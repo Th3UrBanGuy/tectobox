@@ -268,6 +268,7 @@ function clearSessionCookie(res) {
 const PUBLIC_API = new Set([
   'POST /api/auth/login',
   'POST /api/auth/logout',
+  'GET /api/push/vapid-key',
   'GET /api/meta/oauth/callback',
   'GET /api/meta/oauth/pending/',
   'POST /api/meta/oauth/pick',
