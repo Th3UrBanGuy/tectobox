@@ -169,6 +169,24 @@ app.use((req, res, next) => {
   if (BLOCKED_ASSET.test(req.path)) return res.sendStatus(404);
   next();
 });
+// SaaS front door: logged-out visitors get the public landing page,
+// logged-in users go straight to the portal. /app always serves the app
+// (it shows the login view itself when the session is gone).
+app.get('/', (req, res, next) => {
+  let loggedIn = false;
+  try {
+    const sid = parseCookies(req).tb_session;
+    const sess = sid && db.getSession(sid);
+    loggedIn = !!(sess && sess.active);
+  } catch {}
+  if (loggedIn) return res.redirect(302, '/app');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, 'public', 'welcome.html'));
+});
+app.get('/app', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 app.use(express.static(path.join(__dirname, 'public'), {
   dotfiles: 'deny',
   setHeaders(res, filePath) {
@@ -470,7 +488,7 @@ async function handleInbound(clientId, platform, rawEvent, opts = {}) {
     const _who = (_c && (_c.customer_name || _c.customer_phone)) || 'New message';
     sendPushToClient(conv.client_id, {
       title: _who, body: String(norm.text || '').slice(0, 120),
-      tag: 'msg-' + conv.id, url: '/?view=inbox',
+      tag: 'msg-' + conv.id, url: '/app',
     }).catch(() => {});
   } catch {}
   // Lead rows are created ONLY by the qualification gate in src/ai.js
@@ -1291,7 +1309,7 @@ app.post('/api/admin/notify', async (req, res) => {
   if (!body) return res.status(400).json({ error: 'message body required' });
   const target = b.target === 'all' ? 'all' : parseInt(b.client_id || '0', 10);
   let total = 0;
-  const payload = { title, body, tag: 'admin-' + Date.now(), url: '/' };
+  const payload = { title, body, tag: 'admin-' + Date.now(), url: '/app' };
   if (target === 'all') {
     const rows = db.prepare('SELECT DISTINCT client_id FROM push_subscriptions').all();
     for (const r of rows) total += (await sendPushToClient(r.client_id, payload)).sent;

@@ -25,9 +25,9 @@
   "orientation": "portrait",
   "scope": "/",
   "short_name": "Tectobox",
-  "start_url": "/",
+  "start_url": "/app",
   "theme_color": "#0a0a0b",
-  "id": "/",
+  "id": "/app",
   "categories": [
     "business",
     "productivity",
@@ -52,7 +52,7 @@
   "shortcuts": [
     {
       "name": "Inbox",
-      "url": "/?view=inbox",
+      "url": "/app",
       "icons": [
         {
           "src": "/img/tectobox-icon-192.png",
@@ -62,7 +62,7 @@
     },
     {
       "name": "Leads",
-      "url": "/?view=leads",
+      "url": "/app",
       "icons": [
         {
           "src": "/img/tectobox-icon-192.png",

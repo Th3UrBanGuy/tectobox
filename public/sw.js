@@ -3,7 +3,7 @@
  */
 var SW_VERSION = 'tectobox-v1';
 var SHELL = [
-  '/',
+  '/app',
   '/manifest.webmanifest',
   '/img/tectobox-icon-192.png',
   '/img/tectobox-icon.png',
@@ -37,9 +37,11 @@ self.addEventListener('fetch', function (e) {
     e.respondWith(
       fetch(e.request).then(function (r) {
         var copy = r.clone();
-        caches.open(SW_VERSION).then(function (c) { c.put('/', copy); });
+        caches.open(SW_VERSION).then(function (c) { c.put(e.request, copy); });
         return r;
-      }).catch(function () { return caches.match('/'); })
+      }).catch(function () {
+        return caches.match(e.request).then(function (hit) { return hit || caches.match('/app'); });
+      })
     );
     return;
   }
@@ -62,7 +64,7 @@ self.addEventListener('push', function (e) {
   try { data = e.data ? e.data.json() : {}; } catch (err) {}
   var title = data.title || 'Tectobox';
   var body = data.body || 'You have a new message.';
-  var target = data.url || '/';
+  var target = data.url || '/app';
   e.waitUntil(
     self.registration.showNotification(title, {
       body: body,
