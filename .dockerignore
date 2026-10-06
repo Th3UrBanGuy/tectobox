@@ -1,0 +1,14 @@
+# Never bake secrets, local data, or machine state into the image.
+.env
+*.db
+*.db-wal
+*.db-shm
+sessions/
+node_modules/
+.git/
+server.log
+server-restart.log
+audit-reports/
+deployment/
+test-*.js
+.DS_Store

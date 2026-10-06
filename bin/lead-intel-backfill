@@ -1,0 +1,22 @@
+#!/usr/bin/env node
+// Load .env so the AI tiers see their keys even when launched bare.
+require('../src/loadenv');
+// One-shot backfill: run lead-intel analysis over every existing lead once.
+// Usage: DB_PATH=/path/to.db node bin/lead-intel-backfill [limit]
+// The sweep uses force=true, so debounce is bypassed for this run.
+const db = require('../src/db');
+const { analyzeLead } = require('../src/lead-intel');
+
+(async () => {
+  const limit = Math.min(parseInt(process.argv[2], 10) || 500, 2000);
+  const leads = db.getStaleIntelLeads(limit, { maxAgeMs: 0 }); // maxAgeMs 0 => everything stale
+  console.log(`[backfill] ${leads.length} lead(s) to analyze`);
+  let ok = 0, skip = 0;
+  for (const lead of leads) {
+    const r = await analyzeLead(lead.client_id, lead.platform, lead.platform_user_id, { force: true });
+    if (r.ok) { ok++; } else { skip++; console.log(`[backfill] lead ${lead.id}: ${r.skipped}`); }
+    await new Promise(res => setTimeout(res, 2000));
+  }
+  console.log(`[backfill] done: ${ok} analyzed, ${skip} skipped`);
+  process.exit(0);
+})().catch(err => { console.error('[backfill] fatal:', err.message); process.exit(1); });

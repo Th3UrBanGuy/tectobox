@@ -1,0 +1,8 @@
+#!/bin/sh
+# Pass-through shim for the `zstd` CLI.
+# simple-zstd (used by @open-wa/session-sync) shells out to `zstd -zc -<lvl>`
+# for compression and `zstd -dc` for decompression. This VM cannot install the
+# real zstd binary, so this shim passes bytes through uncompressed. Session
+# data stays valid (plain tar); it is just not compressed.
+# If a real zstd is ever installed, put it earlier on PATH to take precedence.
+exec cat
