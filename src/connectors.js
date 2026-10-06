@@ -610,15 +610,15 @@ function getConnectorStatus(clientId) {
     whatsapp: {
       mode: waAccounts.some(a => a.live) ? 'live' : 'demo',
       status: waDefault ? waDefault.status : 'disconnected',
-      method: 'Baileys (QR scan)',
+      method: 'QR scan',
       note: waAccounts.some(a => a.live) ? `${waAccounts.filter(a => a.live).length} WhatsApp account(s) active`
-        : 'Connect via QR scan. ⚠ Automation carries a ban risk — use a secondary number.',
+        : 'Connect via QR scan — secure and private to your workspace.',
       accounts: waAccounts,
     },
     telegram: {
       mode: tgAccounts.some(a => a.live) ? 'live' : 'demo',
       status: tgDefault ? tgDefault.status : 'disconnected',
-      method: 'gramjs user session (QR scan)',
+      method: 'QR scan',
       note: tgAccounts.some(a => a.live) ? `${tgAccounts.filter(a => a.live).length} Telegram account(s) active`
         : 'Needs TELEGRAM_API_ID / TELEGRAM_API_HASH, then QR scan.',
       accounts: tgAccounts,
