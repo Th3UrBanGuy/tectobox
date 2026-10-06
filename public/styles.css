@@ -1693,7 +1693,7 @@ html{ direction:ltr; }
   .inbox .pane.list-pane .pane-head{flex-shrink:0;}
   .conv-list{flex:1 1 auto; min-height:0; max-height:none; overflow-y:auto; -webkit-overflow-scrolling:touch;}
   .inbox .pane.chat-pane{min-height:0;}
-  .inbox.m-chat-open .pane.chat-pane{flex:1 1 auto; min-height:0; display:flex; flex-direction:column;}
+  .inbox.m-chat-open .pane.chat-pane{flex:1 1 auto; min-height:0; height:auto; display:flex; flex-direction:column;}
 }
 /* ── topnav logo: never clip ── */
 .brand{flex-shrink:0; min-width:0;}
