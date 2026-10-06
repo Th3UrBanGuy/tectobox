@@ -212,6 +212,8 @@ const ICONS = {
   chat: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8.5v.5z"/></svg>',
   book: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
   boxsm: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>',
+  chart: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M7 15l4-6 4 3 5-8"/></svg>',
+  help: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
   card: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/></svg>',
   chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
 };
@@ -226,7 +228,7 @@ function renderNav(items) {
   document.querySelectorAll('#bottom-tabs .btab').forEach(b =>
     b.onclick = () => { showView(b.dataset.nav); if (b.dataset.nav === 'admin') loadAdmin(); });
 }
-var VIEW_TITLES = { admin:'Platform Panel', inbox:'Inbox', leads:'Leads', more:'More', products:'Products', settings:'Settings' };
+var VIEW_TITLES = { admin:'Platform Panel', inbox:'Inbox', leads:'Leads', more:'More', products:'Products', settings:'Settings', guide:'Help & Guides' };
 function showView(view) {
   state.view = view;
   var _tt = $('topnav-title'); if (_tt) _tt.textContent = VIEW_TITLES[view] || '';
@@ -240,7 +242,7 @@ function showView(view) {
   const onAdminDash = adminMode && view === 'admin';
   $('view-client').classList.toggle('hidden', onAdminDash);
   $('view-admin').classList.toggle('hidden', !onAdminDash);
-  for (const v of ['inbox', 'leads', 'products', 'settings', 'more']) {
+  for (const v of ['inbox', 'leads', 'products', 'settings', 'more', 'guide']) {
     var _cv = $('cview-' + v);
     _cv.classList.toggle('hidden', view !== v);
     if (view === v && !_cv.classList.contains('hidden')) {
@@ -252,6 +254,7 @@ function showView(view) {
   if (view === 'products') loadProducts();
   if (view === 'settings') { switchSettingsTab(state.settingsTab); renderSetupChecklist(); }
   if (view === 'more') renderMore();
+  if (view === 'guide') renderGuide();
 }
 
 // ---------------- command palette (Cmd+K) ----------------
@@ -387,11 +390,12 @@ async function renderMore() {
   // Workspace section — Products + everything that used to be Settings
   if (me.role !== 'admin') {
     const ws = [
-      { icon: 'boxsm', t: 'Products', s: 'Catalog, prices & stock', go: () => showView('products') },
-      { icon: 'chat', t: 'Channels', s: 'WhatsApp, Telegram & webchat', go: () => gotoSettings('channels') },
-      { icon: 'book', t: 'Knowledge Base', s: 'Teach the AI everything', go: () => gotoSettings('kb') },
-      { icon: 'save', t: 'Backup', s: 'Export, restore & Drive sync', go: () => gotoSettings('backup') },
-      { icon: 'sun', t: 'Appearance', s: 'Chat widget look & greeting', go: () => gotoSettings('appearance') },
+      { icon: 'boxsm', t: 'My Products', s: 'What you sell — prices & stock', go: () => showView('products') },
+      { icon: 'chat', t: 'Connect Channels', s: 'Link WhatsApp, Telegram, website chat', go: () => gotoSettings('channels') },
+      { icon: 'book', t: 'Teach the AI', s: 'Your prices, policies, answers & FAQs', go: () => gotoSettings('kb') },
+      { icon: 'sun', t: 'Chat Widget Style', s: 'How the chat looks on your website', go: () => gotoSettings('appearance') },
+      { icon: 'save', t: 'Backup My Data', s: 'Save a copy or restore', go: () => gotoSettings('backup') },
+      { icon: 'help', t: 'Help & Guides', s: 'Step-by-step with pictures', go: () => showView('guide') },
     ];
     $('more-workspace').innerHTML = ws.map((w, i) => `
       <button class="mrow" data-ws="${i}" style="width:100%;cursor:pointer;text-align:left;">
@@ -405,6 +409,7 @@ async function renderMore() {
   } else {
     $('more-workspace-wrap').classList.add('hidden');
   }
+  renderGetStarted();
   $('more-actions').innerHTML = `
     <button class="mrow danger" id="btn-more-signout" style="width:100%;cursor:pointer;">
       <span class="mrow-tx" style="text-align:center;"><b>Sign Out</b></span>
@@ -2666,3 +2671,109 @@ document.addEventListener('DOMContentLoaded', () => {
 
   boot();
 });
+
+// ---------------- guide / documentation ----------------
+const GUIDES = [
+  {
+    id: 'start', icon: 'zap', title: 'Your first 5 minutes',
+    sub: 'Do these 3 things and Tectobox starts working for you',
+    steps: [
+      { t: 'Connect WhatsApp', d: 'Go to Connect Channels → WhatsApp → Add account, then scan the QR code with your business phone. New chats will appear in your Inbox automatically.', img: '/img/guide-connect.png', go: ['Connect WhatsApp', () => gotoSettings('channels')] },
+      { t: 'Add your products', d: 'Go to My Products → Add product. Enter the name, price and a short description. The AI uses this to answer "how much?" questions.', img: '/img/guide-products.png', go: ['Add a product', () => showView('products')] },
+      { t: 'Teach the AI', d: 'Go to Teach the AI → add your delivery rules, payment methods and common answers. Anything you write here, the AI will know.', img: '/img/guide-teach.png', go: ['Teach the AI', () => gotoSettings('kb')] },
+    ]
+  },
+  {
+    id: 'inbox', icon: 'inbox', title: 'Replying to chats',
+    sub: 'Every customer message lands here',
+    steps: [
+      { t: 'Open the Inbox tab', d: 'Newest conversations are on top. The colored dot shows the channel — green WhatsApp, blue Telegram, purple website chat.', img: '/img/guide-inbox.png' },
+      { t: 'Tap a conversation', d: 'You see the full chat history plus the customer\'s profile on the side. Type in the box at the bottom and press send — just like any chat app.' },
+      { t: 'Use the funnel to filter', d: 'Tap the funnel icon at the top to show only WhatsApp, only Telegram, or only website chats. Tap the magnifier to search any conversation.' },
+      { t: 'Hand icon = needs you', d: 'When a chat needs a human, tap the hand icon at the top. The AI will stay quiet on those chats until you turn it off.' },
+    ]
+  },
+  {
+    id: 'leads', icon: 'chart', title: 'Understanding Leads',
+    sub: 'Who is ready to buy?',
+    steps: [
+      { t: 'Open the Leads tab', d: 'Tectobox watches every chat and lists people who showed buying interest — with a score from 0 to 100.', img: '/img/guide-leads.png' },
+      { t: 'Read the score', d: 'Above 70 = Hot (reply now). 40–70 = Warm (follow up soon). Below 40 = Cold (let the AI nurture them).' },
+      { t: 'Tap a lead', d: 'See what they want, the suggested next action, and one-tap buttons to message or call them.' },
+    ]
+  },
+  {
+    id: 'widget', icon: 'sun', title: 'Chat on your website',
+    sub: 'Let visitors talk to your AI',
+    steps: [
+      { t: 'Open Chat Widget Style', d: 'Go to More → Chat Widget Style. Pick colors and write your greeting message.', img: '/img/guide-widget.png', go: ['Open widget style', () => gotoSettings('appearance')] },
+      { t: 'Copy the code', d: 'Go to Connect Channels → Webchat → Copy embed code. Paste it on your website before </body>. Done — visitors can now chat with your AI.' },
+    ]
+  },
+];
+function renderGuide() {
+  $('guide-list').innerHTML = GUIDES.map(g => `
+    <div class="card guide-card fade-in">
+      <div class="guide-head">
+        <span class="guide-ic">${ICONS[g.icon] || ''}</span>
+        <div><div class="guide-title">${esc(g.title)}</div><div class="muted small">${esc(g.sub)}</div></div>
+      </div>
+      <div class="guide-steps">
+        ${g.steps.map((s, i) => `
+          <div class="guide-step">
+            <span class="guide-num">${i + 1}</span>
+            <div class="guide-body">
+              <div class="guide-step-t">${esc(s.t)}</div>
+              <div class="guide-step-d">${esc(s.d)}</div>
+              ${s.img ? `<img class="guide-img" src="${s.img}" alt="${esc(s.t)}" loading="lazy">` : ''}
+              ${s.go ? `<button class="btn-soft guide-go" data-g="${g.id}" data-s="${i}">${esc(s.go[0])} →</button>` : ''}
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+  document.querySelectorAll('.guide-go').forEach(b =>
+    b.onclick = () => {
+      const g = GUIDES.find(x => x.id === b.dataset.g);
+      const fn = g && g.steps[+b.dataset.s].go && g.steps[+b.dataset.s].go[1];
+      if (fn) fn();
+    });
+}
+
+// ---------------- get started checklist (first-time users) ----------------
+async function renderGetStarted() {
+  const el = $('get-started');
+  if (!el || (state.me && state.me.role === 'admin')) { if (el) el.classList.add('hidden'); return; }
+  let channels = 0, products = 0, docs = 0;
+  try {
+    const [st, pr, kb] = await Promise.all([
+      api('/api/status').catch(() => ({})),
+      api('/api/products').catch(() => []),
+      api(`/api/clients/${state.clientId}/knowledge`).catch(() => []),
+    ]);
+    const plats = (st && st.platforms) || {};
+    channels = Object.values(plats).filter(p => p && (p.status === 'connected' || (p.accounts || []).some(a => a.status === 'connected'))).length;
+    products = Array.isArray(pr) ? pr.length : (pr.products || []).length;
+    docs = Array.isArray(kb) ? kb.length : 0;
+  } catch {}
+  const steps = [
+    { done: channels > 0, t: 'Connect a channel', s: channels > 0 ? 'Connected ✓' : 'Link WhatsApp or Telegram', go: () => gotoSettings('channels') },
+    { done: products > 0, t: 'Add your products', s: products > 0 ? products + ' added ✓' : 'What do you sell?', go: () => showView('products') },
+    { done: docs > 0, t: 'Teach the AI', s: docs > 0 ? docs + ' taught ✓' : 'Prices, policies, FAQs', go: () => gotoSettings('kb') },
+  ];
+  const doneCount = steps.filter(x => x.done).length;
+  if (doneCount === 3) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.innerHTML = `
+    <div class="gs-head">
+      <div><div class="gs-title">Get started</div><div class="muted small">${doneCount} of 3 done — finish setup and you're live</div></div>
+      <div class="gs-bar"><span style="width:${doneCount / 3 * 100}%"></span></div>
+    </div>
+    ${steps.map((x, i) => `
+      <button class="gs-step ${x.done ? 'done' : ''}" data-gs="${i}">
+        <span class="gs-check">${x.done ? '✓' : (i + 1)}</span>
+        <span class="gs-tx"><b>${esc(x.t)}</b><small>${esc(x.s)}</small></span>
+        ${x.done ? '' : '<span class="muted">→</span>'}
+      </button>`).join('')}`;
+  el.querySelectorAll('[data-gs]').forEach(b =>
+    b.onclick = () => { const st = steps[+b.dataset.gs]; if (!st.done) st.go(); });
+}
