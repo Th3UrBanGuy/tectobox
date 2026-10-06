@@ -200,6 +200,7 @@ async function boot() {
   }
   connectSSE();
   maybeShowMetaPicker();
+  renderGetStarted();
 }
 const ICONS = {
   inbox: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.5L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.5A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.5z"/></svg>',
@@ -2570,6 +2571,17 @@ function connectSSE() {
 
 // ---------------- init ----------------
 document.addEventListener('DOMContentLoaded', () => {
+  // Platform-adaptive native UI (install + login follow the device's store language)
+  try {
+    var _ua = navigator.userAgent || '', _plat = navigator.platform || '', _pf = 'other';
+    if (/android/i.test(_ua)) _pf = 'android';
+    else if (/iPad|iPhone|iPod/.test(_ua) || (_plat === 'MacIntel' && navigator.maxTouchPoints > 1)) _pf = 'ios';
+    else if (/Win/.test(_plat) || /Windows/.test(_ua)) _pf = 'windows';
+    else if (/Mac/.test(_plat)) _pf = 'macos';
+    document.documentElement.setAttribute('data-platform', _pf);
+    var _lv = document.getElementById('login-view');
+    if (_lv) _lv.setAttribute('data-platform', _pf);
+  } catch (e) {}
   initCmdk();
   initOffline();
   initModals();
@@ -2789,16 +2801,16 @@ const GUIDES = [
     id: 'start', icon: 'zap', title: 'Your first 5 minutes',
     sub: 'Do these 3 things and Tectobox starts working for you',
     steps: [
-      { t: 'Connect WhatsApp', d: 'Go to Connect Channels → WhatsApp → Add account, then scan the QR code with your business phone. New chats will appear in your Inbox automatically.', img: '/img/guide-connect.png', go: ['Connect WhatsApp', () => gotoSettings('channels')] },
-      { t: 'Add your products', d: 'Go to My Products → Add product. Enter the name, price and a short description. The AI uses this to answer "how much?" questions.', img: '/img/guide-products.png', go: ['Add a product', () => showView('products')] },
-      { t: 'Teach the AI', d: 'Go to Teach the AI → add your delivery rules, payment methods and common answers. Anything you write here, the AI will know.', img: '/img/guide-teach.png', go: ['Teach the AI', () => gotoSettings('kb')] },
+      { t: 'Connect WhatsApp', d: 'Go to Connect Channels → WhatsApp → Add account, then scan the QR code with your business phone. New chats will appear in your Inbox automatically.', img: '/img/guide-connect.png?v=20261006c', go: ['Connect WhatsApp', () => gotoSettings('channels')] },
+      { t: 'Add your products', d: 'Go to My Products → Add product. Enter the name, price and a short description. The AI uses this to answer "how much?" questions.', img: '/img/guide-products.png?v=20261006c', go: ['Add a product', () => showView('products')] },
+      { t: 'Teach the AI', d: 'Go to Teach the AI → add your delivery rules, payment methods and common answers. Anything you write here, the AI will know.', img: '/img/guide-teach.png?v=20261006c', go: ['Teach the AI', () => gotoSettings('kb')] },
     ]
   },
   {
     id: 'inbox', icon: 'inbox', title: 'Replying to chats',
     sub: 'Every customer message lands here',
     steps: [
-      { t: 'Open the Inbox tab', d: 'Newest conversations are on top. The colored dot shows the channel — green WhatsApp, blue Telegram, purple website chat.', img: '/img/guide-inbox.png' },
+      { t: 'Open the Inbox tab', d: 'Newest conversations are on top. The colored dot shows the channel — green WhatsApp, blue Telegram, purple website chat.', img: '/img/guide-inbox.png?v=20261006c' },
       { t: 'Tap a conversation', d: 'You see the full chat history plus the customer\'s profile on the side. Type in the box at the bottom and press send — just like any chat app.' },
       { t: 'Use the funnel to filter', d: 'Tap the funnel icon at the top to show only WhatsApp, only Telegram, or only website chats. Tap the magnifier to search any conversation.' },
       { t: 'Hand icon = needs you', d: 'When a chat needs a human, tap the hand icon at the top. The AI will stay quiet on those chats until you turn it off.' },
@@ -2808,7 +2820,7 @@ const GUIDES = [
     id: 'leads', icon: 'chart', title: 'Understanding Leads',
     sub: 'Who is ready to buy?',
     steps: [
-      { t: 'Open the Leads tab', d: 'Tectobox watches every chat and lists people who showed buying interest — with a score from 0 to 100.', img: '/img/guide-leads.png' },
+      { t: 'Open the Leads tab', d: 'Tectobox watches every chat and lists people who showed buying interest — with a score from 0 to 100.', img: '/img/guide-leads.png?v=20261006c' },
       { t: 'Read the score', d: 'Above 70 = Hot (reply now). 40–70 = Warm (follow up soon). Below 40 = Cold (let the AI nurture them).' },
       { t: 'Tap a lead', d: 'See what they want, the suggested next action, and one-tap buttons to message or call them.' },
     ]
@@ -2817,7 +2829,7 @@ const GUIDES = [
     id: 'widget', icon: 'sun', title: 'Chat on your website',
     sub: 'Let visitors talk to your AI',
     steps: [
-      { t: 'Open Chat Widget Style', d: 'Go to More → Chat Widget Style. Pick colors and write your greeting message.', img: '/img/guide-widget.png', go: ['Open widget style', () => gotoSettings('appearance')] },
+      { t: 'Open Chat Widget Style', d: 'Go to More → Chat Widget Style. Pick colors and write your greeting message.', img: '/img/guide-widget.png?v=20261006c', go: ['Open widget style', () => gotoSettings('appearance')] },
       { t: 'Copy the code', d: 'Go to Connect Channels → Webchat → Copy embed code. Paste it on your website before </body>. Done — visitors can now chat with your AI.' },
     ]
   },

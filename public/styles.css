@@ -1842,3 +1842,36 @@ html{ direction:ltr; }
 .guide-img-num{position:absolute; top:10px; left:10px; width:30px; height:30px; border-radius:50%;
   background:#111; color:#fff; font-size:14px; font-weight:800; display:flex; align-items:center; justify-content:center;
   box-shadow:0 4px 12px rgba(0,0,0,.35); border:2px solid #fff;}
+
+/* ═══ LOGIN — platform-native themes ═══ */
+/* Android: Material Design 3 */
+#login-view[data-platform="android"]{font-family:Roboto,"Segoe UI",system-ui,sans-serif}
+#login-view[data-platform="android"] .login-card{border-radius:28px;box-shadow:0 8px 32px rgba(0,0,0,.14)}
+#login-view[data-platform="android"] .field label{text-transform:none;letter-spacing:.02em;font-size:12.5px}
+#login-view[data-platform="android"] .input{background:rgba(0,0,0,.05);border:none;border-bottom:2px solid transparent;border-radius:8px 8px 0 0;padding:14px 14px 14px 42px}
+#login-view[data-platform="android"] .input:focus{border-bottom-color:#16a34a;box-shadow:none;background:rgba(0,0,0,.07)}
+#login-view[data-platform="android"] .btn-primary{border-radius:99px;background:#16a34a;box-shadow:0 4px 14px rgba(22,163,74,.35);text-transform:none;letter-spacing:.01em}
+#login-view[data-platform="android"] .btn-primary::after{display:none}
+[data-theme="dark"] #login-view[data-platform="android"] .input{background:rgba(255,255,255,.07)}
+[data-theme="dark"] #login-view[data-platform="android"] .input:focus{background:rgba(255,255,255,.1)}
+
+/* iOS: native iOS */
+#login-view[data-platform="ios"]{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}
+#login-view[data-platform="ios"] .login-card{border-radius:20px;box-shadow:0 12px 44px rgba(0,0,0,.12);border:1px solid rgba(0,0,0,.06)}
+#login-view[data-platform="ios"] .field label{text-transform:none;letter-spacing:0;font-size:13px;font-weight:600}
+#login-view[data-platform="ios"] .input{background:rgba(120,120,128,.12);border:none;border-radius:12px;padding:13px 14px 13px 42px;-webkit-appearance:none}
+#login-view[data-platform="ios"] .input:focus{box-shadow:0 0 0 2px #007aff;background:rgba(120,120,128,.08)}
+#login-view[data-platform="ios"] .btn-primary{border-radius:12px;background:#007aff;box-shadow:none;font-weight:600}
+#login-view[data-platform="ios"] .btn-primary::after{display:none}
+#login-view[data-platform="ios"] .btn-primary:active{filter:brightness(.92);transform:none}
+
+/* Windows: Fluent */
+#login-view[data-platform="windows"]{font-family:"Segoe UI",system-ui,sans-serif}
+#login-view[data-platform="windows"] .login-card{border-radius:8px;box-shadow:0 12px 40px rgba(0,0,0,.14);border:1px solid rgba(0,0,0,.08)}
+#login-view[data-platform="windows"] .field label{text-transform:none;letter-spacing:0;font-size:12.5px;font-weight:600}
+#login-view[data-platform="windows"] .input{border-radius:4px;border:1px solid rgba(0,0,0,.25);border-bottom-width:2px;padding:11px 14px 11px 42px;background:#fff}
+#login-view[data-platform="windows"] .input:focus{border-color:#0067c0;box-shadow:none;border-bottom-color:#0067c0}
+#login-view[data-platform="windows"] .btn-primary{border-radius:4px;background:#0067c0;box-shadow:none;font-weight:600}
+#login-view[data-platform="windows"] .btn-primary::after{display:none}
+#login-view[data-platform="windows"] .btn-primary:hover{background:#0f6cbd;transform:none;filter:none}
+[data-theme="dark"] #login-view[data-platform="windows"] .input{background:#1b1b1b;border-color:rgba(255,255,255,.25)}
