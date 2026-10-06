@@ -111,13 +111,50 @@
         deferredPrompt = e;
         if (note) note.textContent = 'Free · One-tap install · Updates automatically';
       });
+      // Tap feedback so the user always sees a response, even if the
+      // native prompt is unavailable or fails silently.
+      function tapFeedback() {
+        try {
+          btn.classList.add('tapped');
+          setTimeout(function () { btn.classList.remove('tapped'); }, 350);
+        } catch (e) {}
+      }
       btn.addEventListener('click', function () {
+        tapFeedback();
         if (deferredPrompt) {
-          deferredPrompt.prompt();
+          var dp = deferredPrompt;
+          deferredPrompt = null; // prompt() may only be called once per event
+          var settled = false;
+          var safety = setTimeout(function () {
+            // Native dialog never appeared / never settled — fall back to manual steps.
+            if (!settled) showManual();
+          }, 2500);
           try {
-            deferredPrompt.userChoice.then(function () { deferredPrompt = null; })
-              .catch(function () {});
-          } catch (e) {}
+            var pr = dp.prompt();
+            if (pr && typeof pr.then === 'function') {
+              pr.catch(function () { /* prompt() rejected — safety timer covers UI */ });
+            }
+          } catch (e) {
+            clearTimeout(safety);
+            settled = true;
+            showManual();
+            return;
+          }
+          try {
+            dp.userChoice.then(function (choice) {
+              settled = true;
+              clearTimeout(safety);
+              // 'accepted' → appinstalled event fires → setInstalled().
+              // 'dismissed' → guide the user with manual steps.
+              if (!choice || choice.outcome !== 'accepted') showManual();
+            }).catch(function () {
+              settled = true;
+              clearTimeout(safety);
+              showManual();
+            });
+          } catch (e) {
+            /* safety timer covers UI */
+          }
           return;
         }
         showManual();
