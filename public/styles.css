@@ -1701,6 +1701,7 @@ html{ direction:ltr; }
 
 /* ═══ compact inbox toolbar — filter popover · expanding search · human toggle ═══ */
 .inbox-toolbar{display:flex; align-items:center; gap:10px; padding:12px 14px; position:relative; z-index:10;}
+.inbox-toolbar{-webkit-mask-image:none; mask-image:none; overflow:visible; z-index:30;}
 .inbox-toolbar .list-title{flex:1; min-width:0;}
 .toolbar-actions{display:flex; align-items:center; gap:8px; flex-shrink:0;}
 .toolbar-actions .icon-btn{
