@@ -2731,7 +2731,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('btn-add-channel').onclick = () => {
     const list = $('chan-pick-list');
     const opts = [
-      { ch: 'whatsapp', label: 'WhatsApp', desc: 'QR scan — drives real WhatsApp Web', badge: 'WA', cls: 'p-whatsapp', ok: true },
+      { ch: 'whatsapp', label: 'WhatsApp', desc: 'Scan QR code — connect in seconds', badge: 'WA', cls: 'p-whatsapp', ok: true },
       { ch: 'telegram', label: 'Telegram', desc: 'Login code — personal or bot account', badge: 'TG', cls: 'p-telegram', ok: true },
       { ch: 'messenger', label: 'Messenger', desc: 'Coming soon — after Meta verification', badge: 'M', cls: 'p-messenger', ok: false },
       { ch: 'instagram', label: 'Instagram', desc: 'Coming soon — after Meta verification', badge: 'IG', cls: 'p-instagram', ok: false },
