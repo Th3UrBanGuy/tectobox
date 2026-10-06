@@ -215,8 +215,10 @@ function renderNav(items) {
   document.querySelectorAll('#bottom-tabs .btab').forEach(b =>
     b.onclick = () => { showView(b.dataset.nav); if (b.dataset.nav === 'admin') loadAdmin(); });
 }
+var VIEW_TITLES = { admin:'Platform Panel', inbox:'Inbox', leads:'Leads', more:'More', products:'Products', settings:'Settings' };
 function showView(view) {
   state.view = view;
+  var _tt = $('topnav-title'); if (_tt) _tt.textContent = VIEW_TITLES[view] || '';
   // products/settings now live under More — keep the More tab highlighted there
   const navView = (view === 'products' || view === 'settings') ? 'more' : view;
   document.querySelectorAll('#nav-links .nav-link').forEach(b => b.classList.toggle('active', b.dataset.nav === navView));
