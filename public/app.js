@@ -230,7 +230,11 @@ function showView(view) {
   $('view-client').classList.toggle('hidden', onAdminDash);
   $('view-admin').classList.toggle('hidden', !onAdminDash);
   for (const v of ['inbox', 'leads', 'products', 'settings', 'more']) {
-    $('cview-' + v).classList.toggle('hidden', view !== v);
+    var _cv = $('cview-' + v);
+    _cv.classList.toggle('hidden', view !== v);
+    if (view === v && !_cv.classList.contains('hidden')) {
+      _cv.classList.remove('view-enter'); void _cv.offsetWidth; _cv.classList.add('view-enter');
+    }
   }
   if (view === 'inbox') { loadConversations(); if (!state.activeId) renderChatHeader(null); }
   if (view === 'leads') loadLeads();

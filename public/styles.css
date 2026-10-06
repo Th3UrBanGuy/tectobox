@@ -247,7 +247,7 @@ select.input{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
 .theme-toggle{
   width:40px; height:40px; border-radius:13px; border:1px solid var(--input-border);
   background:var(--card); cursor:pointer; display:flex; align-items:center; justify-content:center;
-  color:var(--muted); transition:all .25s var(--ease); flex-shrink:0; overflow:hidden;
+  color:var(--muted); transition:color .25s var(--ease), background .25s var(--ease), transform .16s var(--ease-out); flex-shrink:0; overflow:hidden;
   backdrop-filter:blur(12px);
 }
 .theme-toggle:hover{color:var(--accent); border-color:var(--accent); box-shadow:var(--glow); transform:rotate(12deg) scale(1.05);}
@@ -1608,4 +1608,33 @@ html{ direction:ltr; }
     font-size:16px; font-weight:800; letter-spacing:-.02em; color:var(--ink);
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 8px;
   }
+}
+
+/* ═══ micro-interactions — taste layer (Emil Kowalski gate: feedback/subtle only) ═══ */
+/* 1. press feedback — every pressable */
+.btn-primary,.btn-soft,.btn-ghost,.btn-danger-soft,.mini-btn,.add-acct,
+.chip,.fchip,.seg button,.btab,.icon-btn,.btn-icon,.side-tab,.nav-link,.theme-toggle{
+  transition:transform 160ms var(--ease-out);
+}
+.btn-primary:active,.btn-soft:active,.btn-ghost:active,.btn-danger-soft:active,
+.mini-btn:active,.add-acct:active,.chip:active,.fchip:active,.seg button:active,
+.btab:active,.icon-btn:active,.btn-icon:active,.side-tab:active,.nav-link:active,
+.theme-toggle:active{
+  transform:scale(.96);
+}
+/* 2. view-switch — prevent teleport (subtle, 180ms) */
+@keyframes view-enter{from{opacity:0; transform:translateY(7px);} to{opacity:1; transform:none;}}
+.view-enter{animation:view-enter 180ms var(--ease-out);}
+/* 4. stat-grid stagger — decorative, occasional view */
+.stat-grid .stat-card{animation:fadeIn .32s var(--ease-out) backwards;}
+.stat-grid .stat-card:nth-child(2){animation-delay:45ms;}
+.stat-grid .stat-card:nth-child(3){animation-delay:90ms;}
+.stat-grid .stat-card:nth-child(4){animation-delay:135ms;}
+.stat-grid .stat-card:nth-child(5){animation-delay:180ms;}
+.stat-grid .stat-card:nth-child(6){animation-delay:225ms;}
+/* reduced motion: keep fades, drop movement */
+@media(prefers-reduced-motion:reduce){
+  .view-enter{animation:view-enter-fade 180ms ease;}
+  @keyframes view-enter-fade{from{opacity:0;} to{opacity:1;}}
+  .stat-grid .stat-card{animation:fadeIn .2s ease backwards;}
 }
