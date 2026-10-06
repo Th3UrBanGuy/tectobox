@@ -2265,11 +2265,11 @@ function renderAdminResources(resources) {
   $('resources-body').innerHTML = resources.map(r => {
     const m = PLATFORMS[r.channel] || {};
     return `<tr>
-      <td><span style="display:inline-flex; align-items:center; gap:10px;">${platBadge(r.channel, 34)}<b style="color:var(--ink);">${esc(m.label || r.channel)}</b></span></td>
-      <td class="muted">${esc(r.account || '—')}</td>
-      <td class="muted">@${esc(r.workspace || '—')}</td>
-      <td>${statusPill(r.status)}</td>
-      <td class="small muted">${fmtDT(r.lastSeen)}</td>
+      <td data-label="Channel"><span style="display:inline-flex; align-items:center; gap:10px;">${platBadge(r.channel, 34)}<b style="color:var(--ink);">${esc(m.label || r.channel)}</b></span></td>
+      <td data-label="Account" class="muted">${esc(r.account || '—')}</td>
+      <td data-label="Workspace" class="muted">@${esc(r.workspace || '—')}</td>
+      <td data-label="Status">${statusPill(r.status)}</td>
+      <td data-label="Last seen" class="small muted">${fmtDT(r.lastSeen)}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="5" class="tbl-empty">No channel resources yet.</td></tr>';
 }
