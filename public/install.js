@@ -14,7 +14,14 @@
     return 'other';
   }
 
-  var platform = detectPlatform();
+  // ?platform=android|ios|windows|macos|other — preview override (QA/demo only).
+  var platform = (function () {
+    try {
+      var q = new URLSearchParams(location.search).get('platform');
+      if (q && /^(android|ios|windows|macos|other)$/.test(q)) return q;
+    } catch {}
+    return detectPlatform();
+  })();
   document.documentElement.setAttribute('data-platform', platform);
   document.body.setAttribute('data-platform', platform);
 
