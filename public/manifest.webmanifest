@@ -1,1 +1,74 @@
-{"background_color":"#0a0a0b","description":"AI-Powered Unified Inbox","display":"standalone","icons":[{"sizes":"192x192","src":"/img/tectobox-icon-192.png","type":"image/png"},{"purpose":"any","sizes":"512x512","src":"/img/tectobox-icon.png","type":"image/png"},{"purpose":"maskable","sizes":"512x512","src":"/img/tectobox-icon.png","type":"image/png"}],"name":"Tectobox — AI-Powered Unified Inbox","orientation":"portrait","scope":"/","short_name":"Tectobox","start_url":"/","theme_color":"#0a0a0b"}
+{
+  "background_color": "#0a0a0b",
+  "description": "AI-powered unified inbox \u2014 WhatsApp, Telegram and website chat in one place.",
+  "display": "standalone",
+  "icons": [
+    {
+      "sizes": "192x192",
+      "src": "/img/tectobox-icon-192.png",
+      "type": "image/png"
+    },
+    {
+      "purpose": "any",
+      "sizes": "512x512",
+      "src": "/img/tectobox-icon.png",
+      "type": "image/png"
+    },
+    {
+      "purpose": "maskable",
+      "sizes": "512x512",
+      "src": "/img/tectobox-icon.png",
+      "type": "image/png"
+    }
+  ],
+  "name": "Tectobox \u2014 AI-Powered Unified Inbox",
+  "orientation": "portrait",
+  "scope": "/",
+  "short_name": "Tectobox",
+  "start_url": "/",
+  "theme_color": "#0a0a0b",
+  "id": "/",
+  "categories": [
+    "business",
+    "productivity",
+    "communication"
+  ],
+  "screenshots": [
+    {
+      "src": "/img/guide-inbox.png",
+      "sizes": "900x468",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Unified inbox"
+    },
+    {
+      "src": "/img/guide-leads.png",
+      "sizes": "900x468",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Lead intelligence"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Inbox",
+      "url": "/?view=inbox",
+      "icons": [
+        {
+          "src": "/img/tectobox-icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Leads",
+      "url": "/?view=leads",
+      "icons": [
+        {
+          "src": "/img/tectobox-icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}

@@ -105,6 +105,21 @@
     }
     .tc-bubble:hover { transform: translateY(-2px); box-shadow: 0 16px 38px rgba(25,25,60,.18), 0 2px 6px rgba(25,25,60,.08); }
     .tc-bubble:active { transform: scale(.96); }
+    @keyframes tc-wiggle { 0%,100% { transform: rotate(0); } 20% { transform: rotate(-12deg) scale(1.06); } 45% { transform: rotate(10deg) scale(1.06); } 70% { transform: rotate(-6deg); } }
+    .tc-bubble.tc-wiggle svg { animation: tc-wiggle .6s ease; }
+    .tc-preview {
+      position: fixed; ${POS}: 24px; bottom: 96px; z-index: 2147483000; pointer-events: auto;
+      max-width: 300px; background: rgba(255,255,255,.94);
+      -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,.7); border-radius: 16px;
+      box-shadow: 0 16px 44px rgba(25,25,60,.2); padding: 12px 14px; cursor: pointer;
+      animation: tc-prev-in .3s cubic-bezier(.2,.9,.3,1.2);
+    }
+    @keyframes tc-prev-in { from { opacity: 0; transform: translateY(10px) scale(.96); } }
+    .tc-preview.tc-out { opacity: 0; transform: translateY(8px); transition: all .25s ease; }
+    .tc-preview b { display: block; font-size: 13px; color: #17171f; margin-bottom: 2px; }
+    .tc-preview span { font-size: 13px; color: #55555f; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    @media (max-width: 480px) { .tc-preview { ${POS}: 14px; left: 14px; max-width: none; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); } }
     .tc-bubble svg { width: 26px; height: 26px; fill: ${COLOR}; }
     .tc-bubble .tc-ic-close { display: none; width: 22px; height: 22px; }
     .tc-bubble.tc-openbtn .tc-ic-chat { display: none; }
@@ -124,8 +139,8 @@
       border: 1px solid rgba(255,255,255,.65); border-radius: 26px; overflow: hidden;
       display: flex; flex-direction: column;
       box-shadow: 0 30px 80px rgba(25,25,60,.16), 0 4px 18px rgba(25,25,60,.07);
-      opacity: 0; transform: translateY(16px) scale(.98); pointer-events: none;
-      transition: opacity .25s ease, transform .25s ease;
+      opacity: 0; transform: translateY(22px) scale(.96); pointer-events: none;
+      transition: opacity .28s ease, transform .38s cubic-bezier(.2,.9,.25,1.15);
     }
     .tc-panel.tc-open { opacity: 1; transform: none; pointer-events: auto; }
     .tc-header {
@@ -155,7 +170,7 @@
       word-wrap: break-word; white-space: pre-wrap;
       animation: tc-in .22s ease;
     }
-    @keyframes tc-in { from { opacity: 0; transform: translateY(5px); } }
+    @keyframes tc-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
     .tc-row.in .tc-msg { background: #ffffff; color: #23232e; border: 1px solid rgba(20,20,50,.05); border-bottom-left-radius: 6px; box-shadow: 0 1px 3px rgba(25,25,60,.06); }
     .tc-row.out .tc-msg { background: ${COLOR}; color: #fff; border-bottom-right-radius: 6px; }
     .tc-msg .tc-li { display: block; padding-left: 14px; position: relative; margin: 2px 0; }
@@ -408,6 +423,43 @@
       badge.textContent = unread > 9 ? '9+' : unread;
       badge.style.display = 'flex';
     }
+    // Notifications: in-widget preview toast + native Notification API.
+    var notifPerm = ('Notification' in window) ? Notification.permission : 'denied';
+    function askNotifPerm() {
+      if (!('Notification' in window) || notifPerm !== 'default') return;
+      try { Notification.requestPermission().then(function (p) { notifPerm = p; }); } catch (e) {}
+    }
+    function showPreview(title, body) {
+      var old = shadow.querySelector('.tc-preview');
+      if (old) old.remove();
+      var d = document.createElement('div');
+      d.className = 'tc-preview';
+      var b = document.createElement('b'); b.textContent = title;
+      var sp = document.createElement('span'); sp.textContent = body;
+      d.appendChild(b); d.appendChild(sp);
+      d.addEventListener('click', function () { d.remove(); setOpen(true); });
+      shadow.appendChild(d);
+      setTimeout(function () {
+        d.classList.add('tc-out');
+        setTimeout(function () { d.remove(); }, 280);
+      }, 6000);
+    }
+    function notifyNewMessage(text) {
+      // wiggle the bubble for attention
+      bubble.classList.remove('tc-wiggle');
+      void bubble.offsetWidth;
+      bubble.classList.add('tc-wiggle');
+      var title = TITLE || 'New message';
+      var body = String(text || '').slice(0, 120);
+      showPreview(title, body);
+      // native notification when the tab is in background
+      try {
+        if (notifPerm === 'granted' && document.hidden) {
+          var n = new Notification(title, { body: body, tag: 'tectonic-chat' });
+          n.onclick = function () { try { window.focus(); } catch (e) {} setOpen(true); n.close(); };
+        }
+      } catch (e) {}
+    }
 
     var everSent = false;
     function setOpen(v) {
@@ -417,6 +469,7 @@
       bubble.setAttribute('aria-label', v ? 'Close chat' : 'Open chat');
       if (v) {
         unread = 0; badge.style.display = 'none';
+        askNotifPerm();
         var needIntro = REQUIRE_INTRO && !identified;
         if (!greeted && !needIntro) { greeted = true; addMsg('in', GREETING); }
         setTimeout(function () { (needIntro ? introName : input).focus(); }, 250);
@@ -453,6 +506,7 @@
         // re-add it, and advance the poll cursor past it.
         if (data.reply_id) {
           addMsg('in', data.reply, 'srv-' + data.reply_id);
+          if (!open) notifyNewMessage(data.reply);
           lastSeenId = Math.max(lastSeenId, data.reply_id);
         } else {
           if (data.reply) addMsg('in', data.reply);
@@ -480,7 +534,7 @@
           lastSeenId = Math.max(lastSeenId, m.id);
           if (m.direction === 'out') {
             addMsg('in', m.text, 'srv-' + m.id);
-            if (!open) bumpBadge();
+            if (!open) { bumpBadge(); notifyNewMessage(m.text); }
           }
         });
       } catch (e) { /* silent — next poll retries */ }

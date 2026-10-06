@@ -417,6 +417,18 @@ db.exec(`CREATE TABLE IF NOT EXISTS website_imports (
   discovered INTEGER DEFAULT 0, imported INTEGER DEFAULT 0, skipped INTEGER DEFAULT 0,
   error TEXT
 )`);
+// v2.8: web-push subscriptions (PWA/app notifications per client login).
+db.exec(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL,
+  user_id INTEGER,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  last_used_at TEXT
+)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_push_subs_client ON push_subscriptions(client_id)`);
 db.exec(`CREATE TABLE IF NOT EXISTS website_import_pages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   import_id INTEGER NOT NULL,

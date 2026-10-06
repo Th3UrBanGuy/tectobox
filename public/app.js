@@ -171,6 +171,7 @@ async function boot() {
   } catch { return; } // showLogin already triggered
   state.me = me;
   state.clientId = me.clientId;
+  ensurePushSubscribed();
   hidePreloader();
   $('login-view').classList.add('hidden');
   $('app-view').classList.remove('hidden');
@@ -214,6 +215,7 @@ const ICONS = {
   boxsm: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>',
   chart: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M7 15l4-6 4 3 5-8"/></svg>',
   help: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
+  down: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>',
   card: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/></svg>',
   chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
 };
@@ -396,9 +398,10 @@ async function renderMore() {
       { icon: 'sun', t: 'Chat Widget Style', s: 'How the chat looks on your website', go: () => gotoSettings('appearance') },
       { icon: 'save', t: 'Backup My Data', s: 'Save a copy or restore', go: () => gotoSettings('backup') },
       { icon: 'help', t: 'Help & Guides', s: 'Step-by-step with pictures', go: () => showView('guide') },
+      { icon: 'down', t: 'Install App', s: 'Add Tectobox to your home screen', go: () => promptInstall(), cls: 'pwa-install-btn hidden' },
     ];
     $('more-workspace').innerHTML = ws.map((w, i) => `
-      <button class="mrow" data-ws="${i}" style="width:100%;cursor:pointer;text-align:left;">
+      <button class="mrow ${w.cls || ''}" data-ws="${i}" style="width:100%;cursor:pointer;text-align:left;">
         <span class="mrow-ic">${ICONS[w.icon] || ''}</span>
         <span class="mrow-tx"><b>${esc(w.t)}</b><small>${esc(w.s)}</small></span>
         <span class="muted">${ICONS.chev}</span>
@@ -1410,7 +1413,7 @@ function wcToast(msg) {
 }
 function webchatCard() {
   const w = state.webchat || {};
-  const snippet = `<script src="${location.origin}/widget.js?v=20261006u" data-client="${w.widget_key || ''}"></script>`;
+  const snippet = `<script src="${location.origin}/widget.js?v=20261006w" data-client="${w.widget_key || ''}"></script>`;
   return `<div class="chan-card fade-in">
     <div class="top"><span class="plat-badge p-webchat">WC</span>
       <span class="nm">Webchat</span>
@@ -1426,7 +1429,7 @@ function webchatCard() {
 }
 function wireWebchatCard() {
   const w = state.webchat || {};
-  const snippet = `<script src="${location.origin}/widget.js?v=20261006u" data-client="${w.widget_key || ''}"></script>`;
+  const snippet = `<script src="${location.origin}/widget.js?v=20261006w" data-client="${w.widget_key || ''}"></script>`;
   const copyBtn = $('wc-copy');
   if (copyBtn) copyBtn.onclick = async () => {
     try { await navigator.clipboard.writeText(snippet); wcToast('Embed code copied ✓'); }
@@ -1436,7 +1439,7 @@ function wireWebchatCard() {
   if (testBtn) testBtn.onclick = () => {
     if (document.querySelector('script[data-wc-test]')) { wcToast('Test widget already on this page — check the corner'); return; }
     const s = document.createElement('script');
-    s.src = `${location.origin}/widget.js?v=20261006u`;
+    s.src = `${location.origin}/widget.js?v=20261006w`;
     s.setAttribute('data-client', w.widget_key || '');
     s.setAttribute('data-wc-test', '1');
     document.body.appendChild(s);
@@ -1512,6 +1515,77 @@ async function loadAppearanceTab() {
   }
   $('appearance-card').innerHTML = appearanceCard();
   wireAppearance();
+}
+
+// ---------------- PWA: install, updates, push ----------------
+let _deferredInstall = null;
+function initPwa() {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    _deferredInstall = e;
+    document.querySelectorAll('.pwa-install-btn').forEach(b => b.classList.remove('hidden'));
+  });
+  window.addEventListener('appinstalled', () => {
+    _deferredInstall = null;
+    document.querySelectorAll('.pwa-install-btn').forEach(b => b.classList.add('hidden'));
+  });
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      // update check on visibility return — new features reach the app fast
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) reg.update().catch(() => {});
+      });
+    }).catch(() => {});
+    // a new SW took over → tell the user the app just updated
+    let _refreshed = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (_refreshed) return; _refreshed = true;
+      toast('App updated to the latest version ✓');
+    });
+  }
+}
+async function promptInstall() {
+  if (_deferredInstall) {
+    _deferredInstall.prompt();
+    await _deferredInstall.userChoice.catch(() => {});
+    _deferredInstall = null;
+    return;
+  }
+  toast('To install: open this page in Chrome → menu ⋮ → "Install app" / "Add to Home screen".');
+}
+// Web Push subscription (per login) — powers admin + new-message notifications.
+async function vapidKey() {
+  const r = await api('/api/push/vapid-key').catch(() => ({}));
+  return r && r.key;
+}
+function b64ToU8(b64) {
+  const p = '='.repeat((4 - b64.length % 4) % 4);
+  const bin = atob((b64 + p).replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function ensurePushSubscribed() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (Notification.permission === 'denied') return;
+    if (Notification.permission === 'default') {
+      try { await Notification.requestPermission(); } catch {}
+    }
+    if (Notification.permission !== 'granted') return;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const key = await vapidKey();
+      if (!key) return;
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key) });
+    }
+    const j = sub.toJSON();
+    await api('/api/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }),
+    });
+  } catch {}
 }
 
 // ---------------- Backup & Google Drive ----------------
@@ -2360,9 +2434,41 @@ function switchAdminTab(tab) {
   $('atab-resources').classList.toggle('hidden', tab !== 'resources');
   $('atab-users').classList.toggle('hidden', tab !== 'users');
   $('atab-config').classList.toggle('hidden', tab !== 'config');
+  $('atab-notify').classList.toggle('hidden', tab !== 'notify');
   $('atab-audit').classList.toggle('hidden', tab !== 'audit');
   if (tab === 'config') loadAdminConfig();
+  if (tab === 'notify') loadNotifyTab();
   if (tab === 'audit') loadAdminAudit();
+}
+async function loadNotifyTab() {
+  const sel = $('nt-target');
+  sel.innerHTML = '<option value="all">All workspaces</option>';
+  try {
+    const users = await api('/api/admin/users');
+    const seen = {};
+    (users.users || users || []).forEach(u => {
+      if (u.role === 'admin' || !u.clientId || seen[u.clientId]) return;
+      seen[u.clientId] = 1;
+      const o = document.createElement('option');
+      o.value = u.clientId; o.textContent = 'Workspace #' + u.clientId + ' (' + (u.username || '') + ')';
+      sel.appendChild(o);
+    });
+  } catch {}
+  $('btn-send-notif').onclick = async () => {
+    const body = $('nt-body').value.trim();
+    if (!body) { $('nt-status').textContent = 'Write a message first.'; return; }
+    $('btn-send-notif').disabled = true;
+    try {
+      const target = $('nt-target').value;
+      const r = await api('/api/admin/notify', { method: 'POST',
+        body: JSON.stringify({ target: target === 'all' ? 'all' : undefined,
+          client_id: target === 'all' ? undefined : +target,
+          title: $('nt-title').value.trim() || 'Tectobox', body }) });
+      $('nt-status').textContent = r && r.ok ? `Sent to ${r.sent} device(s).` : 'Send failed.';
+      if (r && r.ok) $('nt-body').value = '';
+    } catch (e) { $('nt-status').textContent = 'Send failed: ' + (e.message || ''); }
+    $('btn-send-notif').disabled = false;
+  };
 }
 async function loadAdminConfig() {
   const c = await api('/api/admin/config');
@@ -2473,6 +2579,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initCmdk();
   initOffline();
   initModals();
+  initPwa();
   // draft persistence
   $('msg-input').addEventListener('input', () => { saveDraft(); autosizeComposer(); updateSendBtn(); });
   // login

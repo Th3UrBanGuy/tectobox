@@ -10,6 +10,31 @@ const crypto = require('crypto');
 process.env.PATH = path.join(__dirname, 'bin') + path.delimiter + (process.env.PATH || '');
 
 const express = require('express');
+let webpush = null;
+try {
+  webpush = require('web-push');
+  const _vp = process.env.VAPID_PUBLIC_KEY, _vs = process.env.VAPID_PRIVATE_KEY;
+  if (_vp && _vs) webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:admin@kalandar.me', _vp, _vs);
+  else webpush = null;
+} catch (e) { webpush = null; }
+async function sendPushToClient(clientId, payload) {
+  if (!webpush) return { sent: 0 };
+  const subs = db.prepare('SELECT * FROM push_subscriptions WHERE client_id = ?').all(clientId);
+  let sent = 0;
+  for (const st of subs) {
+    try {
+      await webpush.sendNotification(
+        { endpoint: st.endpoint, keys: { p256dh: st.p256dh, auth: st.auth } },
+        JSON.stringify(payload), { TTL: 86400 });
+      sent++;
+      db.prepare("UPDATE push_subscriptions SET last_used_at = datetime('now') WHERE id = ?").run(st.id);
+    } catch (e) {
+      if (e && (e.statusCode === 404 || e.statusCode === 410))
+        db.prepare('DELETE FROM push_subscriptions WHERE id = ?').run(st.id);
+    }
+  }
+  return { sent };
+}
 
 // ---- tiny .env loader (no dependency) ----
 (function loadEnv() {
@@ -438,6 +463,15 @@ async function handleInbound(clientId, platform, rawEvent, opts = {}) {
     return null;
   }
   const inbound = db.addMessage(conv.id, 'in', norm.text, JSON.stringify(rawEvent), null, norm.externalId);
+  // Push notification to the client's installed app (PWA) — new message alert.
+  try {
+    const _c = db.getConversation(conv.id);
+    const _who = (_c && (_c.customer_name || _c.customer_phone)) || 'New message';
+    sendPushToClient(conv.client_id, {
+      title: _who, body: String(norm.text || '').slice(0, 120),
+      tag: 'msg-' + conv.id, url: '/?view=inbox',
+    }).catch(() => {});
+  } catch {}
   // Lead rows are created ONLY by the qualification gate in src/ai.js
   // (real product interest + details). No junk rows on first contact.
   // The 'lead.created' webhook fires from ai.js when a row is actually created.
@@ -1219,6 +1253,54 @@ function webchatConfigFor(clientId) {
   for (const k of Object.keys(WC_DEFAULTS)) cfg[k] = saved[k] || WC_DEFAULTS[k];
   return cfg;
 }
+// ---- Web Push (PWA/app notifications) ----
+// Public SaaS landing page.
+app.get('/welcome', (req, res) => res.sendFile(path.join(__dirname, 'public', 'welcome.html')));
+
+app.get('/api/push/vapid-key', (req, res) => {
+  res.json({ key: process.env.VAPID_PUBLIC_KEY || null });
+});
+app.post('/api/push/subscribe', (req, res) => {
+  const u = req.user; if (!u) return res.status(401).json({ error: 'login required' });
+  const b = req.body || {};
+  const endpoint = String(b.endpoint || '').slice(0, 500);
+  const p256dh = String(b.p256dh || '').slice(0, 200);
+  const auth = String(b.auth || '').slice(0, 100);
+  if (!endpoint || !p256dh || !auth) return res.status(400).json({ error: 'bad subscription' });
+  const clientId = u.role === 'admin' ? 0 : (u.clientId || 0);
+  db.prepare(`INSERT INTO push_subscriptions (client_id, user_id, endpoint, p256dh, auth)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth,
+      client_id = excluded.client_id, last_used_at = datetime('now')`)
+    .run(clientId, u.id || null, endpoint, p256dh, auth);
+  res.json({ ok: true });
+});
+app.post('/api/push/unsubscribe', (req, res) => {
+  const u = req.user; if (!u) return res.status(401).json({ error: 'login required' });
+  const endpoint = String((req.body || {}).endpoint || '');
+  if (endpoint) db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+  res.json({ ok: true });
+});
+app.post('/api/admin/notify', async (req, res) => {
+  const u = req.user;
+  if (!u || u.role !== 'admin') return res.status(403).json({ error: 'admin only' });
+  const b = req.body || {};
+  const title = String(b.title || 'Tectobox').slice(0, 80);
+  const body = String(b.body || '').slice(0, 200);
+  if (!body) return res.status(400).json({ error: 'message body required' });
+  const target = b.target === 'all' ? 'all' : parseInt(b.client_id || '0', 10);
+  let total = 0;
+  const payload = { title, body, tag: 'admin-' + Date.now(), url: '/' };
+  if (target === 'all') {
+    const rows = db.prepare('SELECT DISTINCT client_id FROM push_subscriptions').all();
+    for (const r of rows) total += (await sendPushToClient(r.client_id, payload)).sent;
+  } else {
+    total = (await sendPushToClient(target, payload)).sent;
+  }
+  try { db.addAudit(u.username, 'admin.notify', target === 'all' ? 'all' : String(target), realIp(req)); } catch {}
+  res.json({ ok: true, sent: total });
+});
+
 app.get('/api/webchat/config', (req, res) => {
   const id = cid(req);
   const c = db.getClient(id);

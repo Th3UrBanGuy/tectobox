@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Tectobox">
-<link rel="stylesheet" href="/styles.css?v=20261006v">
+<link rel="stylesheet" href="/styles.css?v=20261006w">
 <script src="/theme-init.js?v=20261006v"></script>
 </head>
 <body>
@@ -57,6 +57,7 @@
       </button>
     </form>
     <div class="login-brand-box">Tectobox · Powered by <a href="https://tect0nic.com" target="_blank" rel="noopener">Tectonic</a></div>
+    <div style="text-align:center;margin-top:12px;"><a href="/welcome" style="font-size:13.5px;color:var(--muted);text-decoration:none;">New here? See what Tectobox does →</a></div>
   </div>
 </div>
 
@@ -374,6 +375,7 @@
         <button data-at="resources" class="active">Connected resources</button>
         <button data-at="users">Workspaces &amp; users</button>
         <button data-at="config">Platform config</button>
+        <button data-at="notify">Notifications</button>
         <button data-at="audit">Audit log</button>
       </div>
       <div id="atab-resources" class="tbl-card"><table class="tbl">
@@ -406,6 +408,22 @@
             <p class="muted small mb16">Give these to workspace owners connecting Meta channels.</p>
             <div id="admin-webhook-urls"></div>
           </div>
+        </div>
+      </div>
+      <div id="atab-notify" class="hidden">
+        <div class="card" style="max-width:560px;">
+          <div style="font-weight:800; color:var(--ink); font-size:16px; margin-bottom:4px;">Send notification</div>
+          <p class="muted small mb16">Push a custom notification to installed apps. Users get it even with the app closed.</p>
+          <label class="lbl">Send to</label>
+          <select id="nt-target" class="input mb16">
+            <option value="all">All workspaces</option>
+          </select>
+          <label class="lbl">Title</label>
+          <input id="nt-title" class="input mb16" maxlength="80" placeholder="Tectobox" value="Tectobox">
+          <label class="lbl">Message</label>
+          <textarea id="nt-body" class="input mb16" rows="3" maxlength="200" placeholder="What's the update?"></textarea>
+          <button class="btn-primary" id="btn-send-notif">Send notification</button>
+          <div class="muted small" id="nt-status" style="margin-top:8px;"></div>
         </div>
       </div>
       <div id="atab-audit" class="hidden"><div class="tbl-card" id="audit-list"></div></div>
@@ -585,7 +603,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=20261006v"></script>
+<script src="/app.js?v=20261006w"></script>
     <div class="gs-overlay hidden" id="gs-overlay">
       <div class="gs-card" id="get-started" role="dialog" aria-label="Get started"></div>
     </div>
