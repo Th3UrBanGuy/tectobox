@@ -1,4 +1,4 @@
-/* Tectonic Webchat — one-line embed.
+/* Tectobox Webchat — one-line embed.
  * <script src="https://ss.kalandar.me/widget.js?v=20261001i" data-client="WIDGET_KEY"></script>
  * Appearance (title, greeting, color, avatar, position…) is configured in the
  * dashboard and fetched automatically — data-* attributes override it:

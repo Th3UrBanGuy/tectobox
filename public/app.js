@@ -1,4 +1,4 @@
-// Tectonic Inbox — SkyDesk-style frontend (vanilla JS + SSE).
+// Tectobox — AI-powered unified inbox frontend (vanilla JS + SSE).
 // Auth-first: client users are auto-scoped server-side; admin gets the Platform panel.
 const PLATFORMS = {
   whatsapp:  { label: 'WhatsApp',  badge: 'WA', cls: 'p-whatsapp',  color: '#25D366' },
@@ -1495,7 +1495,7 @@ async function loadBackupTab() {
     <div id="bk-drive-files" style="margin-top:10px;"></div>` : `
     <div style="margin-top:14px;">
       <a class="btn primary" href="/api/backup/drive/connect?client_id=${state.clientId}" target="_blank" rel="noopener">🔗 Connect Google Drive</a>
-      <div class="muted small" style="margin-top:8px;">Backups go to a <b>${esc(st.folder || 'Tectonic Backups')}</b> folder in your Drive.</div>
+      <div class="muted small" style="margin-top:8px;">Backups go to a <b>${esc(st.folder || 'Tectobox Backups')}</b> folder in your Drive.</div>
     </div>`;
 
   card.innerHTML = `
