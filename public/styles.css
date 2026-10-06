@@ -1797,7 +1797,7 @@ html{ direction:ltr; }
 .guide-go{margin-top:10px;}
 
 /* ═══ get started checklist ═══ */
-#get-started{padding:20px; margin-bottom:16px;}
+/* #get-started is now the onboarding popup card (.gs-card) */
 .gs-head{display:flex; align-items:center; gap:14px; margin-bottom:12px;}
 .gs-head>div:first-child{flex:1;}
 .gs-title{font-size:16px; font-weight:800; letter-spacing:-.02em; color:var(--ink);}
@@ -1821,3 +1821,24 @@ html{ direction:ltr; }
 .gs-tx{flex:1; min-width:0;}
 .gs-tx b{display:block; font-size:14px; color:var(--ink);}
 .gs-tx small{color:var(--muted); font-size:12.5px;}
+
+/* Get-started onboarding popup */
+.gs-overlay{position:fixed; inset:0; z-index:5000; display:flex; align-items:center; justify-content:center;
+  padding:20px; background:rgba(15,15,25,.45); -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);}
+.gs-overlay.hidden{display:none;}
+.gs-card{width:400px; max-width:100%; background:var(--card-solid); border:1px solid var(--line-hi);
+  border-radius:22px; box-shadow:var(--shadow-lg); padding:22px; position:relative;
+  animation:gs-pop .3s var(--ease-out);}
+@keyframes gs-pop{from{opacity:0; transform:translateY(14px) scale(.97);}}
+.gs-close{position:absolute; top:12px; right:12px; width:32px; height:32px; border:none; background:var(--hover);
+  border-radius:50%; color:var(--body); font-size:16px; cursor:pointer; line-height:1;}
+.gs-close:hover{background:var(--active);}
+.gs-card .gs-head{margin-bottom:12px; padding-right:28px;}
+
+/* guide image step badges */
+.guide-img-wrap{position:relative; display:block; margin-top:10px; border-radius:16px; overflow:hidden;
+  border:1px solid var(--line-hi); box-shadow:var(--shadow);}
+.guide-img{width:100%; display:block; margin:0 !important; border:none !important; border-radius:0 !important; box-shadow:none !important;}
+.guide-img-num{position:absolute; top:10px; left:10px; width:30px; height:30px; border-radius:50%;
+  background:#111; color:#fff; font-size:14px; font-weight:800; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 4px 12px rgba(0,0,0,.35); border:2px solid #fff;}

@@ -2735,7 +2735,7 @@ function renderGuide() {
             <div class="guide-body">
               <div class="guide-step-t">${esc(s.t)}</div>
               <div class="guide-step-d">${esc(s.d)}</div>
-              ${s.img ? `<img class="guide-img" src="${s.img}" alt="${esc(s.t)}" loading="lazy">` : ''}
+              ${s.img ? `<span class="guide-img-wrap"><img class="guide-img" src="${s.img}" alt="${esc(s.t)}" loading="lazy"><span class="guide-img-num">${i + 1}</span></span>` : ''}
               ${s.go ? `<button class="btn-soft guide-go" data-g="${g.id}" data-s="${i}">${esc(s.go[0])} →</button>` : ''}
             </div>
           </div>`).join('')}
@@ -2750,9 +2750,15 @@ function renderGuide() {
 }
 
 // ---------------- get started checklist (first-time users) ----------------
+function dismissOnboarding() {
+  try { localStorage.setItem('tectonic-onboard-hide', '1'); } catch {}
+  $('gs-overlay').classList.add('hidden');
+}
 async function renderGetStarted() {
   const el = $('get-started');
-  if (!el || (state.me && state.me.role === 'admin')) { if (el) el.classList.add('hidden'); return; }
+  const ov = $('gs-overlay');
+  try { if (localStorage.getItem('tectonic-onboard-hide') === '1') { ov.classList.add('hidden'); return; } } catch {}
+  if (!el || (state.me && state.me.role === 'admin')) { if (ov) ov.classList.add('hidden'); return; }
   let channels = 0, products = 0, docs = 0;
   try {
     const [st, pr, kb] = await Promise.all([
@@ -2771,9 +2777,10 @@ async function renderGetStarted() {
     { done: docs > 0, t: 'Teach the AI', s: docs > 0 ? docs + ' taught ✓' : 'Prices, policies, FAQs', go: () => gotoSettings('kb') },
   ];
   const doneCount = steps.filter(x => x.done).length;
-  if (doneCount === 3) { el.classList.add('hidden'); return; }
-  el.classList.remove('hidden');
+  if (doneCount === 3) { ov.classList.add('hidden'); return; }
+  ov.classList.remove('hidden');
   el.innerHTML = `
+    <button class="gs-close" id="gs-close" aria-label="Close">×</button>
     <div class="gs-head">
       <div><div class="gs-title">Get started</div><div class="muted small">${doneCount} of 3 done — finish setup and you're live</div></div>
       <div class="gs-bar"><span style="width:${doneCount / 3 * 100}%"></span></div>
@@ -2785,5 +2792,6 @@ async function renderGetStarted() {
         ${x.done ? '' : '<span class="muted">→</span>'}
       </button>`).join('')}`;
   el.querySelectorAll('[data-gs]').forEach(b =>
-    b.onclick = () => { const st = steps[+b.dataset.gs]; if (!st.done) st.go(); });
+    b.onclick = () => { const st = steps[+b.dataset.gs]; if (!st.done) { dismissOnboarding(); st.go(); } });
+  $('gs-close').onclick = dismissOnboarding;
 }
