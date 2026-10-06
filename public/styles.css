@@ -1684,3 +1684,17 @@ html{ direction:ltr; }
 @media(prefers-reduced-motion:reduce){
   .preloader-logo,.preloader-name,.preloader-bar span{ animation-duration:.01ms; }
 }
+
+/* ── mobile inbox: true flex fill (no clipped chat list) ── */
+@media(max-width:900px){
+  .inbox{display:flex; flex-direction:column; height:calc(100dvh - 170px); min-height:430px;}
+  .inbox .pane{margin-bottom:0;}
+  .inbox .pane.list-pane{max-height:none; flex:1 1 auto; min-height:0; display:flex; flex-direction:column; overflow:hidden;}
+  .inbox .pane.list-pane .pane-head{flex-shrink:0;}
+  .conv-list{flex:1 1 auto; min-height:0; max-height:none; overflow-y:auto; -webkit-overflow-scrolling:touch;}
+  .inbox .pane.chat-pane{min-height:0;}
+  .inbox.m-chat-open .pane.chat-pane{flex:1 1 auto; min-height:0; display:flex; flex-direction:column;}
+}
+/* ── topnav logo: never clip ── */
+.brand{flex-shrink:0; min-width:0;}
+.brand-pill{max-width:132px; object-fit:contain;}
