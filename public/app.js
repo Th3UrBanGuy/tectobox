@@ -2858,7 +2858,10 @@ function dismissOnboarding() {
 async function renderGetStarted() {
   const el = $('get-started');
   const ov = $('gs-overlay');
-  try { if (localStorage.getItem('tectonic-onboard-hide') === '1') { ov.classList.add('hidden'); return; } } catch {}
+  // ?onboard=1 forces the popup (for testing / demo) — bypasses dismissal + completion.
+  let force = false;
+  try { force = new URLSearchParams(location.search).get('onboard') === '1'; } catch {}
+  try { if (!force && localStorage.getItem('tectonic-onboard-hide') === '1') { ov.classList.add('hidden'); return; } } catch {}
   if (!el || (state.me && state.me.role === 'admin')) { if (ov) ov.classList.add('hidden'); return; }
   let channels = 0, products = 0, docs = 0;
   try {
@@ -2878,7 +2881,7 @@ async function renderGetStarted() {
     { done: docs > 0, t: 'Teach the AI', s: docs > 0 ? docs + ' taught ✓' : 'Prices, policies, FAQs', go: () => gotoSettings('kb') },
   ];
   const doneCount = steps.filter(x => x.done).length;
-  if (doneCount === 3) { ov.classList.add('hidden'); return; }
+  if (doneCount === 3 && !force) { ov.classList.add('hidden'); return; }
   ov.classList.remove('hidden');
   el.innerHTML = `
     <button class="gs-close" id="gs-close" aria-label="Close">×</button>
