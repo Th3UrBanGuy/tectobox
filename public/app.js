@@ -147,7 +147,17 @@ async function api(path, opts = {}) {
 }
 
 // ---------------- auth ----------------
+function hidePreloader() {
+  var _p = $('preloader');
+  if (_p && !_p.classList.contains('done')) {
+    _p.classList.add('done');
+    setTimeout(() => _p.remove(), 600);
+  }
+}
+// safety: never trap the user behind the splash
+setTimeout(hidePreloader, 10000);
 function showLogin() {
+  hidePreloader();
   state.me = null;
   $('login-view').classList.remove('hidden');
   $('app-view').classList.add('hidden');
@@ -161,6 +171,7 @@ async function boot() {
   } catch { return; } // showLogin already triggered
   state.me = me;
   state.clientId = me.clientId;
+  hidePreloader();
   $('login-view').classList.add('hidden');
   $('app-view').classList.remove('hidden');
   var _bt2 = $('bottom-tabs'); if (_bt2) _bt2.classList.remove('hidden');
