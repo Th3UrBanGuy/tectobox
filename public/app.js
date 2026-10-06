@@ -1544,14 +1544,8 @@ function initPwa() {
     });
   }
 }
-async function promptInstall() {
-  if (_deferredInstall) {
-    _deferredInstall.prompt();
-    await _deferredInstall.userChoice.catch(() => {});
-    _deferredInstall = null;
-    return;
-  }
-  toast('To install: open this page in Chrome → menu ⋮ → "Install app" / "Add to Home screen".');
+function promptInstall() {
+  location.href = '/install';
 }
 // Web Push subscription (per login) — powers admin + new-message notifications.
 async function vapidKey() {

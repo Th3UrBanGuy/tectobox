@@ -64,7 +64,7 @@ footer a{color:var(--body);text-decoration:none;margin:0 10px}
   <a class="brand" href="/welcome"><img src="/img/tectobox-icon.png" alt="">Tectobox</a>
   <div class="nav-links">
     <a class="btn btn-ghost" href="/app" style="padding:10px 18px;font-size:14px;">Open web app</a>
-    <button class="btn btn-dark pwa-install-btn" onclick="doInstall()" style="padding:10px 18px;font-size:14px;">Install app</button>
+    <a class="btn btn-dark pwa-install-btn" href="/install" style="padding:10px 18px;font-size:14px;">Install app</a>
   </div>
 </div></nav>
 
@@ -73,7 +73,7 @@ footer a{color:var(--body);text-decoration:none;margin:0 10px}
   <h1>Every chat. One inbox.<br><span class="grad">Answered by AI.</span></h1>
   <p class="sub">Tectobox unifies your WhatsApp, Telegram and website chat into one beautiful inbox. Your AI answers customers instantly — from your real products and prices. You step in only when it matters.</p>
   <div class="cta-row">
-    <button class="btn btn-dark pwa-install-btn" onclick="doInstall()">⬇ Install the app</button>
+    <a class="btn btn-dark pwa-install-btn" href="/install">⬇ Install the app</button>
     <a class="btn btn-ghost" href="/app">Use on the web →</a>
   </div>
   <div class="hero-img"><img src="/img/guide-inbox.png" alt="Tectobox unified inbox"></div>
@@ -108,7 +108,7 @@ footer a{color:var(--body);text-decoration:none;margin:0 10px}
     <h2>Get the app</h2>
     <p>Install Tectobox on your Android phone for the full native experience — home-screen icon, splash screen, push notifications, and automatic updates. Prefer the browser? The web app is identical.</p>
     <div class="cta-row">
-      <button class="btn btn-dark pwa-install-btn" onclick="doInstall()">⬇ Install on Android</button>
+      <a class="btn btn-dark pwa-install-btn" href="/install">⬇ Install on Android</button>
       <a class="btn btn-ghost" href="/app" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.25)">Use on the web →</a>
     </div>
     <div class="note">On Android: tap Install, or Chrome menu ⋮ → "Install app".<br>Updates arrive automatically — you're always on the latest version.</div>
@@ -120,14 +120,6 @@ footer a{color:var(--body);text-decoration:none;margin:0 10px}
   <div style="margin-top:10px;">Tectobox · Powered by Tectonic</div>
 </footer>
 
-<script>
-let _di = null;
-window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); _di = e; });
-function doInstall() {
-  if (_di) { _di.prompt(); _di.userChoice.then(() => _di = null).catch(() => {}); return; }
-  alert('To install:\\n\\nAndroid Chrome: menu ⋮ → "Install app" / "Add to Home screen"\\n\\nThen Tectobox runs like a native app with notifications.');
-}
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-</script>
+<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});</script>
 </body>
 </html>
