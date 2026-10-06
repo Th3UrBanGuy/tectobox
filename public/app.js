@@ -2486,7 +2486,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   $('btn-signout').onclick = async () => {
-    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
+    let ok = false;
+    for (let i = 0; i < 2 && !ok; i++) {
+      try { const r = await fetch('/api/auth/logout', { method: 'POST' }); ok = r.ok; }
+      catch {}
+    }
+    if (!ok) { toast('Logout failed — check connection and try again', 'err'); return; }
     showLogin();
   };
   $('btn-refresh').onclick = () => { if (state.view === 'admin') loadAdmin(); };
