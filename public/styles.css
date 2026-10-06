@@ -1700,7 +1700,7 @@ html{ direction:ltr; }
 .brand-pill{max-width:132px; object-fit:contain;}
 
 /* ═══ compact inbox toolbar — filter popover · expanding search · human toggle ═══ */
-.inbox-toolbar{display:flex; align-items:center; gap:10px; padding:12px 14px;}
+.inbox-toolbar{display:flex; align-items:center; gap:10px; padding:12px 14px; position:relative; z-index:10;}
 .inbox-toolbar .list-title{flex:1; min-width:0;}
 .toolbar-actions{display:flex; align-items:center; gap:8px; flex-shrink:0;}
 .toolbar-actions .icon-btn{
@@ -1713,7 +1713,7 @@ html{ direction:ltr; }
 /* filter popover */
 .pop-wrap{position:relative;}
 .pop{
-  position:absolute; top:calc(100% + 8px); right:0; z-index:60; min-width:190px;
+  position:absolute; top:calc(100% + 8px); right:0; z-index:90; min-width:190px;
   background:var(--card-solid); border:1px solid var(--line-hi); border-radius:14px;
   box-shadow:var(--shadow-lg); padding:6px;
   transform-origin:top right;
