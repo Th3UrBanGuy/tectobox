@@ -1698,3 +1698,50 @@ html{ direction:ltr; }
 /* ── topnav logo: never clip ── */
 .brand{flex-shrink:0; min-width:0;}
 .brand-pill{max-width:132px; object-fit:contain;}
+
+/* ═══ compact inbox toolbar — filter popover · expanding search · human toggle ═══ */
+.inbox-toolbar{display:flex; align-items:center; gap:10px; padding:12px 14px;}
+.inbox-toolbar .list-title{flex:1; min-width:0;}
+.toolbar-actions{display:flex; align-items:center; gap:8px; flex-shrink:0;}
+.toolbar-actions .icon-btn{width:38px; height:38px; border-radius:12px; position:relative;}
+/* filter popover */
+.pop-wrap{position:relative;}
+.pop{
+  position:absolute; top:calc(100% + 8px); right:0; z-index:60; min-width:190px;
+  background:var(--card-solid); border:1px solid var(--line-hi); border-radius:14px;
+  box-shadow:var(--shadow-lg); padding:6px;
+  transform-origin:top right;
+  transition:opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+}
+.pop.hidden{display:block; opacity:0; transform:scale(.95); pointer-events:none; visibility:hidden;}
+.pop-item{
+  display:flex; align-items:center; gap:10px; width:100%;
+  border:none; background:transparent; cursor:pointer; text-align:left;
+  padding:10px 12px; border-radius:10px; font-size:13.5px; font-weight:600; color:var(--body);
+  transition:background 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+.pop-item:hover{background:var(--hover);}
+.pop-item:active{transform:scale(.97);}
+.pop-item.active{background:var(--active); color:var(--ink);}
+.pop-item .tick{margin-left:auto; color:var(--accent); font-weight:800; opacity:0;}
+.pop-item.active .tick{opacity:1;}
+.fdir-dot{
+  position:absolute; top:7px; right:7px; width:8px; height:8px; border-radius:50%;
+  background:var(--accent); box-shadow:0 0 6px rgba(var(--accent-rgb),.8);
+}
+/* expanding search */
+.search-expand{display:flex; align-items:center; gap:0;}
+.search-expand .input{
+  width:0; min-height:38px; padding:0; border-width:0; opacity:0;
+  transition:width 260ms var(--ease-out), opacity 200ms var(--ease-out), padding 260ms var(--ease-out);
+  overflow:hidden; white-space:nowrap;
+}
+.search-expand.open .input{
+  width:min(200px, 42vw); opacity:1; padding:0 4px 0 10px; border-width:1px; margin:0 4px;
+}
+.search-expand.open #btn-search{display:none;}
+/* human toggle — premium icon state */
+#btn-human.on{
+  background:var(--accent-grad); color:var(--on-accent); border-color:transparent;
+  box-shadow:0 4px 14px rgba(var(--accent-rgb),.4);
+}

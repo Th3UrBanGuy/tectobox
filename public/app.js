@@ -434,13 +434,22 @@ function renderPlatformChips() {
   const hidden = META_CONNECTORS_VISIBLE ? [] : ['messenger', 'instagram'];
   const all = [{ id: 'all', label: 'All' }, ...Object.entries(PLATFORMS)
     .filter(([id]) => !hidden.includes(id)).map(([id, m]) => ({ id, label: m.label }))];
-  $('platform-chips').innerHTML = all.map(c => `
-    <button class="fchip ${state.platformFilter === c.id ? 'active' : ''}" data-p="${c.id}">
-      ${c.id !== 'all' ? platDot(c.id) : ''}${esc(c.label)}
-    </button>`).join('');
-  document.querySelectorAll('#platform-chips .fchip').forEach(b =>
-    b.onclick = () => { state.platformFilter = b.dataset.p; renderPlatformChips(); renderConvList(); loadConversations(true); });
+  const pop = $('filter-pop');
+  if (pop) {
+    pop.innerHTML = all.map(c => `
+      <button class="pop-item ${state.platformFilter === c.id ? 'active' : ''}" data-p="${c.id}" role="menuitem">
+        ${c.id !== 'all' ? platDot(c.id) : '<span class="plat-dot" style="background:var(--accent)"></span>'}${esc(c.label)}
+        <span class="tick">✓</span>
+      </button>`).join('');
+    pop.querySelectorAll('.pop-item').forEach(b =>
+      b.onclick = (e) => { e.stopPropagation(); state.platformFilter = b.dataset.p; renderPlatformChips(); renderConvList(); loadConversations(true); closeFilterPop(); });
+  }
+  const dot = $('filter-dot');
+  if (dot) dot.classList.toggle('hidden', state.platformFilter === 'all');
+  const fb = $('btn-filter');
+  if (fb) fb.classList.toggle('on', state.platformFilter !== 'all');
 }
+function closeFilterPop() { var _p = $('filter-pop'); if (_p) _p.classList.add('hidden'); }
 
 // Generation counter: concurrent loads (boot fires two) can't clobber each other,
 // and a failed fetch shows a warm retry state instead of a dead skeleton.
@@ -2512,7 +2521,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const v = e.target.value;
     _searchT = setTimeout(() => { state.convQuery = v; loadConversations(true); }, 280);
   });
-  $('needs-human').addEventListener('change', e => { state.needsHuman = e.target.checked; renderConvList(); });
+  // compact toolbar: filter popover
+  $('btn-filter').onclick = (e) => { e.stopPropagation(); $('filter-pop').classList.toggle('hidden'); };
+  document.addEventListener('click', (e) => {
+    var _p = $('filter-pop');
+    if (_p && !_p.classList.contains('hidden') && !e.target.closest('.pop-wrap')) closeFilterPop();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeFilterPop(); collapseSearch(); } });
+  // expanding search
+  const _se = $('search-expand');
+  $('btn-search').onclick = (e) => { e.stopPropagation(); _se.classList.add('open'); $('btn-search-close').classList.remove('hidden'); setTimeout(() => $('conv-search').focus(), 60); };
+  window.collapseSearch = () => {
+    if (!_se.classList.contains('open')) return;
+    _se.classList.remove('open'); $('btn-search-close').classList.add('hidden');
+    if (!$('conv-search').value) { state.convQuery = ''; renderConvList(); }
+  };
+  $('btn-search-close').onclick = (e) => { e.stopPropagation(); $('conv-search').value = ''; collapseSearch(); };
+  // needs-human as premium icon toggle
+  $('btn-human').onclick = () => {
+    state.needsHuman = !state.needsHuman;
+    $('btn-human').classList.toggle('on', state.needsHuman);
+    renderConvList();
+  };
   $('btn-send').onclick = sendReply;
   const _mi = $('msg-input');
   _mi.addEventListener('keydown', e => {
