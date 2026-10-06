@@ -377,6 +377,7 @@ async function renderMore() {
     </label>`;
   }
   $('more-prefs').innerHTML = prefs;
+  $('sw-theme').checked = document.documentElement.getAttribute('data-theme') !== 'light';
   $('sw-theme').onchange = () => { $('btn-theme').click(); };
   const swAr = $('sw-autoreply');
   if (swAr) swAr.onchange = async () => {
@@ -2495,6 +2496,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.documentElement.setAttribute('data-theme', next);
     try { localStorage.setItem('tectonic-theme', next); } catch {}
     syncThemeIcon();
+    var _sw = $('sw-theme'); if (_sw) _sw.checked = (next === 'dark');
   };
   $('btn-theme').onclick = toggleTheme;
   const loginToggle = $('btn-theme-login');
