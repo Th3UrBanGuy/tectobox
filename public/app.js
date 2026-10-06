@@ -151,6 +151,7 @@ function showLogin() {
   state.me = null;
   $('login-view').classList.remove('hidden');
   $('app-view').classList.add('hidden');
+  var _bt = $('bottom-tabs'); if (_bt) _bt.classList.add('hidden');
   if (window._es) { try { window._es.close(); } catch {} window._es = null; }
 }
 async function boot() {
@@ -162,10 +163,11 @@ async function boot() {
   state.clientId = me.clientId;
   $('login-view').classList.add('hidden');
   $('app-view').classList.remove('hidden');
+  var _bt2 = $('bottom-tabs'); if (_bt2) _bt2.classList.remove('hidden');
   $('user-name').textContent = me.username;
   $('user-avatar').textContent = (me.username || '?')[0].toUpperCase();
   if (me.role === 'admin') {
-    $('brand-sub').textContent = 'Platform Panel';
+    var _bs=$('brand-sub'); if(_bs) _bs.textContent='Platform Panel';
     $('btn-refresh').classList.remove('hidden');
     renderNav([
       { id: 'admin', label: 'Platform', icon: 'grid' },
@@ -174,7 +176,7 @@ async function boot() {
     showView('admin');
     loadAdmin();
   } else {
-    $('brand-sub').textContent = 'Unified social commerce';
+    var _bs2=$('brand-sub'); if(_bs2) _bs2.textContent='Tectobox';
     $('btn-refresh').classList.add('hidden');
     renderNav([
       { id: 'inbox', label: 'Inbox', icon: 'inbox' },
