@@ -26,7 +26,7 @@
   document.body.setAttribute('data-platform', platform);
 
   var SUFFIX = { android: '', ios: '-ios', windows: '-win', macos: '-mac', other: '-other' };
-  var sfx = SUFFIX[platform] || '-other';
+  var sfx = (platform in SUFFIX) ? SUFFIX[platform] : '-other';
 
   function $(id) { return document.getElementById(id); }
 
