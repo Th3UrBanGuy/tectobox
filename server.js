@@ -1211,6 +1211,7 @@ const WC_DEFAULTS = {
   avatar: '',
   subtitle: 'Online \u2014 replies instantly',
   require_intro: 1,
+  captcha: 1,
 };
 function webchatConfigFor(clientId) {
   const saved = db.getWebchatAppearance(clientId) || {};
@@ -1247,6 +1248,7 @@ app.post('/api/webchat/config', (req, res) => {
     f.position = b.position;
   }
   if (b.require_intro !== undefined) f.require_intro = !!+b.require_intro;
+  if (b.captcha !== undefined) f.captcha = !!+b.captcha;
   if (Object.keys(f).length) db.setWebchatAppearance(id, f);
   res.json({ ok: true, appearance: webchatConfigFor(id) });
 });

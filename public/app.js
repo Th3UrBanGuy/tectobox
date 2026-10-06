@@ -1410,7 +1410,7 @@ function wcToast(msg) {
 }
 function webchatCard() {
   const w = state.webchat || {};
-  const snippet = `<script src="${location.origin}/widget.js?v=20261002d" data-client="${w.widget_key || ''}"></script>`;
+  const snippet = `<script src="${location.origin}/widget.js?v=20261006u" data-client="${w.widget_key || ''}"></script>`;
   return `<div class="chan-card fade-in">
     <div class="top"><span class="plat-badge p-webchat">WC</span>
       <span class="nm">Webchat</span>
@@ -1426,7 +1426,7 @@ function webchatCard() {
 }
 function wireWebchatCard() {
   const w = state.webchat || {};
-  const snippet = `<script src="${location.origin}/widget.js?v=20261002d" data-client="${w.widget_key || ''}"></script>`;
+  const snippet = `<script src="${location.origin}/widget.js?v=20261006u" data-client="${w.widget_key || ''}"></script>`;
   const copyBtn = $('wc-copy');
   if (copyBtn) copyBtn.onclick = async () => {
     try { await navigator.clipboard.writeText(snippet); wcToast('Embed code copied ✓'); }
@@ -1436,7 +1436,7 @@ function wireWebchatCard() {
   if (testBtn) testBtn.onclick = () => {
     if (document.querySelector('script[data-wc-test]')) { wcToast('Test widget already on this page — check the corner'); return; }
     const s = document.createElement('script');
-    s.src = `${location.origin}/widget.js?v=20261002d`;
+    s.src = `${location.origin}/widget.js?v=20261006u`;
     s.setAttribute('data-client', w.widget_key || '');
     s.setAttribute('data-wc-test', '1');
     document.body.appendChild(s);
@@ -1494,6 +1494,13 @@ function appearanceCard() {
             <button class="wc-opt wc-wide" data-v="0">Start instantly</button>
           </div>
           <div class="note" style="margin-top:4px;">Visitors introduce themselves first — you always know who's talking.</div>
+        </div>
+        <div class="wc-lab">Human check
+          <div class="wc-pick" id="wc-captcha">
+            <button class="wc-opt wc-wide" data-v="1">Simple math question</button>
+            <button class="wc-opt wc-wide" data-v="0">No check</button>
+          </div>
+          <div class="note" style="margin-top:4px;">Visitors solve 7 + 5 = ? before chatting — stops spam bots.</div>
         </div>
         <button class="btn-primary" id="wc-save-appear" style="margin-top:4px;">Save appearance</button>
       </div>
@@ -1611,6 +1618,7 @@ function wireAppearance() {
     position: ap.position || 'bottom-right',
     avatar: ap.avatar || '',
     require_intro: ap.require_intro === undefined || ap.require_intro === null ? 1 : +ap.require_intro,
+    captcha: ap.captcha === undefined || ap.captcha === null ? 1 : +ap.captcha,
   };
   const $id = (x) => $(x);
   function tint(hex, pct) {
@@ -1640,6 +1648,7 @@ function wireAppearance() {
     document.querySelectorAll('#wc-swatches .wc-swatch').forEach(b => b.classList.toggle('sel', b.dataset.v.toLowerCase() === st.color.toLowerCase()));
     document.querySelectorAll('#wc-pos .wc-opt').forEach(b => b.classList.toggle('sel', b.dataset.v === st.position));
     document.querySelectorAll('#wc-intro .wc-opt').forEach(b => b.classList.toggle('sel', +b.dataset.v === +st.require_intro));
+    document.querySelectorAll('#wc-captcha .wc-opt').forEach(b => b.classList.toggle('sel', +b.dataset.v === +st.captcha));
     if ($id('wc-colorhex')) $id('wc-colorhex').textContent = st.color;
   }
   ['wc-title', 'wc-greeting', 'wc-subtitle'].forEach(id => {
@@ -1664,6 +1673,7 @@ function wireAppearance() {
   if (ci) ci.oninput = () => { st.color = ci.value; paint(); };
   document.querySelectorAll('#wc-pos .wc-opt').forEach(b => b.onclick = () => { st.position = b.dataset.v; paint(); });
   document.querySelectorAll('#wc-intro .wc-opt').forEach(b => b.onclick = () => { st.require_intro = +b.dataset.v; paint(); });
+  document.querySelectorAll('#wc-captcha .wc-opt').forEach(b => b.onclick = () => { st.captcha = +b.dataset.v; paint(); });
   const saveBtn = $id('wc-save-appear');
   if (saveBtn) saveBtn.onclick = async () => {
     saveBtn.disabled = true;

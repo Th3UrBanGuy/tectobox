@@ -56,6 +56,12 @@
       if (ri !== null && ri !== undefined && ri !== '') REQUIRE_INTRO = !(ri === '0' || ri === 'false' || ri === 'no');
       else if (serverCfg.require_intro !== undefined && serverCfg.require_intro !== null) REQUIRE_INTRO = !!+serverCfg.require_intro;
     } catch (e) {}
+    var REQUIRE_CAPTCHA = true;
+    try {
+      var rc = DS('captcha');
+      if (rc !== null && rc !== undefined && rc !== '') REQUIRE_CAPTCHA = !(rc === '0' || rc === 'false' || rc === 'no');
+      else if (serverCfg.captcha !== undefined && serverCfg.captcha !== null) REQUIRE_CAPTCHA = !!+serverCfg.captcha;
+    } catch (e) {}
     function uuid() {
       return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
         var r = Math.random() * 16 | 0;
@@ -187,13 +193,29 @@
     .tc-intro input:focus { border-color: ${COLOR}; box-shadow: 0 0 0 3px ${tint(85)}; }
     .tc-ierr { color: #d33; font-size: 12px; min-height: 16px; margin: 0; }
     .tc-start { margin-top: 4px; border: none; border-radius: 12px; padding: 13px; font-size: 15px; font-weight: 700; color: #fff; background: ${COLOR}; cursor: pointer; }
+    .tc-captcha { display: flex; align-items: center; gap: 10px; margin-top: 4px; background: ${tint(92)}; border: 1px dashed ${tint(40)}; border-radius: 12px; padding: 10px 12px; }
+    .tc-captcha .tc-q { flex: 1; font-size: 15px; font-weight: 700; color: #23232e; letter-spacing: .02em; }
+    .tc-captcha input { width: 76px; flex-shrink: 0; border: 1.5px solid rgba(20,20,50,.14); border-radius: 10px; padding: 9px 10px; font-size: 16px; outline: none; text-align: center; color: #191932; background: #fff; }
+    .tc-captcha input:focus { border-color: ${COLOR}; box-shadow: 0 0 0 3px ${tint(85)}; }
+    .tc-captcha .tc-refresh { border: none; background: none; cursor: pointer; color: ${COLOR}; font-size: 18px; padding: 6px; border-radius: 8px; line-height: 1; flex-shrink: 0; }
+    .tc-captcha .tc-refresh:hover { background: rgba(20,20,50,.06); }
+    .tc-captcha .tc-refresh:active { transform: rotate(40deg); }
     .tc-start:active { transform: scale(.98); }
     .tc-ident { display: none; align-items: center; gap: 6px; padding: 7px 14px; font-size: 11.5px; color: #6b6b85; border-bottom: 1px solid rgba(20,20,50,.06); background: rgba(255,255,255,.5); }
     .tc-ident b { color: #3a3a55; }
     .tc-ident button { margin-left: auto; border: none; background: none; color: ${COLOR}; font-size: 11.5px; font-weight: 600; cursor: pointer; padding: 2px 4px; }
-    @media (max-width: 420px) {
-      .tc-panel { ${POS}: 12px; left: 12px; width: auto; bottom: 88px; }
-      .tc-bubble { ${POS}: 16px; bottom: 16px; }
+    @media (max-width: 480px) {
+      .tc-panel {
+        ${POS}: 10px; left: 10px; width: auto; bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+        height: min(600px, calc(100dvh - 120px)); max-height: calc(100dvh - 120px);
+        border-radius: 22px;
+      }
+      .tc-bubble { ${POS}: 14px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); width: 54px; height: 54px; }
+      .tc-inputbar input, .tc-intro input { font-size: 16px; }
+      .tc-header { padding: 13px 10px 11px 13px; }
+      .tc-avatar { width: 40px; height: 40px; font-size: 19px; }
+      .tc-msgs { padding: 12px 10px; }
+      .tc-inputbar { padding: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
     }`;
 
     function esc(s) {
@@ -228,6 +250,11 @@
         <input class="tc-in-name" type="text" placeholder="e.g. Rahim Uddin" maxlength="80" autocomplete="name" />
         <label>Phone or email</label>
         <input class="tc-in-contact" type="text" placeholder="01XXXXXXXXX or you@email.com" maxlength="120" autocomplete="tel" />
+        <div class="tc-captcha" style="display:none;">
+          <span class="tc-q"></span>
+          <input class="tc-in-captcha" type="text" inputmode="numeric" placeholder="?" maxlength="6" autocomplete="off" />
+          <button class="tc-refresh" type="button" title="New question" aria-label="New question">↻</button>
+        </div>
         <p class="tc-ierr"></p>
         <button class="tc-start" type="button">Start chat</button>
       </div>
@@ -249,6 +276,26 @@
     var introContact = shadow.querySelector('.tc-in-contact');
     var introErr = shadow.querySelector('.tc-ierr');
     var introStart = shadow.querySelector('.tc-start');
+    var captchaBox = shadow.querySelector('.tc-captcha');
+    var captchaQ = shadow.querySelector('.tc-captcha .tc-q');
+    var captchaIn = shadow.querySelector('.tc-in-captcha');
+    var captchaRefresh = shadow.querySelector('.tc-captcha .tc-refresh');
+    var captchaAnswer = 0;
+    function newCaptcha() {
+      var a = 2 + Math.floor(Math.random() * 18);
+      var b = 2 + Math.floor(Math.random() * 18);
+      var plus = Math.random() < 0.6;
+      if (!plus && b > a) { var t = a; a = b; b = t; }
+      captchaAnswer = plus ? a + b : a - b;
+      captchaQ.textContent = 'Prove you\'re human:  ' + a + ' ' + (plus ? '+' : '−') + ' ' + b + ' = ?';
+      captchaIn.value = '';
+    }
+    function renderCaptcha() {
+      var show = REQUIRE_CAPTCHA && !identified;
+      captchaBox.style.display = show ? 'flex' : 'none';
+      if (show && !captchaQ.textContent) newCaptcha();
+    }
+    captchaRefresh.addEventListener('click', function () { newCaptcha(); captchaIn.focus(); });
     var identBar = shadow.querySelector('.tc-ident');
     var identName = shadow.querySelector('.tc-ident-name');
     var identEdit = shadow.querySelector('.tc-ident-edit');
@@ -260,6 +307,7 @@
       return digits.length >= 7 && digits.length <= 15; // phone
     }
     function renderIdentity() {
+      renderCaptcha();
       var need = REQUIRE_INTRO && !identified;
       panel.classList.toggle('tc-need-intro', need);
       if (!need && identified) {
@@ -274,6 +322,13 @@
       var contact = introContact.value.trim();
       if (name.length < 2) { introErr.textContent = 'Please enter your name.'; introName.focus(); return; }
       if (!validContact(contact)) { introErr.textContent = 'Enter a valid phone number or email.'; introContact.focus(); return; }
+      if (REQUIRE_CAPTCHA) {
+        var given = parseInt(String(captchaIn.value).trim(), 10);
+        if (given !== captchaAnswer) {
+          introErr.textContent = 'Wrong answer — try the new question.';
+          newCaptcha(); captchaIn.focus(); return;
+        }
+      }
       introErr.textContent = '';
       visitorName = name.slice(0, 80);
       visitorContact = contact.slice(0, 120);
@@ -297,6 +352,7 @@
     }
     introStart.addEventListener('click', submitIntro);
     introContact.addEventListener('keydown', function (e) { if (e.key === 'Enter') submitIntro(); });
+    captchaIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') submitIntro(); });
     introName.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); introContact.focus(); } });
     identEdit.addEventListener('click', function () {
       identified = false;
