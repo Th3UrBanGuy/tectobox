@@ -19,7 +19,7 @@ try {
 } catch (e) { webpush = null; }
 async function sendPushToClient(clientId, payload) {
   if (!webpush) return { sent: 0 };
-  const subs = db.prepare('SELECT * FROM push_subscriptions WHERE client_id = ?').all(clientId);
+  const subs = db.dbQuery('SELECT * FROM push_subscriptions WHERE client_id = ?', [clientId]);
   let sent = 0;
   for (const st of subs) {
     try {
@@ -27,10 +27,10 @@ async function sendPushToClient(clientId, payload) {
         { endpoint: st.endpoint, keys: { p256dh: st.p256dh, auth: st.auth } },
         JSON.stringify(payload), { TTL: 86400 });
       sent++;
-      db.prepare("UPDATE push_subscriptions SET last_used_at = datetime('now') WHERE id = ?").run(st.id);
+      db.dbRun("UPDATE push_subscriptions SET last_used_at = datetime('now') WHERE id = ?", [st.id]);
     } catch (e) {
       if (e && (e.statusCode === 404 || e.statusCode === 410))
-        db.prepare('DELETE FROM push_subscriptions WHERE id = ?').run(st.id);
+        db.dbRun('DELETE FROM push_subscriptions WHERE id = ?', [st.id]);
     }
   }
   return { sent };
@@ -53,11 +53,49 @@ const { aiResponder, autoReplyEnabled, commentResponder, setBusyRetryHook, APOLO
 const crawler = require('./src/crawler');
 const leadIntel = require('./src/lead-intel');
 const { sendPlatformMessage, setTypingIndicator, platformStatus, metaTokenFor } = require('./src/senders');
+const { pacedSend } = require('./src/pacer');
 const senders = require('./src/senders');
 const connectors = require('./src/connectors');
 const { maybeSeed } = require('./seed');
+const { generateSecret, verifyTotp, otpauthUrl } = require('./src/totp');
+const { createChallenge, verifyChallenge } = require('./src/captcha');
+const { encryptSecret, decryptSecret } = require('./src/crypto');
 
-maybeSeed();
+// Demo seed ONLY on explicit opt-in: a fresh production DB must stay empty.
+// Run manually with `npm run seed` or set SEED_DEMO=1 on first boot.
+if (process.env.SEED_DEMO === '1') maybeSeed();
+
+// ---- login brute-force tracking (per IP, 15-min window) ----
+// After LOGIN_FAIL_THRESHOLD failures the login endpoint requires a CAPTCHA.
+// In-memory: a restart clears it, which only weakens this layer briefly.
+const loginFails = new Map(); // ip -> { count, resetAt }
+const LOGIN_FAIL_THRESHOLD = 5;
+const LOGIN_FAIL_WINDOW_MS = 15 * 60 * 1000;
+function loginFailureCount(ip) {
+  const e = loginFails.get(ip);
+  if (!e || Date.now() > e.resetAt) { loginFails.delete(ip); return 0; }
+  return e.count;
+}
+function recordLoginFailure(ip) {
+  const e = loginFails.get(ip);
+  if (!e || Date.now() > e.resetAt) loginFails.set(ip, { count: 1, resetAt: Date.now() + LOGIN_FAIL_WINDOW_MS });
+  else e.count++;
+}
+// ---- widget abuse tracking (per IP, hourly) ----
+const widgetMsgCount = new Map(); // ip -> { count, resetAt }
+// 40/hr/IP: bots blow past this in minutes; a NAT'd office of real humans
+// rarely does. (The 60/min/IP hard rate limit still applies underneath.)
+const WIDGET_CAPTCHA_THRESHOLD = 40;
+function widgetMessageCount(ip) {
+  const e = widgetMsgCount.get(ip);
+  if (!e || Date.now() > e.resetAt) { widgetMsgCount.delete(ip); return 0; }
+  return e.count;
+}
+function recordWidgetMessage(ip) {
+  const e = widgetMsgCount.get(ip);
+  if (!e || Date.now() > e.resetAt) widgetMsgCount.set(ip, { count: 1, resetAt: Date.now() + 3600 * 1000 });
+  else e.count++;
+}
 
 const app = express();
 app.disable('x-powered-by');
@@ -114,6 +152,12 @@ const PORT = parseInt(process.env.PORT, 10) || 3120;
     console.warn('[config] DEMO_WEBHOOKS=1 — webhooks accept unsigned payloads. NEVER use in production.');
   }
 })();
+
+// Demo unsigned-webhook acceptance is a development-only escape hatch: it can
+// never activate in production, even if the env var is left set.
+function demoWebhooksAllowed() {
+  return process.env.DEMO_WEBHOOKS === '1' && process.env.NODE_ENV !== 'production';
+}
 
 // Real client IP behind the Cloudflare tunnel. cloudflared connects from
 // loopback, so req.ip alone is always 127.0.0.1 — Cloudflare sets
@@ -216,11 +260,16 @@ function hashPassword(password) {
   const hash = crypto.scryptSync(password, salt, 64).toString('hex');
   return `${salt}:${hash}`;
 }
-function verifyPassword(password, stored) {
+// Async scrypt: runs in libuv's threadpool instead of blocking the Node
+// event loop. A burst of login attempts must never stall the whole server
+// (load test showed scryptSync spiking loop lag to ~800ms).
+const _scrypt = require('util').promisify(crypto.scrypt);
+async function verifyPassword(password, stored) {
   const [salt, hash] = String(stored).split(':');
   if (!salt || !hash) return false;
-  const check = crypto.scryptSync(password, salt, 64).toString('hex');
-  return crypto.timingSafeEqual(Buffer.from(check, 'hex'), Buffer.from(hash, 'hex'));
+  const check = (await _scrypt(String(password), salt, 64)).toString('hex');
+  const a = Buffer.from(check, 'hex'), b = Buffer.from(hash, 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 // Pre-computed scrypt hash of a random secret: used for unknown usernames so
 // the login path takes the same time whether the user exists or not.
@@ -256,6 +305,8 @@ function sessionFromReq(req) {
   const s = db.getSession(sid);
   if (!s) return null;
   if (!s.active) { db.deleteSession(sid); return null; } // disabled/deleted user
+  // Suspended workspace: kill the session instantly, no grace period.
+  if (s.client_id && db.isClientSuspended(s.client_id)) { db.deleteSession(sid); return null; }
   return { id: s.user_id, username: s.username, role: s.role, clientId: s.client_id, sid };
 }
 function setSessionCookie(res, sid) {
@@ -290,6 +341,7 @@ function clearSessionCookie(res) {
 const PUBLIC_API = new Set([
   'POST /api/auth/login',
   'POST /api/auth/logout',
+  'GET /api/captcha',
   'GET /api/push/vapid-key',
   'GET /api/meta/oauth/callback',
   'GET /api/meta/oauth/pending/',
@@ -326,6 +378,12 @@ function apiKeyAuth(req, res, next) {
     return res.status(429).json({ error: 'API key rate limit exceeded' });
   }
   db.touchApiKey(key.id);
+  // Plan gate: the public API is a licensed feature; suspended workspaces are off.
+  const _acc = db.resolveAccess(key.client_id);
+  if (_acc.suspended) return res.status(403).json({ error: 'workspace suspended' });
+  if (!_acc.features.includes('api_access')) {
+    return res.status(403).json({ error: 'API access is not included in this workspace plan' });
+  }
   req.apiKey = key;
   req.user = { id: 0, username: `apikey:${key.key_prefix}`, role: 'apikey', clientId: key.client_id };
   next();
@@ -336,6 +394,57 @@ function adminOnly(req, res, next) {
 }
 app.use('/api', authRequired);
 app.use('/api/admin', adminOnly);
+
+// ---- Admin two-factor auth (TOTP) ----
+// Setup: generates a secret (stored encrypted, disabled until verified).
+// The admin adds it to any authenticator app via the manual key or otpauth URL,
+// then confirms with a 6-digit code. Login requires the code once enabled.
+app.post('/api/admin/totp/setup', async (req, res) => {
+  // Require the password here too: otherwise a hijacked session alone could
+  // enroll an attacker's authenticator and lock out the real admin.
+  const user = db.getUserById(req.user.id);
+  const ok = await verifyPassword(String((req.body && req.body.password) || ''), user ? user.password_hash : DUMMY_HASH);
+  if (!user || !ok) return res.status(401).json({ error: 'Invalid password' });
+  const secret = generateSecret();
+  db.setTotpSecret(req.user.id, encryptSecret(secret));
+  db.addAudit(req.user.username, 'admin.totp.setup', null, realIp(req));
+  res.json({ secret, otpauth_url: otpauthUrl(secret, req.user.username) });
+});
+app.post('/api/admin/totp/enable', (req, res) => {
+  const row = db.getTotpRow(req.user.id);
+  if (!row) return res.status(400).json({ error: 'run setup first' });
+  let ok = false;
+  try { ok = verifyTotp(decryptSecret(row.secret_enc), req.body && req.body.token); } catch { ok = false; }
+  if (!ok) return res.status(401).json({ error: 'Invalid code — check your authenticator app clock.' });
+  db.enableTotp(req.user.id);
+  db.addAudit(req.user.username, 'admin.totp.enabled', null, realIp(req));
+  res.json({ ok: true });
+});
+app.post('/api/admin/totp/disable', async (req, res) => {
+  const user = db.getUserById(req.user.id);
+  const ok = await verifyPassword(String((req.body && req.body.password) || ''), user ? user.password_hash : DUMMY_HASH);
+  if (!user || !ok) return res.status(401).json({ error: 'Invalid password' });
+  db.deleteTotp(req.user.id);
+  db.addAudit(req.user.username, 'admin.totp.disabled', null, realIp(req));
+  res.json({ ok: true });
+});
+app.get('/api/admin/totp/status', (req, res) => {
+  const row = db.getTotpRow(req.user.id);
+  res.json({ enabled: !!(row && row.enabled), configured: !!row });
+});
+
+// ---- Per-workspace daily widget AI-spend cap ----
+app.get('/api/admin/clients/:id/ai-budget', (req, res) => {
+  res.json(db.getWidgetAiBudget(Number(req.params.id)));
+});
+app.put('/api/admin/clients/:id/ai-budget', (req, res) => {
+  const cap = Number((req.body && req.body.cap));
+  if (!Number.isFinite(cap) || cap < 0 || cap > 100000) return res.status(400).json({ error: 'cap must be 0–100000' });
+  const b = db.setWidgetAiCap(Number(req.params.id), cap);
+  db.addAudit(req.user.username, 'admin.client.ai_budget', `${req.params.id} → ${cap}/day`, realIp(req));
+  pushAccessChanged(Number(req.params.id));
+  res.json(b);
+});
 // CSRF: state-changing requests carry the cookie automatically, so require a
 // same-origin signal. Browsers always send Origin/Referer on fetch/XHR; a
 // missing-or-cross-origin value is rejected (safe methods skip the check).
@@ -366,28 +475,66 @@ app.use('/api/clients/:clientId', (req, res, next) => {
   next();
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body || {};
   const uname = String(username || '').trim();
+  const ip = realIp(req);
   // Rate limit: 5 attempts per minute per IP+username — slows credential stuffing.
-  const rlKey = `login:${realIp(req)}:${uname.toLowerCase()}`;
+  const rlKey = `login:${ip}:${uname.toLowerCase()}`;
   if (!rateLimit(rlKey, 5, 60 * 1000)) {
-    db.addAudit(uname, 'auth.login.ratelimited', null, realIp(req));
+    db.addAudit(uname, 'auth.login.ratelimited', null, ip);
     return res.status(429).json({ error: 'Too many attempts. Try again in a minute.' });
+  }
+  // CAPTCHA gate: after repeated failures from this IP, a solved CAPTCHA is
+  // required before the password is even checked.
+  if (loginFailureCount(ip) >= LOGIN_FAIL_THRESHOLD) {
+    const { captcha_token, captcha_answer } = req.body || {};
+    if (!verifyChallenge(captcha_token, captcha_answer)) {
+      db.addAudit(uname, 'auth.login.captcha_required', null, ip);
+      return res.status(401).json({ error: 'Please solve the CAPTCHA to continue.', captcha_required: true });
+    }
   }
   const user = uname && db.getUserByUsername(uname);
   // Always run the (slow) scrypt check, even for unknown users, so timing
   // doesn't reveal which usernames exist.
   const stored = user ? user.password_hash : DUMMY_HASH;
-  const ok = verifyPassword(String(password || ''), stored);
+  const ok = await verifyPassword(String(password || ''), stored);
   if (!user || !user.active || !ok) {
-    db.addAudit(uname, 'auth.login.failed', null, realIp(req));
+    db.addAudit(uname, 'auth.login.failed', null, ip);
+    recordLoginFailure(ip);
     return res.status(401).json({ error: 'Invalid username or password' });
   }
+  // Suspended workspace: the whole workspace is switched off by the admin.
+  if (user.client_id && db.isClientSuspended(user.client_id)) {
+    db.addAudit(uname, 'auth.login.suspended', null, ip);
+    return res.status(401).json({ error: 'This workspace has been suspended. Please contact the platform admin.' });
+  }
+  // Admin two-factor: when TOTP is enabled for this admin, the 6-digit code
+  // must accompany the login — no session is created without it.
+  if (user.role === 'admin') {
+    const trow = db.getTotpRow(user.id);
+    if (trow && trow.enabled) {
+      let totpOk = false;
+      try { totpOk = verifyTotp(decryptSecret(trow.secret_enc), req.body && req.body.totp); } catch { totpOk = false; }
+      if (!totpOk) {
+        db.addAudit(uname, 'auth.login.totp_failed', null, ip);
+        recordLoginFailure(ip);
+        return res.status(401).json({ error: 'Invalid two-factor code.', totp_required: true });
+      }
+    }
+  }
+  loginFails.delete(ip);
   const sid = newSession(user);
   setSessionCookie(res, sid);
-  db.addAudit(user.username, 'auth.login.success', null, realIp(req));
+  db.addAudit(user.username, 'auth.login.success', null, ip);
   res.json({ ok: true, user: { username: user.username, role: user.role, clientId: user.client_id } });
+});
+// Self-hosted CAPTCHA challenge (SVG + stateless encrypted token).
+// Public by design; rate-limited so it can't be farmed for tokens.
+app.get('/api/captcha', (req, res) => {
+  if (!rateLimit(`captcha:${realIp(req)}`, 30, 60 * 1000)) return res.status(429).json({ error: 'rate limited' });
+  const c = createChallenge();
+  res.json({ token: c.token, svg: c.svg });
 });
 app.post('/api/auth/logout', (req, res) => {
   const s = sessionFromReq(req);
@@ -422,6 +569,13 @@ function broadcast(type, payload, clientId) {
     if (c.role !== 'admin' && c.clientId !== clientId) continue;
     try { c.res.write(data); } catch {}
   }
+}
+// License/access sync: after ANY admin action that changes what a workspace
+// may do, push the fresh access decision so the client panel re-gates
+// instantly instead of waiting for a manual reload.
+function pushAccessChanged(clientId) {
+  try { broadcast('access_changed', { clientId, access: db.resolveAccess(clientId) }, clientId); }
+  catch (e) { console.warn('[access] push failed:', e.message); }
 }
 // ---------------- Inbound pipeline ----------------
 // Conversations with an AI reply currently being composed. Used for burst
@@ -565,6 +719,14 @@ async function runReplyTask(conv, platform, norm, opts = {}, inbound = null, cid
     console.log(`[ai] paused for ${platform}/${pauseSlot} (client ${clientId}) — inbound stored, no auto-reply (conv ${conv.id})`);
     return null;
   }
+  // Workspace-level gate: admin AI-pause switch or the workspace's license.
+  // Inbound is already stored + broadcast by the caller — the combined inbox
+  // keeps working, the AI just stays silent.
+  const access = db.resolveAccess(clientId);
+  if (!access.aiAllowed) {
+    console.log(`[ai] blocked for client ${clientId} (${access.aiReason || 'no license'}) — inbound stored, no auto-reply (conv ${conv.id})`);
+    return null;
+  }
   if (replyingNow.has(conv.id)) {
     console.log(`[ai] burst: conv ${conv.id} already has a reply in flight — stored, no duplicate reply`);
     return null;
@@ -635,6 +797,9 @@ async function runReplyTask(conv, platform, norm, opts = {}, inbound = null, cid
       if (!sendResult.sent) console.log(`[send] demo mode (${platform}): ${sendResult.reason}`);
       broadcast('message', { conversation: db.getConversation(conv.id), outbound: out }, conv.client_id);
       broadcast('lead', { clientId }, clientId);
+      // Credit-system licenses: one real AI answer = one credit. No-op for
+      // legacy and time-unlimited licenses.
+      if (!provisional) db.consumeAiCredit(clientId);
     }
     if (needsHuman) {
       db.flagNeedsHuman(conv.id, 'AI requested human handover');
@@ -658,7 +823,7 @@ function verifyMetaSignature(req) {
   // Fail closed: without the app secret we cannot verify the payload came
   // from Meta. Unsigned acceptance is only allowed with explicit DEMO_WEBHOOKS=1.
   if (!secret) {
-    if (process.env.DEMO_WEBHOOKS === '1') {
+    if (demoWebhooksAllowed()) {
       console.warn('[meta] META_APP_SECRET not set — accepting UNSIGNED payload (demo mode)');
       return true;
     }
@@ -680,7 +845,7 @@ app.get('/webhooks/meta', (req, res) => {
   // Fail closed: accepting a subscription challenge without a verify token
   // would let anyone subscribe their own endpoint. Demo override only.
   if (!expected) {
-    if (process.env.DEMO_WEBHOOKS === '1') {
+    if (demoWebhooksAllowed()) {
       console.warn('[meta] META_VERIFY_TOKEN not set — accepting challenge (demo mode)');
       return res.status(200).send(challenge);
     }
@@ -924,7 +1089,7 @@ app.post('/webhooks/telegram/:secret', async (req, res) => {
   const expected = process.env.TELEGRAM_WEBHOOK_SECRET;
   // Fail closed: without a secret token, anyone could post fake inbound
   // messages. Unsigned acceptance only with explicit DEMO_WEBHOOKS=1.
-  if (!expected && process.env.DEMO_WEBHOOKS !== '1') return res.sendStatus(401);
+  if (!expected && !demoWebhooksAllowed()) return res.sendStatus(401);
   if (expected && !secretsEqual(req.params.secret, expected)) return res.sendStatus(401);
   if (!expected) console.warn('[telegram] TELEGRAM_WEBHOOK_SECRET not set — accepting any path (demo mode)');
   try {
@@ -1010,7 +1175,7 @@ app.post('/api/conversations/:id/reply', async (req, res) => {
   res.json({ message: msg, send: sendResult });
 });
 
-// ---------------- Public API v1 (Bearer API key — see /api/docs) ----------------
+// ---------------- Public API v1 (Bearer API key — see /api-docs.html) ----------------
 function v1ConvOwned(req, id) {
   const conv = db.getConversation(id);
   if (!conv || Number(conv.client_id) !== Number(req.user.clientId)) return null;
@@ -1051,6 +1216,9 @@ app.get('/api/clients/:clientId/api-keys', (req, res) => {
   res.json(db.listApiKeys(cid(req)));
 });
 app.post('/api/clients/:clientId/api-keys', (req, res) => {
+  if (!db.resolveAccess(cid(req)).features.includes('api_access')) {
+    return res.status(403).json({ error: 'API access is not included in your plan' });
+  }
   const name = String((req.body && req.body.name) || 'integration').trim().slice(0, 60) || 'integration';
   const { raw, hash, prefix } = mintApiKey();
   const id = db.createApiKey(cid(req), name, hash, prefix);
@@ -1218,6 +1386,9 @@ app.patch('/api/leads/:id', (req, res) => {
 // Lead intelligence: manual re-analyze of one lead (debounce bypassed).
 app.post('/api/leads/:id/analyze', async (req, res) => {
   try {
+    if (!db.resolveAccess(cid(req)).features.includes('lead_intel')) {
+      return res.status(403).json({ error: 'Lead intelligence is not included in your plan' });
+    }
     const lead = db.getLead(req.params.id);
     if (!lead || lead.client_id !== cid(req)) return res.status(404).json({ error: 'Lead not found' });
     const r = await leadIntel.analyzeLead(lead.client_id, lead.platform, lead.platform_user_id, { force: true });
@@ -1232,8 +1403,113 @@ app.post('/api/leads/:id/analyze', async (req, res) => {
 
 // Lead intelligence: counts by stage / temperature for the workspace.
 app.get('/api/leads/intel-stats', (req, res) => {
+  if (!db.resolveAccess(cid(req)).features.includes('lead_intel')) {
+    return res.status(403).json({ error: 'Lead intelligence is not included in your plan' });
+  }
   res.json(db.getLeadIntelStats(cid(req)));
 });
+
+// ---------------- broadcast campaigns (licensed feature) ----------------
+function broadcastGated(req, res) {
+  const id = cid(req);
+  const access = db.resolveAccess(id);
+  if (access.suspended) {
+    res.status(403).json({ error: 'workspace suspended' });
+    return null;
+  }
+  if (!access.features.includes('broadcast')) {
+    res.status(403).json({ error: 'Broadcast is not included in your plan' });
+    return null;
+  }
+  return id;
+}
+app.get('/api/broadcasts', (req, res) => {
+  const id = broadcastGated(req, res); if (id == null) return;
+  res.json(db.listBroadcasts(id));
+});
+app.post('/api/broadcasts', (req, res) => {
+  const id = broadcastGated(req, res); if (id == null) return;
+  try {
+    const b = db.createBroadcast(id, req.body || {});
+    db.addAudit(req.user.username, 'broadcast.created', `#${b.id} ${b.name}`, realIp(req));
+    res.status(201).json(b);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/broadcasts/:id', (req, res) => {
+  const id = broadcastGated(req, res); if (id == null) return;
+  const b = db.getBroadcast(Number(req.params.id), id);
+  if (!b) return res.status(404).json({ error: 'campaign not found' });
+  res.json(b);
+});
+app.post('/api/broadcasts/:id/audience', (req, res) => {
+  const id = broadcastGated(req, res); if (id == null) return;
+  try {
+    const b = db.buildBroadcastAudience(Number(req.params.id), id);
+    res.json(b);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/broadcasts/:id/send', (req, res) => {
+  const id = broadcastGated(req, res); if (id == null) return;
+  try {
+    const b = db.getBroadcast(Number(req.params.id), id);
+    if (!b) return res.status(404).json({ error: 'campaign not found' });
+    if (b.status === 'sending') return res.status(409).json({ error: 'already sending' });
+    if (b.status === 'done') return res.status(400).json({ error: 'campaign already finished' });
+    if (!b.text.trim()) return res.status(400).json({ error: 'message text is empty' });
+    if (b.stats.total === 0) return res.status(400).json({ error: 'audience is empty — build it first' });
+    db.setBroadcastStatus(b.id, id, 'sending');
+    db.addAudit(req.user.username, 'broadcast.send', `#${b.id} → ${b.stats.total} recipients`, realIp(req));
+    pumpBroadcast(b.id, id).catch(e => console.error('[broadcast] pump failed:', e.message));
+    res.json(db.getBroadcast(b.id, id));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/broadcasts/:id/cancel', (req, res) => {
+  const id = broadcastGated(req, res); if (id == null) return;
+  try {
+    const b = db.setBroadcastStatus(Number(req.params.id), id, 'cancelled');
+    db.addAudit(req.user.username, 'broadcast.cancelled', `#${req.params.id}`, realIp(req));
+    res.json(b);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/broadcasts/:id', (req, res) => {
+  const id = broadcastGated(req, res); if (id == null) return;
+  try {
+    if (!db.deleteBroadcast(Number(req.params.id), id)) return res.status(404).json({ error: 'campaign not found' });
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Background sender: drains pending recipients through the pacer (own slot so
+// campaigns never block live AI replies), then marks the campaign done.
+const broadcastPumping = new Set();
+async function pumpBroadcast(broadcastId, clientId) {
+  if (broadcastPumping.has(broadcastId)) return;
+  broadcastPumping.add(broadcastId);
+  try {
+    const slot = 'broadcast-' + broadcastId;
+    for (;;) {
+      const b = db.getBroadcast(broadcastId, clientId);
+      if (!b || b.status !== 'sending') break;
+      const batch = db.nextBroadcastBatch(broadcastId, 10);
+      if (!batch.length) { db.setBroadcastStatus(broadcastId, clientId, 'done'); break; }
+      for (const r of batch) {
+        const cur = db.getBroadcast(broadcastId, clientId);
+        if (!cur || cur.status !== 'sending') break;
+        try {
+          const res = await pacedSend(clientId, slot, r.platform_user_id, b.text,
+            () => sendPlatformMessage(r.platform, r.platform_user_id, b.text, clientId, 'default'));
+          db.markRecipientSent(r.id, !!res.sent, res.sent ? null : (res.reason || 'send failed'));
+        } catch (e) {
+          db.markRecipientSent(r.id, false, e.message);
+        }
+      }
+      broadcast('broadcast_progress', { broadcastId, stats: db.getBroadcast(broadcastId, clientId).stats }, clientId);
+    }
+  } finally {
+    broadcastPumping.delete(broadcastId);
+    try { broadcast('broadcast_progress', { broadcastId, stats: (db.getBroadcast(broadcastId, clientId) || {}).stats }, clientId); }
+    catch {}
+  }
+}
 
 // ---------------- knowledge ----------------
 app.get('/api/clients/:clientId/knowledge', (req, res) => {
@@ -1291,17 +1567,17 @@ app.post('/api/push/subscribe', (req, res) => {
   const auth = String(b.auth || '').slice(0, 100);
   if (!endpoint || !p256dh || !auth) return res.status(400).json({ error: 'bad subscription' });
   const clientId = u.role === 'admin' ? 0 : (u.clientId || 0);
-  db.prepare(`INSERT INTO push_subscriptions (client_id, user_id, endpoint, p256dh, auth)
+  db.dbRun(`INSERT INTO push_subscriptions (client_id, user_id, endpoint, p256dh, auth)
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth,
-      client_id = excluded.client_id, last_used_at = datetime('now')`)
-    .run(clientId, u.id || null, endpoint, p256dh, auth);
+      client_id = excluded.client_id, last_used_at = datetime('now')`,
+    [clientId, u.id || null, endpoint, p256dh, auth]);
   res.json({ ok: true });
 });
 app.post('/api/push/unsubscribe', (req, res) => {
   const u = req.user; if (!u) return res.status(401).json({ error: 'login required' });
   const endpoint = String((req.body || {}).endpoint || '');
-  if (endpoint) db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+  if (endpoint) db.dbRun('DELETE FROM push_subscriptions WHERE endpoint = ?', [endpoint]);
   res.json({ ok: true });
 });
 app.post('/api/admin/notify', async (req, res) => {
@@ -1315,7 +1591,7 @@ app.post('/api/admin/notify', async (req, res) => {
   let total = 0;
   const payload = { title, body, tag: 'admin-' + Date.now(), url: '/app' };
   if (target === 'all') {
-    const rows = db.prepare('SELECT DISTINCT client_id FROM push_subscriptions').all();
+    const rows = db.dbQuery('SELECT DISTINCT client_id FROM push_subscriptions');
     for (const r of rows) total += (await sendPushToClient(r.client_id, payload)).sent;
   } else {
     total = (await sendPushToClient(target, payload)).sent;
@@ -1360,6 +1636,9 @@ app.post('/api/webchat/config', (req, res) => {
 // ---- Knowledge Base: website import jobs (persistent, per-page detail) ----
 app.post('/api/kb/import-website', (req, res) => {
   const id = cid(req);
+  if (!db.resolveAccess(id).features.includes('knowledge')) {
+    return res.status(403).json({ error: 'AI knowledge base is not included in your plan' });
+  }
   const url = String((req.body && req.body.url) || '').trim();
   if (!url) return res.status(400).json({ error: 'url is required' });
   const latest = db.getLatestWebsiteImport(id);
@@ -1375,11 +1654,17 @@ app.post('/api/kb/import-website', (req, res) => {
   const job = db.createWebsiteImport(id, origin);
   res.status(202).json({ ok: true, status: 'running', import_id: job.id });
   (async () => {
+    // Note: the error path also touches the DB, so it gets its own guard —
+    // a locked DB during failure bookkeeping must not crash the process.
+    const markImport = (id, patch) => {
+      try { db.finishWebsiteImport(id, patch); }
+      catch (e) { console.error('[import] finishWebsiteImport failed:', e.message); }
+    };
     try {
       const result = await crawler.importWebsite(id, origin, { importId: job.id });
-      db.finishWebsiteImport(job.id, { status: 'done', ...result });
+      markImport(job.id, { status: 'done', ...result });
     } catch (e) {
-      db.finishWebsiteImport(job.id, { status: 'error', error: e.message });
+      markImport(job.id, { status: 'error', error: e.message });
     }
   })();
 });
@@ -1417,7 +1702,7 @@ app.get('/api/clients/:id/backup/export-md', (req, res) => {
 });
 
 // Restore from an uploaded JSON backup.
-app.post('/api/clients/:id/backup/import', express.json({ limit: '50mb' }), (req, res) => {
+app.post('/api/clients/:id/backup/import', express.json({ limit: '10mb' }), (req, res) => {
   const id = cid(req);
   try {
     const counts = backup.importClientData(id, req.body);
@@ -1667,6 +1952,30 @@ app.get('/api/admin/overview', (req, res) => res.json(db.adminOverview()));
 
 app.get('/api/admin/users', (req, res) => res.json(db.getUsers()));
 
+// Unified workspace overview for the redesigned admin panel: user + workspace
+// flags + effective license in one call.
+app.get('/api/admin/workspaces', (req, res) => {
+  const users = db.getUsers().filter(u => u.role !== 'admin');
+  res.json(users.map(u => {
+    const access = u.client_id ? db.resolveAccess(u.client_id) : null;
+    const lic = access && access.license;
+    return {
+      id: u.id, username: u.username, active: !!u.active,
+      client_id: u.client_id, client_name: u.client_name,
+      ai_paused: !!u.client_ai_paused, suspended: !!u.client_suspended,
+      delete_scheduled_at: u.delete_scheduled_at || null,
+      ai_allowed: access ? access.aiAllowed : false,
+      ai_reason: access ? access.aiReason : null,
+      ai_budget: u.client_id ? db.getWidgetAiBudget(u.client_id) : null,
+      license: lic ? {
+        code: lic.code, plan_name: lic.plan_name, kind: lic.kind,
+        status: lic.status, ends_at: lic.ends_at,
+        credits_total: lic.credits_total, credits_used: lic.credits_used,
+      } : null,
+    };
+  }));
+});
+
 // Create a workspace (client) + its login user in one step.
 app.post('/api/admin/users', (req, res) => {
   const { username, password, workspaceName, businessType } = req.body || {};
@@ -1692,6 +2001,12 @@ app.post('/api/admin/users', (req, res) => {
 app.post('/api/admin/users/:id/reset-password', (req, res) => {
   const user = db.getUserById(req.params.id);
   if (!user) return res.status(404).json({ error: 'user not found' });
+  // An admin can only reset their own password — never another admin's.
+  // (Client workspace passwords are unaffected by this guard.)
+  if (user.role === 'admin' && user.username !== req.user.username) {
+    db.addAudit(req.user.username, 'admin.user.password_reset.denied', user.username, realIp(req));
+    return res.status(403).json({ error: 'cannot reset another admin password' });
+  }
   const { password } = req.body || {};
   const pwErr = checkPasswordPolicy(String(password || ''));
   if (pwErr) return res.status(400).json({ error: pwErr });
@@ -1760,6 +2075,153 @@ app.put('/api/admin/config', (req, res) => {
 
 app.get('/api/admin/audit', (req, res) => res.json(db.getAudit(100)));
 
+// ---------------- plans & licenses (admin only) ----------------
+app.get('/api/admin/features', (req, res) => res.json(db.FEATURES));
+
+app.get('/api/admin/plans', (req, res) => res.json(db.listPlans(true)));
+app.post('/api/admin/plans', (req, res) => {
+  try {
+    const p = db.createPlan(req.body || {});
+    db.addAudit(req.user.username, 'admin.plan.created', p.name, realIp(req));
+    res.status(201).json(p);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/admin/plans/:id', (req, res) => {
+  try {
+    const p = db.updatePlan(Number(req.params.id), req.body || {});
+    if (!p) return res.status(404).json({ error: 'plan not found' });
+    db.addAudit(req.user.username, 'admin.plan.updated', p.name, realIp(req));
+    res.json(p);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/admin/plans/:id', (req, res) => {
+  try {
+    db.deletePlan(Number(req.params.id));
+    db.addAudit(req.user.username, 'admin.plan.deleted', String(req.params.id), realIp(req));
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/admin/licenses', (req, res) => {
+  const clientId = req.query.client_id ? Number(req.query.client_id) : null;
+  res.json(db.listLicenses(clientId));
+});
+// Custom license creator: issue a license to a workspace, optionally
+// overriding the plan's duration, credits and feature list.
+app.post('/api/admin/licenses', (req, res) => {
+  try {
+    const lic = db.issueLicense({ ...(req.body || {}), createdBy: req.user.username });
+    db.addAudit(req.user.username, 'admin.license.issued',
+      `${lic.code} → workspace #${lic.client_id} (${lic.kind})`, realIp(req));
+    res.status(201).json(lic);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/admin/licenses/:id/pause', (req, res) => {
+  const lic = db.setLicenseStatus(Number(req.params.id), 'paused');
+  if (!lic) return res.status(404).json({ error: 'license not found' });
+  pushAccessChanged(lic.client_id);
+  db.addAudit(req.user.username, 'admin.license.paused', lic.code, realIp(req));
+  res.json(lic);
+});
+app.post('/api/admin/licenses/:id/resume', (req, res) => {
+  const lic = db.setLicenseStatus(Number(req.params.id), 'active');
+  if (!lic) return res.status(404).json({ error: 'license not found' });
+  pushAccessChanged(lic.client_id);
+  db.addAudit(req.user.username, 'admin.license.resumed', lic.code, realIp(req));
+  res.json(lic);
+});
+app.post('/api/admin/licenses/:id/cancel', (req, res) => {
+  const lic = db.setLicenseStatus(Number(req.params.id), 'cancelled');
+  if (!lic) return res.status(404).json({ error: 'license not found' });
+  pushAccessChanged(lic.client_id);
+  db.addAudit(req.user.username, 'admin.license.cancelled', lic.code, realIp(req));
+  res.json(lic);
+});
+app.post('/api/admin/licenses/:id/topup', (req, res) => {
+  try {
+    const lic = db.topupLicense(Number(req.params.id), Number((req.body || {}).credits));
+    if (!lic) return res.status(404).json({ error: 'license not found' });
+    pushAccessChanged(lic.client_id);
+    db.addAudit(req.user.username, 'admin.license.topup', `${lic.code} +${(req.body || {}).credits}`, realIp(req));
+    res.json(lic);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/admin/licenses/:id/topup-feature', (req, res) => {
+  try {
+    const { feature, credits } = req.body || {};
+    const lic = db.topupFeatureCredit(Number(req.params.id), String(feature), Number(credits));
+    if (!lic) return res.status(404).json({ error: 'license not found' });
+    pushAccessChanged(lic.client_id);
+    db.addAudit(req.user.username, 'admin.license.feature_topup', `${lic.code} ${feature} +${credits}`, realIp(req));
+    res.json(lic);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// One-tap assign: pick an existing plan, it becomes the workspace's license.
+app.post('/api/admin/clients/:id/assign-license', (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const lic = db.assignLicense(id, Number((req.body || {}).planId), req.user.username);
+    pushAccessChanged(id);
+    db.addAudit(req.user.username, 'admin.license.assigned', `${lic.code} → workspace #${id}`, realIp(req));
+    res.status(201).json(lic);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Workspace AI pause switch: the workspace keeps its full combined inbox,
+// but the AI never replies on any channel until resumed.
+app.post('/api/admin/clients/:id/ai-pause', (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.getClient(id)) return res.status(404).json({ error: 'workspace not found' });
+  const paused = !((req.body || {}).paused === false);
+  const c = db.setClientAiPaused(id, paused);
+  pushAccessChanged(id);
+  db.addAudit(req.user.username, paused ? 'admin.client.ai_paused' : 'admin.client.ai_resumed', `workspace #${id}`, realIp(req));
+  res.json({ ok: true, ai_paused: !!c.ai_paused });
+});
+// Workspace on/off switch: suspending kills every login instantly and blocks
+// the widget, API and AI. Data is untouched — re-enabling restores everything.
+app.post('/api/admin/clients/:id/suspend', (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.getClient(id)) return res.status(404).json({ error: 'workspace not found' });
+  const suspended = !((req.body || {}).suspended === false);
+  const c = db.setClientSuspended(id, suspended);
+  pushAccessChanged(id);
+  db.addAudit(req.user.username, suspended ? 'admin.client.suspended' : 'admin.client.unsuspended', `workspace #${id}`, realIp(req));
+  res.json({ ok: true, suspended: !!c.suspended });
+});
+// Delete queue: schedule permanent deletion after a 15-day grace period.
+// The workspace is switched off immediately; cancelling restores it.
+app.post('/api/admin/clients/:id/delete-schedule', (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const c = db.scheduleWorkspaceDeletion(id, db.DELETE_GRACE_DAYS);
+    pushAccessChanged(id);
+    db.addAudit(req.user.username, 'admin.client.delete_scheduled', `workspace #${id}`, realIp(req));
+    res.json({ ok: true, delete_scheduled_at: c.delete_scheduled_at });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/admin/clients/:id/delete-cancel', (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.getClient(id)) return res.status(404).json({ error: 'workspace not found' });
+  const c = db.cancelWorkspaceDeletion(id);
+  pushAccessChanged(id);
+  db.addAudit(req.user.username, 'admin.client.delete_cancelled', `workspace #${id}`, realIp(req));
+  res.json({ ok: true, delete_scheduled_at: c.delete_scheduled_at });
+});
+app.get('/api/admin/clients/:id/access', (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.getClient(id)) return res.status(404).json({ error: 'workspace not found' });
+  res.json(db.resolveAccess(id));
+});
+
+// Workspace's own view of its license + features (client users see their own).
+app.get('/api/client/access', (req, res) => {
+  if (!req.user || req.user.role === 'admin') {
+    const id = Number(req.query.client_id) || 1;
+    return res.json(db.resolveAccess(id));
+  }
+  res.json(db.resolveAccess(req.user.clientId));
+});
+
 // ---------------- liveness (unauthenticated — for uptime monitors) ----------------
 app.get('/healthz', (req, res) => {
   // PURE liveness check: never touches the DB. If the event loop is alive,
@@ -1778,11 +2240,34 @@ app.use('/api/widget', (req, res, next) => {
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+// License gate for the public widget: a workspace whose plan doesn't include
+// the webchat feature gets a clean 403 instead of a working chat bubble.
+function widgetLicensed(client, res) {
+  const access = db.resolveAccess(client.id);
+  if (access.suspended) {
+    res.status(403).json({ error: 'this workspace has been suspended' });
+    return false;
+  }
+  if (!access.features.includes('webchat')) {
+    res.status(403).json({ error: 'webchat is not included in this workspace plan' });
+    return false;
+  }
+  return true;
+}
 app.post('/api/widget/:widgetKey/message', async (req, res) => {
   const client = db.getClientByWidgetKey(req.params.widgetKey);
   if (!client) return res.status(404).json({ error: 'unknown widget' });
+  if (!widgetLicensed(client, res)) return;
   if (!rateLimit(`widget:${realIp(req)}`, 60, 60 * 1000)) return res.status(429).json({ error: 'rate limited' });
   const b = req.body || {};
+  // Abuse guard: an IP sending heavily must solve a CAPTCHA per message.
+  const wip = realIp(req);
+  recordWidgetMessage(wip);
+  if (widgetMessageCount(wip) > WIDGET_CAPTCHA_THRESHOLD) {
+    if (!verifyChallenge(b.captcha_token, b.captcha_answer)) {
+      return res.status(429).json({ error: 'Please solve the CAPTCHA to continue.', captcha_required: true });
+    }
+  }
   const visitorId = String(b.visitor_id || '').slice(0, 128);
   const text = String(b.text || '').trim().slice(0, 2000);
   if (!visitorId || !text) return res.status(400).json({ error: 'visitor_id and text are required' });
@@ -1816,7 +2301,16 @@ app.post('/api/widget/:widgetKey/message', async (req, res) => {
   let replyText = null;
   try {
     if (autoReplyEnabled()) {
-      if (replyingNow.has(conv.id)) {
+      if (!db.consumeWidgetAiBudget(client.id)) {
+        // Daily AI budget for this workspace is exhausted — skip the AI
+        // reply (economic-abuse guard). The visitor gets a handover note and
+        // the team follows up manually; the inbound message is already stored.
+        replyText = 'Thanks for reaching out — our team will reply here shortly.';
+        try {
+          db.addMessage(conv.id, 'out', replyText, JSON.stringify({ budget_capped: true }), null, null);
+          broadcast('message', { conversation: db.getConversation(conv.id) }, conv.client_id);
+        } catch {}
+      } else if (replyingNow.has(conv.id)) {
         // Burst: another reply is already composing for this conversation —
         // wait for it (bounded) and return its answer instead of composing
         // a duplicate.
@@ -1858,6 +2352,7 @@ app.post('/api/widget/:widgetKey/message', async (req, res) => {
 app.post('/api/widget/:widgetKey/identify', async (req, res) => {
   const client = db.getClientByWidgetKey(req.params.widgetKey);
   if (!client) return res.status(404).json({ error: 'unknown widget' });
+  if (!widgetLicensed(client, res)) return;
   if (!rateLimit(`widget:${realIp(req)}`, 60, 60 * 1000)) return res.status(429).json({ error: 'rate limited' });
   const b = req.body || {};
   const visitorId = String(b.visitor_id || '').slice(0, 128);
@@ -1869,8 +2364,8 @@ app.post('/api/widget/:widgetKey/identify', async (req, res) => {
   const conv = db.findConversation(client.id, 'webchat', visitorId, 'default');
   if (!conv) return res.json({ ok: true, noop: true });
   // Explicit identity action wins over any stale value — overwrite, don't COALESCE.
-  db.prepare('UPDATE conversations SET customer_name = COALESCE(?, customer_name), customer_phone = COALESCE(?, customer_phone), customer_contact = COALESCE(?, customer_contact) WHERE id = ?')
-    .run(name || conv.customer_name, phone || conv.customer_phone, contact || conv.customer_contact, conv.id);
+  db.dbRun('UPDATE conversations SET customer_name = COALESCE(?, customer_name), customer_phone = COALESCE(?, customer_phone), customer_contact = COALESCE(?, customer_contact) WHERE id = ?',
+    [name || conv.customer_name, phone || conv.customer_phone, contact || conv.customer_contact, conv.id]);
   res.json({ ok: true, conversation_id: conv.id });
 });
 
@@ -1879,6 +2374,7 @@ app.post('/api/widget/:widgetKey/identify', async (req, res) => {
 app.get('/api/widget/:widgetKey/config', (req, res) => {
   const client = db.getClientByWidgetKey(req.params.widgetKey);
   if (!client) return res.status(404).json({ error: 'unknown widget' });
+  if (!widgetLicensed(client, res)) return;
   if (!rateLimit(`widget-cfg:${realIp(req)}`, 60, 60 * 1000)) return res.status(429).json({ error: 'rate limited' });
   res.json(webchatConfigFor(client.id));
 });
@@ -1887,6 +2383,7 @@ app.get('/api/widget/:widgetKey/config', (req, res) => {
 app.get('/api/widget/:widgetKey/messages', (req, res) => {
   const client = db.getClientByWidgetKey(req.params.widgetKey);
   if (!client) return res.status(404).json({ error: 'unknown widget' });
+  if (!widgetLicensed(client, res)) return;
   if (!rateLimit(`widget-poll:${realIp(req)}`, 60, 60 * 1000)) return res.status(429).json({ error: 'rate limited' });
   const visitorId = String(req.query.visitor_id || '').slice(0, 128);
   const since = Number(req.query.since_id || 0);
@@ -1967,6 +2464,13 @@ const server = app.listen(PORT, BIND_HOST, () => {
   // Best-effort: resume persisted WhatsApp/Telegram sessions (Baileys creds
   // reconnect without a re-scan). Never blocks boot.
   connectors.restoreSessions().catch((e) => console.warn('[boot] restoreSessions:', e.message));
+  // Deletion-queue janitor: permanently wipe workspaces whose 15-day grace
+  // has elapsed. Runs in-process (never a second sqlite writer) — at boot
+  // and every 6 hours.
+  try { db.purgeDeletedWorkspaces(); } catch (e) { console.warn('[boot] purge:', e.message); }
+  setInterval(() => {
+    try { db.purgeDeletedWorkspaces(); } catch (e) { console.warn('[purge]', e.message); }
+  }, 6 * 3600 * 1000).unref();
 });
 
 // Graceful shutdown: stop accepting, close connector clients (browser/user

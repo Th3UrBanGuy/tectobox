@@ -4,12 +4,26 @@
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const crypto = require('crypto');
+const { encryptSecret, decryptSecret, isEncrypted } = require('./crypto');
+
+// Encrypt a credential for storage (skip if already an enc:v1 envelope —
+// protects against double-encryption on read-then-write-back flows).
+function encIfPlain(v) { return (v && !isEncrypted(v)) ? encryptSecret(v) : v; }
+// Transparently decrypt on read; legacy plaintext rows keep working.
+// A corrupt envelope fails closed (null) rather than leaking garbage.
+function decSecretField(row, field) {
+  if (row && row[field] && isEncrypted(row[field])) {
+    try { row[field] = decryptSecret(row[field]); } catch { row[field] = null; }
+  }
+  return row;
+}
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'tectonic-inbox.db');
 require('fs').mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new DatabaseSync(dbPath);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
+db.exec('PRAGMA busy_timeout = 5000;'); // wait on lock instead of crashing
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS clients (
@@ -129,6 +143,30 @@ CREATE TABLE IF NOT EXISTS audit_log (
 -- Public API access: per-workspace API keys. Only the SHA-256 hash is stored;
 -- the raw key is shown once at creation and never again. last_used_at lets
 -- owners spot leaked/unused keys.
+CREATE TABLE IF NOT EXISTS broadcasts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  channel TEXT NOT NULL DEFAULT 'all',
+  text TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft',
+  total INTEGER NOT NULL DEFAULT 0,
+  sent INTEGER NOT NULL DEFAULT 0,
+  failed INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  started_at TEXT, finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS broadcast_recipients (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  broadcast_id INTEGER NOT NULL REFERENCES broadcasts(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL, platform_user_id TEXT NOT NULL,
+  customer_name TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  error TEXT, sent_at TEXT,
+  UNIQUE (broadcast_id, platform, platform_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_broadcasts_client ON broadcasts(client_id, status);
+CREATE INDEX IF NOT EXISTS idx_bcast_recip ON broadcast_recipients(broadcast_id, status);
 CREATE TABLE IF NOT EXISTS api_keys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -452,6 +490,24 @@ db.exec(`CREATE TABLE IF NOT EXISTS client_drive_tokens (
   email TEXT,
   connected_at TEXT
 )`);
+// v2.9: admin TOTP (two-factor) secrets + per-workspace daily widget
+// AI-spend cap (economic-abuse guard: caps AI replies/day per workspace).
+db.exec(`CREATE TABLE IF NOT EXISTS admin_totp (
+  user_id INTEGER PRIMARY KEY,
+  secret_enc TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
+for (const [col, ddl] of [
+  ['widget_ai_daily_cap', `ALTER TABLE clients ADD COLUMN widget_ai_daily_cap INTEGER NOT NULL DEFAULT 200`],
+  ['widget_ai_used', `ALTER TABLE clients ADD COLUMN widget_ai_used INTEGER NOT NULL DEFAULT 0`],
+  ['widget_ai_day', `ALTER TABLE clients ADD COLUMN widget_ai_day TEXT NOT NULL DEFAULT ''`],
+]) {
+  if (!columnExists('clients', col)) {
+    db.exec(ddl);
+    console.log(`[db] migrated: clients.${col} added`);
+  }
+}
 // Backfill embed keys for clients created before v2.6.
 for (const c of db.prepare('SELECT id FROM clients WHERE widget_key IS NULL').all()) {
   db.prepare('UPDATE clients SET widget_key = ? WHERE id = ?')
@@ -493,6 +549,89 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_exp ON sessions(expires_at);
 `);
+
+// v2.9: plans & licensing — per-workspace feature gating + AI pause switch.
+//
+// Model:
+//   plans    — reusable templates: kind 'time' (monthly/quarterly/yearly,
+//              unlimited usage inside the window), 'credit' (pay-per-AI-reply),
+//              'feature' (per-feature unlimited-or-credit grants).
+//   licenses — issued to one workspace; carries its own snapshot so editing a
+//              plan later never rewrites history. features_json NULL = inherit
+//              the plan's feature list; array = custom override (the "custom
+//              license creator").
+//   license_feature_credits — per-feature grants for kind='feature'.
+//   clients.ai_paused — workspace-level AI kill switch: inbound messages keep
+//              flowing into the combined inbox, but no AI reply is generated
+//              on any channel. Independent of the plan.
+if (!columnExists('clients', 'ai_paused')) {
+  db.exec('ALTER TABLE clients ADD COLUMN ai_paused INTEGER NOT NULL DEFAULT 0');
+  console.log('[db] migrated: clients.ai_paused added');
+}
+// v2.10: workspace suspend — the admin can switch a whole workspace off.
+// Suspended workspaces: client logins rejected, widget + API + AI all blocked,
+// inbox data untouched so re-enabling restores everything instantly.
+if (!columnExists('clients', 'suspended')) {
+  db.exec('ALTER TABLE clients ADD COLUMN suspended INTEGER NOT NULL DEFAULT 0');
+  console.log('[db] migrated: clients.suspended added');
+}
+// v2.11: workspace deletion queue — deleting a workspace first parks it for
+// a grace period (default 15 days) fully switched off; a janitor inside the
+// server process permanently wipes it afterwards. Cancelling restores it.
+if (!columnExists('clients', 'delete_scheduled_at')) {
+  db.exec('ALTER TABLE clients ADD COLUMN delete_scheduled_at TEXT');
+  console.log('[db] migrated: clients.delete_scheduled_at added');
+}
+db.exec(`CREATE TABLE IF NOT EXISTS plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'time' CHECK(kind IN ('time','credit','feature')),
+  billing_period TEXT CHECK(billing_period IN ('monthly','quarterly','yearly')),
+  features_json TEXT NOT NULL DEFAULT '[]',
+  credits_included INTEGER NOT NULL DEFAULT 0,
+  price_bdt INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS licenses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT UNIQUE NOT NULL,
+  plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'time' CHECK(kind IN ('time','credit','feature')),
+  billing_period TEXT CHECK(billing_period IN ('monthly','quarterly','yearly')),
+  starts_at TEXT NOT NULL,
+  ends_at TEXT,
+  credits_total INTEGER NOT NULL DEFAULT 0,
+  credits_used INTEGER NOT NULL DEFAULT 0,
+  features_json TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','expired','cancelled')),
+  note TEXT,
+  created_by TEXT,
+  created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_licenses_client ON licenses(client_id, status)');
+db.exec(`CREATE TABLE IF NOT EXISTS license_feature_credits (
+  license_id INTEGER NOT NULL REFERENCES licenses(id) ON DELETE CASCADE,
+  feature TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'unlimited' CHECK(mode IN ('unlimited','credit')),
+  credits_total INTEGER NOT NULL DEFAULT 0,
+  credits_used INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (license_id, feature)
+)`);
+
+// Seed starter plans once (admin can edit/delete them afterwards).
+if (db.prepare('SELECT COUNT(*) c FROM plans').get().c === 0) {
+  const all = JSON.stringify(['combined_inbox','ai_response','webchat','broadcast','lead_intel','knowledge','api_access']);
+  const seed = db.prepare(`INSERT INTO plans (name, kind, billing_period, features_json, credits_included, price_bdt)
+    VALUES (?, ?, ?, ?, ?, ?)`);
+  seed.run('Starter · Monthly', 'time', 'monthly', all, 0, 0);
+  seed.run('Growth · Quarterly', 'time', 'quarterly', all, 0, 0);
+  seed.run('Business · Yearly', 'time', 'yearly', all, 0, 0);
+  seed.run('AI Credits · 1000', 'credit', null,
+    JSON.stringify(['combined_inbox','ai_response','webchat']), 1000, 0);
+  console.log('[db] seeded 4 starter plans');
+}
 
 const now = () => new Date().toISOString();
 const rowid = (info) => Number(info.lastInsertRowid);
@@ -593,7 +732,10 @@ function deleteClient(id) {
       db.prepare(`DELETE FROM messages WHERE conversation_id IN (${ph})`).run(...cids);
       db.prepare(`DELETE FROM conversations WHERE id IN (${ph})`).run(...cids);
     }
-    for (const t of ['orders', 'products', 'leads', 'knowledge', 'channel_sessions', 'meta_pages']) {
+    for (const t of ['orders', 'products', 'leads', 'knowledge', 'channel_sessions', 'meta_pages',
+      'licenses', 'api_keys', 'client_webhooks', 'website_imports', 'website_import_pages',
+      'push_subscriptions', 'client_drive_tokens', 'client_payment_config', 'client_ai_rules',
+      'fb_comment_log']) {
       db.prepare(`DELETE FROM ${t} WHERE client_id = ?`).run(id);
     }
     db.prepare('DELETE FROM clients WHERE id = ?').run(id);
@@ -1162,22 +1304,25 @@ function deleteKnowledgeOwned(id, clientId) {
 
 // ---------------- channel sessions (multi-account: slot per channel) ----------------
 function getChannelSession(clientId, channel, slot = 'default') {
-  return db.prepare('SELECT * FROM channel_sessions WHERE client_id = ? AND channel = ? AND slot = ?').get(clientId, channel, slot);
+  return decSecretField(
+    db.prepare('SELECT * FROM channel_sessions WHERE client_id = ? AND channel = ? AND slot = ?').get(clientId, channel, slot),
+    'session_json');
 }
 function listChannelSessions(clientId, channel = null) {
-  if (channel) {
-    return db.prepare('SELECT * FROM channel_sessions WHERE client_id = ? AND channel = ? ORDER BY slot').all(clientId, channel);
-  }
-  return db.prepare('SELECT * FROM channel_sessions WHERE client_id = ? ORDER BY channel, slot').all(clientId);
+  const rows = channel
+    ? db.prepare('SELECT * FROM channel_sessions WHERE client_id = ? AND channel = ? ORDER BY slot').all(clientId, channel)
+    : db.prepare('SELECT * FROM channel_sessions WHERE client_id = ? ORDER BY channel, slot').all(clientId);
+  return rows.map(r => decSecretField(r, 'session_json'));
 }
 function setChannelSession(clientId, channel, { sessionJson, status, label }, slot = 'default') {
+  const enc = sessionJson !== undefined ? encIfPlain(sessionJson) : null;
   const existing = getChannelSession(clientId, channel, slot);
   if (existing) {
     db.prepare('UPDATE channel_sessions SET session_json = COALESCE(?, session_json), status = ?, label = COALESCE(?, label), updated_at = ? WHERE id = ?')
-      .run(sessionJson !== undefined ? sessionJson : null, status || existing.status, label || null, now(), existing.id);
+      .run(enc, status || existing.status, label || null, now(), existing.id);
   } else {
     db.prepare('INSERT INTO channel_sessions (client_id, channel, slot, session_json, status, label, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(clientId, channel, slot, sessionJson || null, status || 'disconnected', label || null, now());
+      .run(clientId, channel, slot, enc, status || 'disconnected', label || null, now());
   }
   return getChannelSession(clientId, channel, slot);
 }
@@ -1213,6 +1358,309 @@ function clientForChannel(channel) {
   return first ? first.id : 1;
 }
 
+// ---------------- plans & licensing (v2.9) ----------------
+// Canonical feature keys. The admin panel renders these; the backend gates on
+// them. Keep this list and the frontend FEATURES in sync.
+const FEATURES = [
+  { key: 'combined_inbox', label: 'Combined inbox', desc: 'All platforms in one unified inbox view' },
+  { key: 'ai_response', label: 'AI auto-replies', desc: 'AI answers customers on every connected channel' },
+  { key: 'webchat', label: 'Webchat widget', desc: 'Embeddable chat bubble for the client website' },
+  { key: 'broadcast', label: 'Broadcast', desc: 'Bulk campaign messaging' },
+  { key: 'lead_intel', label: 'Lead intelligence', desc: 'AI lead scoring (Hot/Warm/Cold)' },
+  { key: 'knowledge', label: 'AI knowledge base', desc: 'Teach the AI from docs + website imports' },
+  { key: 'api_access', label: 'API keys & webhooks', desc: 'Public API v1 + outbound webhooks' },
+];
+const FEATURE_KEYS = new Set(FEATURES.map(f => f.key));
+const cleanFeatures = (arr) => [...new Set((arr || []).filter(k => FEATURE_KEYS.has(k)))];
+
+// --- workspace-level AI pause (the admin kill switch) ---
+function setClientAiPaused(clientId, paused) {
+  db.prepare('UPDATE clients SET ai_paused = ? WHERE id = ?').run(paused ? 1 : 0, clientId);
+  return getClient(clientId);
+}
+function isClientAiPaused(clientId) {
+  const c = db.prepare('SELECT ai_paused FROM clients WHERE id = ?').get(clientId);
+  return Boolean(c && c.ai_paused);
+}
+// --- workspace suspend (whole workspace off) ---
+function setClientSuspended(clientId, suspended) {
+  db.prepare('UPDATE clients SET suspended = ? WHERE id = ?').run(suspended ? 1 : 0, clientId);
+  if (suspended) {
+    // Suspended workspaces can't use the product at all: kill every login now.
+    const users = db.prepare('SELECT id FROM users WHERE client_id = ?').all(clientId);
+    for (const u of users) deleteUserSessions(u.id);
+  }
+  return getClient(clientId);
+}
+function isClientSuspended(clientId) {
+  const c = db.prepare('SELECT suspended FROM clients WHERE id = ?').get(clientId);
+  return Boolean(c && c.suspended);
+}
+
+// --- workspace deletion queue (15-day grace) ---
+const DELETE_GRACE_DAYS = 15;
+function scheduleWorkspaceDeletion(clientId, days = DELETE_GRACE_DAYS) {
+  const c = getClient(clientId);
+  if (!c) throw new Error('workspace not found');
+  const at = new Date(Date.now() + Math.max(1, days | 0 || DELETE_GRACE_DAYS) * 86400000).toISOString();
+  db.prepare('UPDATE clients SET delete_scheduled_at = ?, suspended = 1 WHERE id = ?').run(at, clientId);
+  // Off immediately: kill every login now; all gates already honor `suspended`.
+  const users = db.prepare('SELECT id FROM users WHERE client_id = ?').all(clientId);
+  for (const u of users) deleteUserSessions(u.id);
+  return getClient(clientId);
+}
+function cancelWorkspaceDeletion(clientId) {
+  db.prepare('UPDATE clients SET delete_scheduled_at = NULL, suspended = 0 WHERE id = ?').run(clientId);
+  return getClient(clientId);
+}
+function getDeletionScheduled(clientId) {
+  const c = db.prepare('SELECT delete_scheduled_at FROM clients WHERE id = ?').get(clientId);
+  return (c && c.delete_scheduled_at) || null;
+}
+// Permanent wipe. Runs INSIDE the server process only (never from a second
+// sqlite connection while the server is alive).
+function hardDeleteClient(id) {
+  const users = db.prepare('SELECT id FROM users WHERE client_id = ?').all(id);
+  for (const u of users) deleteUserSessions(u.id);
+  db.prepare(`DELETE FROM users WHERE client_id = ? AND role != 'admin'`).run(id);
+  deleteClient(id); // manual cascade of every workspace table, one transaction
+}
+// Janitor: wipe workspaces whose grace period has fully elapsed.
+function purgeDeletedWorkspaces() {
+  const due = db.prepare(`SELECT id FROM clients
+    WHERE delete_scheduled_at IS NOT NULL AND delete_scheduled_at <= ?`)
+    .all(new Date().toISOString());
+  let n = 0;
+  for (const { id } of due) {
+    try { hardDeleteClient(id); n++; }
+    catch (e) { console.error(`[db] purge of workspace ${id} failed:`, e.message); }
+  }
+  if (n) console.log(`[db] purged ${n} workspace(s) after deletion grace period`);
+  return n;
+}
+
+// --- plans ---
+function listPlans(includeInactive = true) {
+  return db.prepare(`SELECT * FROM plans ${includeInactive ? '' : 'WHERE active = 1'} ORDER BY id`)
+    .all().map(p => ({ ...p, features: JSON.parse(p.features_json || '[]') }));
+}
+function getPlan(id) {
+  const p = db.prepare('SELECT * FROM plans WHERE id = ?').get(id);
+  return p ? { ...p, features: JSON.parse(p.features_json || '[]') } : null;
+}
+function createPlan({ name, kind, billing_period, features, credits_included, price_bdt }) {
+  if (!name || !String(name).trim()) throw new Error('plan name required');
+  if (!['time', 'credit', 'feature'].includes(kind)) throw new Error('invalid kind');
+  const r = db.prepare(`INSERT INTO plans (name, kind, billing_period, features_json, credits_included, price_bdt)
+    VALUES (?, ?, ?, ?, ?, ?)`).run(String(name).trim(), kind,
+    kind === 'time' ? (billing_period || 'monthly') : null,
+    JSON.stringify(cleanFeatures(features)), Math.max(0, credits_included | 0), Math.max(0, price_bdt | 0));
+  return getPlan(r.lastInsertRowid);
+}
+function updatePlan(id, fields) {
+  const p = getPlan(id);
+  if (!p) return null;
+  const sets = [], vals = [];
+  if (fields.name !== undefined) { sets.push('name = ?'); vals.push(String(fields.name).trim() || p.name); }
+  if (fields.kind !== undefined && ['time', 'credit', 'feature'].includes(fields.kind)) { sets.push('kind = ?'); vals.push(fields.kind); }
+  if (fields.billing_period !== undefined) { sets.push('billing_period = ?'); vals.push(fields.billing_period || null); }
+  if (fields.features !== undefined) { sets.push('features_json = ?'); vals.push(JSON.stringify(cleanFeatures(fields.features))); }
+  if (fields.credits_included !== undefined) { sets.push('credits_included = ?'); vals.push(Math.max(0, fields.credits_included | 0)); }
+  if (fields.price_bdt !== undefined) { sets.push('price_bdt = ?'); vals.push(Math.max(0, fields.price_bdt | 0)); }
+  if (fields.active !== undefined) { sets.push('active = ?'); vals.push(fields.active ? 1 : 0); }
+  if (sets.length) db.prepare(`UPDATE plans SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);
+  return getPlan(id);
+}
+function deletePlan(id) {
+  const n = db.prepare("SELECT COUNT(*) c FROM licenses WHERE plan_id = ? AND status = 'active'").get(id).c;
+  if (n > 0) throw new Error('plan has active licenses — cancel them first');
+  db.prepare('DELETE FROM plans WHERE id = ?').run(id);
+  return true;
+}
+
+// --- licenses ---
+function genLicenseCode() {
+  for (let i = 0; i < 10; i++) {
+    const code = 'TBX-' + crypto.randomBytes(4).toString('hex').toUpperCase().slice(0, 6);
+    if (!db.prepare('SELECT 1 FROM licenses WHERE code = ?').get(code)) return code;
+  }
+  throw new Error('could not mint a unique license code');
+}
+const PERIOD_MONTHS = { monthly: 1, quarterly: 3, yearly: 12 };
+function issueLicense({ planId, clientId, kind, billing_period, months, credits_total, features, featureGrants, note, createdBy, startsAt }) {
+  const plan = planId ? getPlan(planId) : null;
+  const k = kind || (plan && plan.kind) || 'time';
+  if (!['time', 'credit', 'feature'].includes(k)) throw new Error('invalid kind');
+  if (!getClient(clientId)) throw new Error('workspace not found');
+  const start = startsAt ? new Date(startsAt) : new Date();
+  if (isNaN(start)) throw new Error('invalid start date');
+  let endsAt = null;
+  if (k === 'time') {
+    const bp = billing_period || (plan && plan.billing_period) || 'monthly';
+    const m = months ? Math.max(1, months | 0) : (PERIOD_MONTHS[bp] || 1);
+    const e = new Date(start); e.setMonth(e.getMonth() + m); endsAt = e.toISOString();
+  }
+  const credits = k === 'credit'
+    ? Math.max(1, (credits_total != null ? credits_total : (plan ? plan.credits_included : 0)) | 0)
+    : 0;
+  const featJson = features === undefined || features === null
+    ? (plan ? plan.features_json : JSON.stringify([...FEATURE_KEYS]))
+    : JSON.stringify(cleanFeatures(features));
+  const r = db.prepare(`INSERT INTO licenses
+    (code, plan_id, client_id, kind, billing_period, starts_at, ends_at, credits_total, features_json, note, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(genLicenseCode(), planId || null, clientId, k,
+      k === 'time' ? (billing_period || (plan && plan.billing_period) || 'monthly') : null,
+      start.toISOString(), endsAt, credits, featJson,
+      note ? String(note).slice(0, 500) : null, createdBy || null);
+  const id = r.lastInsertRowid;
+  if (k === 'feature') {
+    // Per-feature grants: [{ feature, mode: 'unlimited'|'credit', credits }]
+    const grants = Array.isArray(featureGrants) && featureGrants.length
+      ? featureGrants
+      : cleanFeatures(JSON.parse(featJson)).map(f => ({ feature: f, mode: 'unlimited', credits: 0 }));
+    const ins = db.prepare(`INSERT INTO license_feature_credits (license_id, feature, mode, credits_total)
+      VALUES (?, ?, ?, ?)`);
+    for (const g of grants) {
+      if (!FEATURE_KEYS.has(g.feature)) continue;
+      ins.run(id, g.feature, g.mode === 'credit' ? 'credit' : 'unlimited',
+        g.mode === 'credit' ? Math.max(1, g.credits | 0) : 0);
+    }
+  }
+  return getLicense(id);
+}
+function getLicense(id) {
+  const l = db.prepare(`SELECT l.*, p.name AS plan_name, c.name AS client_name
+    FROM licenses l LEFT JOIN plans p ON p.id = l.plan_id LEFT JOIN clients c ON c.id = l.client_id
+    WHERE l.id = ?`).get(id);
+  if (!l) return null;
+  l.features = l.features_json ? JSON.parse(l.features_json) : [];
+  l.feature_grants = db.prepare('SELECT feature, mode, credits_total, credits_used FROM license_feature_credits WHERE license_id = ?').all(id);
+  return l;
+}
+function listLicenses(clientId) {
+  const rows = db.prepare(`SELECT l.*, p.name AS plan_name, c.name AS client_name FROM licenses l
+    LEFT JOIN plans p ON p.id = l.plan_id LEFT JOIN clients c ON c.id = l.client_id
+    ${clientId ? 'WHERE l.client_id = ?' : ''} ORDER BY l.id DESC`)
+    .all(...(clientId ? [clientId] : []));
+  return rows.map(l => {
+    const full = getLicense(l.id);
+    return { ...l, features: full.features, feature_grants: full.feature_grants };
+  });
+}
+function setLicenseStatus(id, status) {
+  if (!['active', 'paused', 'expired', 'cancelled'].includes(status)) throw new Error('invalid status');
+  db.prepare('UPDATE licenses SET status = ? WHERE id = ?').run(status, id);
+  return getLicense(id);
+}
+function topupLicense(id, credits) {
+  const n = Math.max(1, credits | 0);
+  db.prepare('UPDATE licenses SET credits_total = credits_total + ? WHERE id = ?').run(n, id);
+  return getLicense(id);
+}
+function topupFeatureCredit(licenseId, feature, credits) {
+  const n = Math.max(1, credits | 0);
+  db.prepare('UPDATE license_feature_credits SET credits_total = credits_total + ? WHERE license_id = ? AND feature = ?')
+    .run(n, licenseId, feature);
+  return getLicense(licenseId);
+}
+// Assign a plan to a workspace in one tap: retire any currently active
+// license, then issue a fresh one straight from the plan's defaults.
+function assignLicense(clientId, planId, createdBy) {
+  const plan = getPlan(planId);
+  if (!plan || !plan.active) throw new Error('plan not found or inactive');
+  if (!getClient(clientId)) throw new Error('workspace not found');
+  db.prepare(`UPDATE licenses SET status = 'cancelled' WHERE client_id = ? AND status = 'active'`)
+    .run(clientId);
+  return issueLicense({ planId, clientId, createdBy });
+}
+// Newest license wins; only one 'active' license is effective at a time.
+function activeLicense(clientId) {
+  return db.prepare(`SELECT * FROM licenses WHERE client_id = ? AND status = 'active'
+    ORDER BY id DESC LIMIT 1`).get(clientId) || null;
+}
+
+// --- the access decision: one place, every gate asks here ---
+function resolveAccess(clientId) {
+  const aiPaused = isClientAiPaused(clientId);
+  const suspended = isClientSuspended(clientId);
+  const base = { aiPaused, suspended, features: [], aiAllowed: false, aiReason: null, license: null, mode: 'none' };
+  if (suspended) return { ...base, mode: 'suspended', aiReason: 'workspace_suspended' };
+  const lic = activeLicense(clientId);
+  if (!lic) {
+    // No license ever issued (or all cancelled): workspaces created before
+    // the licensing launch keep legacy full access so nothing breaks on
+    // upgrade. Anything newer without a license is LOCKED — a new workspace
+    // must never inherit full access by default.
+    const ever = db.prepare('SELECT 1 FROM licenses WHERE client_id = ? LIMIT 1').get(clientId);
+    if (!ever) {
+      const c = getClient(clientId);
+      const created = c && c.created_at ? new Date(c.created_at).getTime() : 0;
+      if (created >= Date.parse('2026-10-07T00:00:00Z')) {
+        return { ...base, aiReason: 'no_active_license' };
+      }
+      return { ...base, mode: 'legacy', features: [...FEATURE_KEYS], aiAllowed: !aiPaused, aiReason: aiPaused ? 'paused' : null };
+    }
+    return { ...base, aiReason: 'no_active_license' };
+  }
+  const nowMs = Date.now();
+  const full = getLicense(lic.id);
+  base.license = {
+    id: full.id, code: full.code, plan_name: full.plan_name, kind: full.kind,
+    billing_period: full.billing_period, starts_at: full.starts_at, ends_at: full.ends_at,
+    credits_total: full.credits_total, credits_used: full.credits_used,
+    status: full.status, feature_grants: full.feature_grants,
+  };
+  base.mode = 'licensed';
+  if (full.kind === 'time') {
+    if (full.ends_at && new Date(full.ends_at).getTime() <= nowMs) {
+      db.prepare("UPDATE licenses SET status = 'expired' WHERE id = ? AND status = 'active'").run(full.id);
+      base.license.status = 'expired';
+      return { ...base, aiReason: 'license_expired' };
+    }
+    base.features = full.features;
+    base.aiAllowed = !aiPaused && full.features.includes('ai_response');
+    base.aiReason = aiPaused ? 'paused' : (base.aiAllowed ? null : 'feature_not_in_plan');
+    return base;
+  }
+  if (full.kind === 'credit') {
+    if (full.credits_used >= full.credits_total) return { ...base, aiReason: 'credits_exhausted' };
+    base.features = full.features;
+    const aiInPlan = full.features.includes('ai_response');
+    base.aiAllowed = !aiPaused && aiInPlan;
+    base.aiReason = aiPaused ? 'paused' : (aiInPlan ? null : 'feature_not_in_plan');
+    base.license.credits_left = full.credits_total - full.credits_used;
+    return base;
+  }
+  // feature kind: a feature is granted when unlimited, or when it still has credits.
+  const granted = full.feature_grants
+    .filter(g => g.mode === 'unlimited' || g.credits_used < g.credits_total)
+    .map(g => g.feature);
+  base.features = granted;
+  const aiGrant = full.feature_grants.find(g => g.feature === 'ai_response');
+  const aiOk = aiGrant && (aiGrant.mode === 'unlimited' || aiGrant.credits_used < aiGrant.credits_total);
+  base.aiAllowed = !aiPaused && !!aiOk;
+  base.aiReason = aiPaused ? 'paused' : (aiOk ? null : 'ai_not_granted');
+  return base;
+}
+// Called after one real (non-provisional) AI reply is delivered. No-op for
+// legacy and time-unlimited licenses; returns false when no credit was left.
+function consumeAiCredit(clientId) {
+  const lic = activeLicense(clientId);
+  if (!lic) return true; // legacy: unlimited
+  if (lic.kind === 'time') return true; // unlimited inside the window
+  if (lic.kind === 'credit') {
+    const r = db.prepare(`UPDATE licenses SET credits_used = credits_used + 1
+      WHERE id = ? AND status = 'active' AND credits_used < credits_total`).run(lic.id);
+    return r.changes > 0;
+  }
+  const r = db.prepare(`UPDATE license_feature_credits SET credits_used = credits_used + 1
+    WHERE license_id = ? AND feature = 'ai_response' AND mode = 'credit' AND credits_used < credits_total`)
+    .run(lic.id);
+  const g = db.prepare(`SELECT mode FROM license_feature_credits WHERE license_id = ? AND feature = 'ai_response'`).get(lic.id);
+  return g ? (g.mode === 'unlimited' || r.changes > 0) : false;
+}
+
 // ---------------- users / settings / audit (SaaS auth) ----------------
 function createUser({ username, passwordHash, role, clientId }) {
   const r = db.prepare(`INSERT INTO users (username, password_hash, role, client_id, active)
@@ -1227,7 +1675,8 @@ function getUserByUsername(username) {
   return db.prepare('SELECT * FROM users WHERE lower(username) = lower(?)').get(username);
 }
 function getUsers() {
-  return db.prepare(`SELECT u.id, u.username, u.role, u.client_id, u.active, u.created_at, c.name AS client_name
+  return db.prepare(`SELECT u.id, u.username, u.role, u.client_id, u.active, u.created_at, c.name AS client_name,
+      c.ai_paused AS client_ai_paused, c.suspended AS client_suspended, c.delete_scheduled_at
     FROM users u LEFT JOIN clients c ON c.id = u.client_id ORDER BY u.id`).all();
 }
 function setUserPassword(id, passwordHash) {
@@ -1301,21 +1750,23 @@ function connectedResources() {
   }));
 }
 function saveMetaPage(clientId, channel, { pageId, pageName, pageAccessToken, igUserId, igUsername }) {
+  const enc = encIfPlain(pageAccessToken);
   const existing = db.prepare('SELECT * FROM meta_pages WHERE client_id = ? AND channel = ?').get(clientId, channel);
   if (existing) {
     db.prepare(`UPDATE meta_pages SET page_id = ?, page_name = ?, page_access_token = ?,
       ig_user_id = COALESCE(?, ig_user_id), ig_username = COALESCE(?, ig_username),
       status = 'connected', updated_at = ? WHERE id = ?`)
-      .run(pageId, pageName || null, pageAccessToken, igUserId || null, igUsername || null, now(), existing.id);
+      .run(pageId, pageName || null, enc, igUserId || null, igUsername || null, now(), existing.id);
   } else {
     db.prepare(`INSERT INTO meta_pages (client_id, channel, page_id, page_name, page_access_token, ig_user_id, ig_username, status, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'connected', ?)`)
-      .run(clientId, channel, pageId, pageName || null, pageAccessToken, igUserId || null, igUsername || null, now());
+      .run(clientId, channel, pageId, pageName || null, enc, igUserId || null, igUsername || null, now());
   }
-  return db.prepare('SELECT * FROM meta_pages WHERE client_id = ? AND channel = ?').get(clientId, channel);
+  return decSecretField(db.prepare('SELECT * FROM meta_pages WHERE client_id = ? AND channel = ?').get(clientId, channel), 'page_access_token');
 }
 function getMetaPages(clientId) {
-  return db.prepare('SELECT * FROM meta_pages WHERE client_id = ?').all(clientId);
+  return db.prepare('SELECT * FROM meta_pages WHERE client_id = ?').all(clientId)
+    .map(r => decSecretField(r, 'page_access_token'));
 }
 // Route a webhook entry to its owning client: entry.id is the Page ID (object=page)
 // or the IG user ID (object=instagram). Never exposes the token.
@@ -1330,7 +1781,8 @@ function deleteMetaPage(clientId, channel) {
 // All connected messenger pages (for boot-time feed resubscription). Tokens stay server-side.
 function getAllConnectedMetaPages() {
   return db.prepare(`SELECT client_id, channel, page_id, page_name, page_access_token
-    FROM meta_pages WHERE channel = 'messenger' AND status = 'connected'`).all();
+    FROM meta_pages WHERE channel = 'messenger' AND status = 'connected'`).all()
+    .map(r => decSecretField(r, 'page_access_token'));
 }
 
 // ---------------- stats ----------------
@@ -1454,8 +1906,123 @@ function saveAiRules(clientId, rawText, parsed, customRulesText) {
   return getAiRules(clientId);
 }
 
+// ---------------- admin TOTP (two-factor) ----------------
+function getTotpRow(userId) {
+  return db.prepare('SELECT * FROM admin_totp WHERE user_id = ?').get(userId) || null;
+}
+function setTotpSecret(userId, secretEnc) {
+  db.prepare(`INSERT INTO admin_totp (user_id, secret_enc, enabled) VALUES (?, ?, 0)
+    ON CONFLICT(user_id) DO UPDATE SET secret_enc = excluded.secret_enc, enabled = 0`)
+    .run(userId, secretEnc);
+}
+function enableTotp(userId) {
+  db.prepare('UPDATE admin_totp SET enabled = 1 WHERE user_id = ?').run(userId);
+}
+function deleteTotp(userId) {
+  db.prepare('DELETE FROM admin_totp WHERE user_id = ?').run(userId);
+}
+
+// ---------------- per-workspace daily widget AI-spend cap ----------------
+// Economic-abuse guard: bounds AI replies/day per workspace (UTC day).
+function widgetAiToday() { return new Date().toISOString().slice(0, 10); }
+function getWidgetAiBudget(clientId) {
+  const c = db.prepare('SELECT widget_ai_daily_cap, widget_ai_used, widget_ai_day FROM clients WHERE id = ?').get(clientId);
+  const today = widgetAiToday();
+  if (!c) return { cap: 200, used: 0, day: today };
+  if (c.widget_ai_day !== today) {
+    db.prepare('UPDATE clients SET widget_ai_used = 0, widget_ai_day = ? WHERE id = ?').run(today, clientId);
+    return { cap: c.widget_ai_daily_cap ?? 200, used: 0, day: today };
+  }
+  return { cap: c.widget_ai_daily_cap ?? 200, used: c.widget_ai_used ?? 0, day: today };
+}
+// Returns true when the reply is allowed (and counts it). False when over cap.
+function consumeWidgetAiBudget(clientId) {
+  const b = getWidgetAiBudget(clientId);
+  if (b.used >= b.cap) return false;
+  db.prepare('UPDATE clients SET widget_ai_used = widget_ai_used + 1 WHERE id = ?').run(clientId);
+  return true;
+}
+function setWidgetAiCap(clientId, cap) {
+  const n = Math.max(0, Math.floor(Number(cap)));
+  if (!Number.isFinite(n)) throw new Error('invalid cap');
+  db.prepare('UPDATE clients SET widget_ai_daily_cap = ? WHERE id = ?').run(n, clientId);
+  return getWidgetAiBudget(clientId);
+}
+
+// ---------------- broadcast campaigns ----------------
+function createBroadcast(clientId, { name, channel, text }) {
+  const r = db.prepare(`INSERT INTO broadcasts (client_id, name, channel, text)
+    VALUES (?, ?, ?, ?)`).run(clientId, String(name || 'Campaign').slice(0, 120),
+    ['all','whatsapp','telegram','messenger','instagram'].includes(channel) ? channel : 'all',
+    String(text || '').slice(0, 4000));
+  return getBroadcast(r.lastInsertRowid, clientId);
+}
+function getBroadcast(id, clientId) {
+  const b = db.prepare('SELECT * FROM broadcasts WHERE id = ? AND client_id = ?').get(id, clientId);
+  if (!b) return null;
+  b.stats = db.prepare(`SELECT COUNT(*) total,
+      SUM(status = 'sent') sent, SUM(status = 'failed') failed, SUM(status = 'pending') pending
+    FROM broadcast_recipients WHERE broadcast_id = ?`).get(id);
+  return b;
+}
+function listBroadcasts(clientId) {
+  return db.prepare(`SELECT b.*,
+      (SELECT COUNT(*) FROM broadcast_recipients r WHERE r.broadcast_id = b.id) AS total,
+      (SELECT COUNT(*) FROM broadcast_recipients r WHERE r.broadcast_id = b.id AND r.status = 'sent') AS sent,
+      (SELECT COUNT(*) FROM broadcast_recipients r WHERE r.broadcast_id = b.id AND r.status = 'failed') AS failed
+    FROM broadcasts b WHERE b.client_id = ? ORDER BY b.id DESC`).all(clientId);
+}
+// Build the audience from the workspace's customers (distinct platform users
+// with at least one conversation), optionally filtered to one channel.
+function buildBroadcastAudience(broadcastId, clientId) {
+  const b = db.prepare('SELECT * FROM broadcasts WHERE id = ? AND client_id = ?').get(broadcastId, clientId);
+  if (!b || b.status !== 'draft') throw new Error('campaign is not editable');
+  db.prepare('DELETE FROM broadcast_recipients WHERE broadcast_id = ?').run(broadcastId);
+  const rows = db.prepare(`
+    SELECT platform, platform_user_id, MAX(customer_name) AS customer_name
+    FROM conversations WHERE client_id = ? ${b.channel === 'all' ? '' : 'AND platform = ?'}
+    GROUP BY platform, platform_user_id`).all(...(b.channel === 'all' ? [clientId] : [clientId, b.channel]));
+  const ins = db.prepare(`INSERT OR IGNORE INTO broadcast_recipients
+    (broadcast_id, platform, platform_user_id, customer_name) VALUES (?, ?, ?, ?)`);
+  for (const r of rows) ins.run(broadcastId, r.platform, r.platform_user_id, r.customer_name);
+  db.prepare('UPDATE broadcasts SET total = (SELECT COUNT(*) FROM broadcast_recipients WHERE broadcast_id = ?) WHERE id = ?')
+    .run(broadcastId, broadcastId);
+  return getBroadcast(broadcastId, clientId);
+}
+function setBroadcastStatus(id, clientId, status, extra = {}) {
+  const ok = ['draft','sending','paused','done','cancelled'].includes(status);
+  if (!ok) throw new Error('invalid status');
+  db.prepare(`UPDATE broadcasts SET status = ?,
+    started_at = COALESCE(started_at, CASE WHEN ? IN ('sending') THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE started_at END),
+    finished_at = CASE WHEN ? IN ('done','cancelled') THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE finished_at END
+    WHERE id = ? AND client_id = ?`).run(status, status, status, id, clientId);
+  return getBroadcast(id, clientId);
+}
+function nextBroadcastBatch(broadcastId, limit = 25) {
+  return db.prepare(`SELECT * FROM broadcast_recipients
+    WHERE broadcast_id = ? AND status = 'pending' ORDER BY id LIMIT ?`).all(broadcastId, limit);
+}
+function markRecipientSent(recipientId, ok, error) {
+  db.prepare(`UPDATE broadcast_recipients SET status = ?, error = ?, sent_at = ?
+    WHERE id = ?`).run(ok ? 'sent' : 'failed', error || null,
+    ok ? new Date().toISOString() : null, recipientId);
+  const r = db.prepare('SELECT broadcast_id FROM broadcast_recipients WHERE id = ?').get(recipientId);
+  if (r) db.prepare(`UPDATE broadcasts SET sent = (SELECT COUNT(*) FROM broadcast_recipients
+    WHERE broadcast_id = ? AND status = 'sent'), failed = (SELECT COUNT(*) FROM broadcast_recipients
+    WHERE broadcast_id = ? AND status = 'failed') WHERE id = ?`).run(r.broadcast_id, r.broadcast_id, r.broadcast_id);
+}
+function deleteBroadcast(id, clientId) {
+  const b = db.prepare('SELECT status FROM broadcasts WHERE id = ? AND client_id = ?').get(id, clientId);
+  if (!b) return false;
+  if (b.status === 'sending') throw new Error('cancel the campaign first');
+  db.prepare('DELETE FROM broadcasts WHERE id = ? AND client_id = ?').run(id, clientId);
+  return true;
+}
+
 module.exports = {
   DEFAULT_LEAD_FIELDS,
+  getTotpRow, setTotpSecret, enableTotp, deleteTotp,
+  getWidgetAiBudget, consumeWidgetAiBudget, setWidgetAiCap,
   getClients, getClient, getClientByWidgetKey, ensureWidgetKey, setClientWebsite, getWebchatAppearance, setWebchatAppearance, createClient, updateClient, deleteClient,
   findConversation, upsertConversation, getConversation, addMessage, findMessageByExternalId,
   getConversations, getMessages, getRecentMessages, markRead, flagNeedsHuman, clearNeedsHuman,
@@ -1478,6 +2045,16 @@ module.exports = {
   updateKnowledgeOwned, deleteKnowledgeOwned,
   getChannelSession, setChannelSession, listChannelSessions, deleteChannelSession, clientForChannel,
   setAiPaused, isAiPaused,
+  setClientAiPaused, isClientAiPaused,
+  setClientSuspended, isClientSuspended,
+  DELETE_GRACE_DAYS, scheduleWorkspaceDeletion, cancelWorkspaceDeletion,
+  getDeletionScheduled, hardDeleteClient, purgeDeletedWorkspaces,
+  createBroadcast, getBroadcast, listBroadcasts, buildBroadcastAudience,
+  setBroadcastStatus, nextBroadcastBatch, markRecipientSent, deleteBroadcast,
+  FEATURES,
+  listPlans, getPlan, createPlan, updatePlan, deletePlan,
+  issueLicense, getLicense, listLicenses, setLicenseStatus, topupLicense, topupFeatureCredit,
+  assignLicense, resolveAccess, consumeAiCredit,
   getPaymentConfig, savePaymentConfig,
   getAiRules, saveAiRules,
   saveMetaPage, getMetaPages, findClientByMetaPage, deleteMetaPage, getAllConnectedMetaPages,
@@ -1491,4 +2068,6 @@ module.exports = {
   // SQL text is constructed by trusted server code only — never from user input.
   dbQuery: (sql, params = []) => db.prepare(sql).all(...params),
   dbRun: (sql, params = []) => db.prepare(sql).run(...params),
+  createBroadcast, getBroadcast, listBroadcasts, buildBroadcastAudience,
+  setBroadcastStatus, nextBroadcastBatch, markRecipientSent, deleteBroadcast,
 };

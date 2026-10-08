@@ -13,6 +13,12 @@ const PREFIX = 'enc:v1:';
 function loadOrCreateKey() {
   let hex = (process.env.SESSION_ENC_KEY || '').trim();
   if (/^[0-9a-fA-F]{64}$/.test(hex)) return Buffer.from(hex, 'hex');
+  if (hex) {
+    // A key is configured but malformed — LOUD, because an ephemeral key
+    // would silently orphan every encrypted row on the next restart.
+    console.error('[crypto] FATAL: SESSION_ENC_KEY is set but is not 64 hex chars (32 bytes). Fix .env — refusing to use an ephemeral key.');
+    throw new Error('SESSION_ENC_KEY malformed: must be 64 hex chars');
+  }
   // Generate once and persist — otherwise a restart would orphan every session.
   const fresh = crypto.randomBytes(32);
   try {

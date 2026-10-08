@@ -40,6 +40,7 @@ const state = {
   adminTab: 'resources',
   settingsTab: 'channels',
   kbSubTab: 'docs',
+  access: null,          // workspace license + feature grants from /api/client/access
 };
 
 const $ = (id) => document.getElementById(id);
@@ -190,6 +191,8 @@ async function boot() {
   } else {
     var _bs2=$('brand-sub'); if(_bs2) _bs2.textContent='Tectobox';
     $('btn-refresh').classList.add('hidden');
+    try { state.access = await api('/api/client/access'); } catch { state.access = null; }
+    applyAccessGating();
     renderNav([
       { id: 'inbox', label: 'Inbox', icon: 'inbox' },
       { id: 'leads', label: 'Leads', icon: 'sheets' },
@@ -201,6 +204,72 @@ async function boot() {
   connectSSE();
   maybeShowMetaPicker();
   renderGetStarted();
+}
+
+// ---------------- workspace license gating (client side) ----------------
+function hasFeature(k) {
+  if (!state.me || state.me.role === 'admin') return true;
+  const a = state.access;
+  if (!a) return true; // not loaded yet — never hide before we know
+  return (a.features || []).includes(k);
+}
+function applyAccessGating() {
+  const a = state.access;
+  if (!a || !state.me || state.me.role === 'admin') return;
+  const stApp = document.querySelector('#settings-tabs [data-st="appearance"]');
+  if (stApp) stApp.style.display = hasFeature('webchat') ? '' : 'none';
+  const stKb = document.querySelector('#settings-tabs [data-st="kb"]');
+  if (stKb) stKb.style.display = hasFeature('knowledge') ? '' : 'none';
+  const stKeys = document.querySelector('#settings-tabs [data-st="apikeys"]');
+  if (stKeys) stKeys.style.display = hasFeature('api_access') ? '' : 'none';
+  if (state.settingsTab === 'appearance' && !hasFeature('webchat')) state.settingsTab = 'channels';
+  if (state.settingsTab === 'kb' && !hasFeature('knowledge')) state.settingsTab = 'channels';
+  if (state.settingsTab === 'apikeys' && !hasFeature('api_access')) state.settingsTab = 'channels';
+  const ltIntel = document.querySelector('#lm-tabs [data-lt="intel"]');
+  if (ltIntel) {
+    const show = hasFeature('lead_intel');
+    ltIntel.style.display = show ? '' : 'none';
+    if (!show) {
+      document.querySelectorAll('#lm-tabs button').forEach(x => x.classList.toggle('active', x.dataset.lt === 'details'));
+      $('lm-tab-intel').classList.add('hidden');
+      $('lm-tab-details').classList.remove('hidden');
+    }
+  }
+  renderLicenseBanner();
+  updateInboxLock();
+}
+function renderLicenseBanner() {
+  let el = $('license-banner');
+  const a = state.access;
+  const admin = !state.me || state.me.role === 'admin';
+  if (!a || admin) { if (el) el.remove(); return; }
+  const msgs = [];
+  if (a.mode === 'none') msgs.push(['warn', 'This workspace has no active license — contact the platform admin to activate features.']);
+  else if (a.license && a.license.status === 'expired') msgs.push(['warn', 'Your license has expired — AI and licensed features are paused until renewal.']);
+  if (a.aiPaused) msgs.push(['warn', 'AI replies are paused by the platform admin. Your inbox keeps working — every message still arrives here.']);
+  else if (a.aiReason === 'credits_exhausted') msgs.push(['warn', `AI credits exhausted (${a.license.credits_used}/${a.license.credits_total} used). The inbox keeps working — ask the admin for a top-up to resume AI replies.`]);
+  else if (a.aiReason === 'feature_not_in_plan' || a.aiReason === 'ai_not_granted') msgs.push(['', 'AI auto-replies are not included in your current plan — reply manually from the inbox.']);
+  if (!msgs.length) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'license-banner'; $('cview-inbox').prepend(el); }
+  el.innerHTML = msgs.map(([cls, t]) =>
+    `<div class="notice ${cls}" style="margin-bottom:10px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span>${esc(t)}</span></div>`).join('');
+}
+function updateInboxLock() {
+  const locked = state.me && state.me.role !== 'admin' && state.access
+    && state.access.mode === 'licensed' && !hasFeature('combined_inbox');
+  const panes = $('inbox-panes');
+  let note = $('inbox-locked');
+  if (locked) {
+    if (panes) panes.classList.add('hidden');
+    if (!note) { note = document.createElement('div'); note.id = 'inbox-locked'; $('cview-inbox').prepend(note); }
+    note.innerHTML = `<div class="card" style="max-width:560px; margin:40px auto; text-align:center; padding:36px 28px;">
+      <div style="font-weight:800; color:var(--ink); font-size:18px; margin-bottom:8px;">Combined inbox not included</div>
+      <p class="muted small" style="margin-bottom:18px;">Your current plan doesn't include the combined inbox. Contact the platform admin to upgrade your license.</p>
+      <button class="btn-primary" onclick="location.reload()">Recheck license</button></div>`;
+  } else {
+    if (panes) panes.classList.remove('hidden');
+    if (note) note.remove();
+  }
 }
 const ICONS = {
   inbox: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.5L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.5A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.5z"/></svg>',
@@ -218,6 +287,7 @@ const ICONS = {
   help: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
   down: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>',
   card: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/></svg>',
+  key: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="15" r="4.5"/><path d="M11.2 11.8L20 3m-3 3l2.5 2.5M16 7l2 2"/></svg>',
   chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
 };
 function renderNav(items) {
@@ -231,12 +301,12 @@ function renderNav(items) {
   document.querySelectorAll('#bottom-tabs .btab').forEach(b =>
     b.onclick = () => { showView(b.dataset.nav); if (b.dataset.nav === 'admin') loadAdmin(); });
 }
-var VIEW_TITLES = { admin:'Platform Panel', inbox:'Inbox', leads:'Leads', more:'More', products:'Products', settings:'Settings', guide:'Help & Guides' };
+var VIEW_TITLES = { admin:'Platform Panel', inbox:'Inbox', leads:'Leads', more:'More', products:'Products', settings:'Settings', guide:'Help & Guides', broadcast:'Broadcast' };
 function showView(view) {
   state.view = view;
   var _tt = $('topnav-title'); if (_tt) _tt.textContent = VIEW_TITLES[view] || '';
   // products/settings now live under More — keep the More tab highlighted there
-  const navView = (view === 'products' || view === 'settings') ? 'more' : view;
+  const navView = (view === 'products' || view === 'settings' || view === 'broadcast') ? 'more' : view;
   document.querySelectorAll('#nav-links .nav-link').forEach(b => b.classList.toggle('active', b.dataset.nav === navView));
   document.querySelectorAll('#bottom-tabs .btab').forEach(b => b.classList.toggle('active', b.dataset.nav === navView));
   // reset mobile inbox to list when switching views
@@ -245,7 +315,7 @@ function showView(view) {
   const onAdminDash = adminMode && view === 'admin';
   $('view-client').classList.toggle('hidden', onAdminDash);
   $('view-admin').classList.toggle('hidden', !onAdminDash);
-  for (const v of ['inbox', 'leads', 'products', 'settings', 'more', 'guide']) {
+  for (const v of ['inbox', 'leads', 'products', 'settings', 'more', 'guide', 'broadcast']) {
     var _cv = $('cview-' + v);
     _cv.classList.toggle('hidden', view !== v);
     if (view === v && !_cv.classList.contains('hidden')) {
@@ -258,6 +328,7 @@ function showView(view) {
   if (view === 'settings') { switchSettingsTab(state.settingsTab); renderSetupChecklist(); }
   if (view === 'more') renderMore();
   if (view === 'guide') renderGuide();
+  if (view === 'broadcast') renderBroadcast();
 }
 
 // ---------------- command palette (Cmd+K) ----------------
@@ -265,6 +336,7 @@ const CMDK_ACTIONS = [
   { id:'go-inbox', t:'Go to Inbox', s:'View conversations', ic:'M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z', run:() => showView('inbox') },
   { id:'go-leads', t:'Go to Leads', s:'Lead intelligence', ic:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', run:() => showView('leads') },
   { id:'go-more', t:'Go to More', s:'Workspace hub', ic:'M12 5v14M5 12h14', run:() => showView('more') },
+  { id:'go-broadcast', t:'Broadcast', s:'Campaign messages', ic:'M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z', run:() => showView('broadcast'), req:'broadcast' },
   { id:'go-products', t:'Products', s:'Manage catalog', ic:'M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2', run:() => showView('products') },
   { id:'go-settings', t:'Settings', s:'Channels, widget, preferences', ic:'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z', run:() => showView('settings') },
   { id:'add-product', t:'Add product', s:'New catalog item', ic:'M12 5v14M5 12h14', run:() => { showView('products'); setTimeout(() => openProductModal(null), 150); } },
@@ -283,7 +355,8 @@ function closeCmdk() { $('cmdk-bg').classList.add('hidden'); }
 function renderCmdk(q) {
   const ql = q.toLowerCase();
   cmdkItems = CMDK_ACTIONS.filter(a =>
-    !ql || a.t.toLowerCase().includes(ql) || a.s.toLowerCase().includes(ql));
+    (!a.req || hasFeature(a.req)) &&
+    (!ql || a.t.toLowerCase().includes(ql) || a.s.toLowerCase().includes(ql)));
   // admin action only for admins
   if (state.me && state.me.role === 'admin' && (!ql || 'platform panel'.includes(ql))) {
     cmdkItems.push({ id:'go-admin', t:'Platform Panel', s:'Admin dashboard', ic:'M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10z', run:() => showView('admin') });
@@ -355,6 +428,77 @@ function initCmdk() {
 
 // ---------------- more / settings (native) ----------------
 function gotoSettings(tab) { showView('settings'); switchSettingsTab(tab || 'channels'); }
+// ---------------- client: Broadcast campaigns ----------------
+async function renderBroadcast() {
+  if (!hasFeature('broadcast')) {
+    $('bcast-list').innerHTML = `<div class="card"><p class="muted">Broadcast is not included in your plan.</p></div>`;
+    return;
+  }
+  let list = [];
+  try { list = await api('/api/broadcasts'); } catch (e) { $('bcast-list').innerHTML = `<div class="card err">${esc(e.message)}</div>`; return; }
+  const pill = (s) => `<span class="pill ${s === 'sending' ? 'blue' : s === 'done' ? 'green' : s === 'cancelled' ? 'red' : ''}">${esc(s)}</span>`;
+  $('bcast-list').innerHTML = list.map(b => {
+    const pct = b.total ? Math.round(((b.sent + b.failed) / b.total) * 100) : 0;
+    return `<div class="card mb16" data-bcast="${b.id}">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:180px;">
+          <div style="font-weight:800; color:var(--ink);">${esc(b.name)}</div>
+          <div class="muted small">${esc(b.channel === 'all' ? 'All channels' : b.channel)} · ${b.total} recipient${b.total === 1 ? '' : 's'}</div>
+        </div>
+        ${pill(b.status)}
+      </div>
+      <div class="meter" style="margin:10px 0 6px;"><div class="meter-fill" style="width:${pct}%;"></div></div>
+      <div class="muted small" style="margin-bottom:10px;">${b.sent} sent · ${b.failed} failed · ${pct}%</div>
+      <div class="muted small" style="margin-bottom:10px; white-space:pre-wrap;">${esc((b.text || '').slice(0, 220))}${(b.text || '').length > 220 ? '…' : ''}</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        ${b.status === 'draft' ? `<button class="btn-soft" data-bc-aud="${b.id}">Build audience</button>
+          ${b.total > 0 ? `<button class="btn-primary" data-bc-send="${b.id}">Send to ${b.total}</button>` : ''}
+          <button class="btn-soft danger" data-bc-del="${b.id}">Delete</button>` : ''}
+        ${b.status === 'sending' ? `<button class="btn-soft danger" data-bc-cancel="${b.id}">Cancel</button>` : ''}
+        ${(b.status === 'done' || b.status === 'cancelled') ? `<button class="btn-soft danger" data-bc-del="${b.id}">Delete</button>` : ''}
+      </div>
+    </div>`;
+  }).join('') || `<div class="card"><p class="muted">No campaigns yet. Create one to message your customers in bulk.</p></div>`;
+
+  $('bcast-list').querySelectorAll('[data-bc-aud]').forEach(x => x.onclick = async () => {
+    try { const b = await api(`/api/broadcasts/${x.dataset.bcAud}/audience`, { method: 'POST' }); toast(`Audience ready: ${b.stats.total} recipients`); renderBroadcast(); }
+    catch (e) { toast('Failed: ' + e.message, 'err'); }
+  });
+  $('bcast-list').querySelectorAll('[data-bc-send]').forEach(x => x.onclick = async () => {
+    if (!confirm('Start sending this campaign?')) return;
+    try { await api(`/api/broadcasts/${x.dataset.bcSend}/send`, { method: 'POST' }); toast('Campaign sending…'); renderBroadcast(); }
+    catch (e) { toast('Failed: ' + e.message, 'err'); }
+  });
+  $('bcast-list').querySelectorAll('[data-bc-cancel]').forEach(x => x.onclick = async () => {
+    if (!confirm('Cancel this campaign? Remaining recipients will not be messaged.')) return;
+    try { await api(`/api/broadcasts/${x.dataset.bcCancel}/cancel`, { method: 'POST' }); renderBroadcast(); }
+    catch (e) { toast('Failed: ' + e.message, 'err'); }
+  });
+  $('bcast-list').querySelectorAll('[data-bc-del]').forEach(x => x.onclick = async () => {
+    if (!confirm('Delete this campaign?')) return;
+    try { await api(`/api/broadcasts/${x.dataset.bcDel}`, { method: 'DELETE' }); renderBroadcast(); }
+    catch (e) { toast('Failed: ' + e.message, 'err'); }
+  });
+}
+function initBroadcastComposer() {
+  $('btn-bcast-new').onclick = () => { $('bcast-composer').classList.remove('hidden'); };
+  $('bcast-cancel-compose').onclick = () => { $('bcast-composer').classList.add('hidden'); };
+  $('bcast-create').onclick = async () => {
+    const name = $('bcast-name').value.trim() || 'Campaign';
+    const channel = $('bcast-channel').value;
+    const text = $('bcast-text').value.trim();
+    if (!text) { toast('Write the message first.', 'err'); return; }
+    try {
+      const b = await api('/api/broadcasts', { method: 'POST', body: JSON.stringify({ name, channel, text }) });
+      const full = await api(`/api/broadcasts/${b.id}/audience`, { method: 'POST' });
+      $('bcast-name').value = ''; $('bcast-text').value = '';
+      $('bcast-composer').classList.add('hidden');
+      toast(`Draft created — audience: ${full.stats.total} recipients`);
+      renderBroadcast();
+    } catch (e) { toast('Failed: ' + e.message, 'err'); }
+  };
+}
+
 async function renderMore() {
   const me = state.me || {};
   const initial = (me.username || '?')[0].toUpperCase();
@@ -395,12 +539,15 @@ async function renderMore() {
     const ws = [
       { icon: 'boxsm', t: 'My Products', s: 'What you sell — prices & stock', go: () => showView('products') },
       { icon: 'chat', t: 'Connect Channels', s: 'Link WhatsApp, Telegram, website chat', go: () => gotoSettings('channels') },
-      { icon: 'book', t: 'Teach the AI', s: 'Your prices, policies, answers & FAQs', go: () => gotoSettings('kb') },
-      { icon: 'sun', t: 'Chat Widget Style', s: 'How the chat looks on your website', go: () => gotoSettings('appearance') },
+      { icon: 'book', t: 'Teach the AI', s: 'Your prices, policies, answers & FAQs', go: () => gotoSettings('kb'), req: 'knowledge' },
+      { icon: 'sun', t: 'Chat Widget Style', s: 'How the chat looks on your website', go: () => gotoSettings('appearance'), req: 'webchat' },
       { icon: 'save', t: 'Backup My Data', s: 'Save a copy or restore', go: () => gotoSettings('backup') },
+      { icon: 'card', t: 'My Plan', s: 'License, features & usage', go: () => gotoSettings('plan') },
+      { icon: 'key', t: 'API Keys', s: 'Integrate your own systems', go: () => gotoSettings('apikeys'), req: 'api_access' },
+      { icon: 'chat', t: 'Broadcast', s: 'Campaign messages to customers', go: () => showView('broadcast'), req: 'broadcast' },
       { icon: 'help', t: 'Help & Guides', s: 'Step-by-step with pictures', go: () => showView('guide') },
       { icon: 'down', t: 'Install App', s: 'Add Tectobox to your home screen', go: () => promptInstall(), cls: 'pwa-install-btn hidden' },
-    ];
+    ].filter(w => !w.req || hasFeature(w.req));
     $('more-workspace').innerHTML = ws.map((w, i) => `
       <button class="mrow ${w.cls || ''}" data-ws="${i}" style="width:100%;cursor:pointer;text-align:left;">
         <span class="mrow-ic">${ICONS[w.icon] || ''}</span>
@@ -1017,8 +1164,7 @@ const STAGE_PILL = { new: 'gray', contacted: 'blue', qualified: 'blue', intent: 
 const TEMP_PILL = { hot: 'red', warm: 'amber', cold: 'blue' };
 function stagePill(s) { return `<span class="pill ${STAGE_PILL[s] || 'gray'}">${esc(s || 'new')}</span>`; }
 function tempPill(t) {
-  const icon = t === 'hot' ? '🔥 ' : '';
-  return `<span class="pill ${TEMP_PILL[t] || 'blue'}">${icon}${esc(t || 'cold')}</span>`;
+  return `<span class="pill ${TEMP_PILL[t] || 'blue'}">${esc(t || 'cold')}</span>`;
 }
 function scoreBar(score) {
   const s = Math.max(0, Math.min(100, Number(score) || 0));
@@ -1048,7 +1194,7 @@ async function loadIntelSummary() {
     const s = await api('/api/leads/intel-stats');
     const hot = (s.byTemperature && s.byTemperature.hot) || 0;
     const warm = (s.byTemperature && s.byTemperature.warm) || 0;
-    $('lead-intel-summary').textContent = `${s.total || 0} leads · 🔥${hot} hot · ${warm} warm`;
+    $('lead-intel-summary').textContent = `${s.total || 0} leads · ${hot} hot · ${warm} warm`;
   } catch { /* non-fatal */ }
 }
 // Smart segments: customers (bought), potential (hot/warm or engaged, not yet
@@ -1061,7 +1207,7 @@ function leadSegmentOf(l) {
   return 'new';
 }
 function renderLeads() {
-  const segName = { all: 'All', customers: '🛒 Customers', potential: '🎯 Potential', new: '🌱 New leads' };
+  const segName = { all: 'All', customers: 'Customers', potential: 'Potential', new: 'New leads' };
   document.querySelectorAll('#lead-segment-filters button').forEach(b => {
     const f = b.dataset.seg;
     const n = f === 'all' ? state.leads.length : state.leads.filter(l => leadSegmentOf(l) === f).length;
@@ -1070,7 +1216,7 @@ function renderLeads() {
   const rows = state.leads.filter(l => state.leadSegment === 'all' || leadSegmentOf(l) === state.leadSegment);
   document.querySelectorAll('#lead-temp-filters button').forEach(b => {
     const f = b.dataset.lt;
-    const base = f === 'all' ? 'All temps' : f === 'hot' ? '🔥 Hot' : f[0].toUpperCase() + f.slice(1);
+    const base = f === 'all' ? 'All temps' : f[0].toUpperCase() + f.slice(1);
     const n = f === 'all' ? state.leads.length : state.leads.filter(l => (l.temperature || 'cold') === f).length;
     b.textContent = base + (state.leadTemp === 'all' || f === state.leadTemp ? ` (${n})` : '');
   });
@@ -1384,10 +1530,14 @@ function switchSettingsTab(tab) {
   $('stab-kb').classList.toggle('hidden', tab !== 'kb');
   $('stab-appearance').classList.toggle('hidden', tab !== 'appearance');
   $('stab-backup').classList.toggle('hidden', tab !== 'backup');
+  $('stab-plan').classList.toggle('hidden', tab !== 'plan');
+  $('stab-apikeys').classList.toggle('hidden', tab !== 'apikeys');
   if (tab === 'channels') loadConnectors();
   if (tab === 'kb') { switchKbSubTab(state.kbSubTab); loadKnowledge(); }
   if (tab === 'appearance') loadAppearanceTab();
   if (tab === 'backup') loadBackupTab();
+  if (tab === 'plan') renderPlanTab();
+  if (tab === 'apikeys') renderApiKeysTab();
 }
 function switchKbSubTab(sub) {
   state.kbSubTab = sub;
@@ -1584,6 +1734,92 @@ async function ensurePushSubscribed() {
 }
 
 // ---------------- Backup & Google Drive ----------------
+// ---------------- client: My Plan (license sync view) ----------------
+const CLIENT_FEATURES = [
+  { key: 'combined_inbox', label: 'Combined inbox', desc: 'All platforms in one unified inbox' },
+  { key: 'ai_response', label: 'AI auto-replies', desc: 'AI answers customers on every channel' },
+  { key: 'webchat', label: 'Webchat widget', desc: 'Chat bubble for your website' },
+  { key: 'broadcast', label: 'Broadcast', desc: 'Bulk campaign messaging' },
+  { key: 'lead_intel', label: 'Lead intelligence', desc: 'AI lead scoring (Hot/Warm/Cold)' },
+  { key: 'knowledge', label: 'Knowledge base', desc: 'Teach the AI from docs + website' },
+  { key: 'api_access', label: 'API keys & webhooks', desc: 'Public API v1 + outbound webhooks' },
+];
+async function renderPlanTab() {
+  const card = $('plan-card');
+  card.innerHTML = `<div class="card small muted">Loading plan…</div>`;
+  let a = state.access;
+  try { a = await api('/api/client/access'); state.access = a; } catch {}
+  if (!a) { card.innerHTML = `<div class="card small err">Could not load plan details.</div>`; return; }
+  const lic = a.license;
+  const modeLabel = { licensed: 'Licensed plan', legacy: 'Legacy — full access', none: 'No active license', suspended: 'Suspended' }[a.mode] || a.mode;
+  const featRows = CLIENT_FEATURES.map(f => {
+    const on = (a.features || []).includes(f.key);
+    return `<div class="mrow" style="cursor:default;">
+      <span class="mrow-ic" style="color:${on ? 'var(--ok)' : 'var(--muted)'};">${on ? '✓' : '○'}</span>
+      <span class="mrow-tx"><b>${esc(f.label)}</b><small>${esc(f.desc)}</small></span>
+      <span class="pill ${on ? 'green' : ''}">${on ? 'Included' : 'Not included'}</span>
+    </div>`;
+  }).join('');
+  const creditLine = lic && lic.kind === 'credit'
+    ? `<div class="kv"><span>AI credits</span><b>${lic.credits_used} / ${lic.credits_total} used</b></div>
+       <div class="meter" style="margin:6px 0 12px;"><div class="meter-fill" style="width:${Math.min(100, Math.round(lic.credits_used / Math.max(1, lic.credits_total) * 100))}%;"></div></div>` : '';
+  const featCreditLine = lic && lic.kind === 'feature' && lic.feature_grants
+    ? lic.feature_grants.map(g => `<div class="kv"><span>${esc((CLIENT_FEATURES.find(f => f.key === g.feature) || {}).label || g.feature)}</span><b>${g.mode === 'unlimited' ? 'Unlimited' : g.credits_used + ' / ' + g.credits_total + ' used'}</b></div>`).join('') : '';
+  card.innerHTML = `
+    <div class="ttl" style="font-size:17px; margin-bottom:4px;">📋 My Plan</div>
+    <p class="muted small" style="margin-bottom:14px;">What your workspace is licensed for — synced live with the platform.</p>
+    <div class="kv"><span>Status</span><b>${esc(modeLabel)}</b></div>
+    ${lic ? `<div class="kv"><span>Plan</span><b>${esc(lic.plan_name || lic.kind)}</b></div>
+    <div class="kv"><span>License code</span><code>${esc(lic.code)}</code></div>
+    ${lic.kind === 'time' && lic.ends_at ? `<div class="kv"><span>Renews / expires</span><b>${esc(fmtDate(lic.ends_at))}</b></div>` : ''}` : ''}
+    ${a.aiPaused ? `<div class="notice warn" style="margin:10px 0;">AI replies are paused by the platform admin. Your inbox keeps working.</div>` : ''}
+    ${creditLine}${featCreditLine}
+    <hr style="margin:16px 0; border:none; border-top:1px solid var(--line);">
+    <div class="ttl" style="margin-bottom:8px;">Features</div>
+    ${featRows}
+    <p class="muted small" style="margin-top:12px;">Need more? Contact the platform admin to upgrade your license.</p>`;
+}
+// ---------------- client: API keys ----------------
+async function renderApiKeysTab() {
+  const card = $('apikeys-card');
+  if (!hasFeature('api_access')) {
+    card.innerHTML = `<div class="card small muted">API access is not included in your plan.</div>`;
+    return;
+  }
+  card.innerHTML = `<div class="card small muted">Loading API keys…</div>`;
+  let keys = [];
+  try { keys = (await api(`/api/clients/${state.clientId}/api-keys`)).filter(k => !k.revoked); } catch {}
+  card.innerHTML = `
+    <div class="ttl" style="font-size:17px; margin-bottom:4px;">🔑 API Keys</div>
+    <p class="muted small" style="margin-bottom:14px;">Use these keys with the <a href="/api-docs.html" target="_blank" rel="noopener">public API v1</a> (<span class="mono">Authorization: Bearer &lt;key&gt;</span>). The full key is shown once — store it safely.</p>
+    <div style="display:flex; gap:8px; margin-bottom:14px;">
+      <input id="ak-name" class="input no-icon" placeholder="Key name (e.g. website)" style="flex:1; min-width:0;">
+      <button class="btn-primary" id="ak-create">Create key</button>
+    </div>
+    <div id="ak-new"></div>
+    <div id="ak-list">${keys.map(k => `
+      <div class="mrow" style="cursor:default;">
+        <span class="mrow-ic">${ICONS.key || ''}</span>
+        <span class="mrow-tx"><b>${esc(k.name || 'key')}</b><small class="mono">${esc(k.prefix || '')}… · last used ${k.last_used_at ? esc(fmtDT(k.last_used_at)) : 'never'}</small></span>
+        <button class="mini-btn danger" data-ak-del="${k.id}">Revoke</button>
+      </div>`).join('') || '<p class="muted small">No API keys yet.</p>'}</div>`;
+  card.querySelector('#ak-create').onclick = async () => {
+    const name = card.querySelector('#ak-name').value.trim() || 'integration';
+    try {
+      const r = await api(`/api/clients/${state.clientId}/api-keys`, { method: 'POST', body: JSON.stringify({ name }) });
+      // Re-render the list WITHOUT wiping the one-time key display.
+      const onceHtml = `<div class="notice warn" style="margin-bottom:10px;"><span>New key (copy now — shown once):<br><code style="user-select:all;">${esc(r.api_key)}</code></span></div>`;
+      await renderApiKeysTab();
+      const slot = $('ak-new');
+      if (slot) slot.innerHTML = onceHtml;
+    } catch (e) { toast('Failed: ' + e.message, 'err'); }
+  };
+  card.querySelectorAll('[data-ak-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('Revoke this API key?')) return;
+    try { await api(`/api/clients/${state.clientId}/api-keys/${b.dataset.akDel}`, { method: 'DELETE' }); renderApiKeysTab(); }
+    catch (e) { toast('Failed: ' + e.message, 'err'); }
+  });
+}
 async function loadBackupTab() {
   const card = $('backup-card');
   card.innerHTML = `<div class="card small muted">Loading backup status…</div>`;
@@ -2354,21 +2590,18 @@ async function maybeShowMetaPicker() {
 
 // ---------------- admin ----------------
 async function loadAdmin() {
-  const [ov, users, resources] = await Promise.all([
-    api('/api/admin/overview'), api('/api/admin/users'), api('/api/admin/resources'),
+  const [ov, workspaces, resources] = await Promise.all([
+    api('/api/admin/overview'), api('/api/admin/workspaces'), api('/api/admin/resources'),
   ]);
   const stats = [
-    ['Workspaces', ov.workspaces, '', 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z'],
-    ['Active users', ov.activeUsers, '', 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'],
-    ['Channels', ov.channels, '', 'M13 2L3 14h7l-1 8 10-12h-7l1-8z'],
-    ['Connected', ov.connected, 'green', 'M22 11.1V12a10 10 0 1 1-5.93-9.14M22 4L12 14l-3-3'],
-    ['Errored', ov.errored, 'red', 'M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10z'],
+    ['Workspaces', ov.workspaces, ''],
+    ['Channels', ov.channels, ''],
+    ['Connected', ov.connected, 'green'],
+    ['Errored', ov.errored, 'red'],
   ];
-  $('admin-stats').innerHTML = stats.map(([l, v, cls, path]) => `
-    <div class="stat-card"><div class="stat-ic">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>
-    </div><div><div class="lbl">${l}</div><div class="num ${cls}">${v}</div></div></div>`).join('');
-  renderAdminUsers(users, resources);
+  $('admin-stats').innerHTML = stats.map(([l, v, cls]) =>
+    `<div class="hstat"><div class="lbl">${l}</div><div class="num ${cls}">${v}</div></div>`).join('');
+  renderWorkspaces(workspaces);
   renderAdminResources(resources);
   switchAdminTab(state.adminTab);
 }
@@ -2384,56 +2617,304 @@ function renderAdminResources(resources) {
     </tr>`;
   }).join('') || '<tr><td colspan="5" class="tbl-empty">No channel resources yet.</td></tr>';
 }
-function renderAdminUsers(users, resources) {
-  $('users-grid').innerHTML = users.map(u => {
-    const chans = resources.filter(r => r.workspace === u.client_name).length;
-    const isAdmin = u.role === 'admin';
-    const nm = u.client_name || u.username;
+function renderWorkspaces(workspaces) {
+  // Unified workspace cards: license + AI pause + suspend + login toggle,
+  // everything about one workspace in one place.
+  const grid = $('users-grid');
+  grid.innerHTML = workspaces.map(w => {
+    const nm = w.client_name || w.username;
     const hue = avatarHue(nm);
-    return `<div class="user-card fade-in">
-      <div class="top">
-        <span class="admin-avatar" style="background:linear-gradient(135deg,hsl(${hue},65%,55%),hsl(${(hue + 40) % 360},65%,45%));">${esc(avatarInitials(nm))}</span>
-        <div style="min-width:0;">
-          <div class="nm">${esc(nm)}
-            ${isAdmin ? '<span class="pill blue">SUPER ADMIN</span>' : ''}
-          </div>
-          <div class="sub" style="margin:3px 0 0;">@${esc(u.username)} · ${chans} channel(s)</div>
+    const lic = w.license;
+    const licPill = !lic ? '<span class="pill">NO LICENSE</span>'
+      : `<span class="pill ${lic.status === 'active' ? 'green' : lic.status === 'paused' ? 'amber' : 'red'}">${esc(lic.code)}</span>`;
+    const aiPill = w.suspended ? '<span class="pill red">OFF</span>'
+      : w.ai_paused ? '<span class="pill amber">AI PAUSED</span>'
+      : w.ai_allowed ? '<span class="pill green">AI ON</span>' : '<span class="pill amber">AI OFF</span>';
+    const licLine = !lic ? '<span class="muted">Legacy — full access, no license issued</span>'
+      : `<code>${esc(lic.code)}</code><span class="muted">${esc(lic.plan_name || KIND_LABEL[lic.kind] || lic.kind)}${lic.kind === 'time' && lic.ends_at ? ' · until ' + esc(fmtDate(lic.ends_at)) : ''}${lic.kind === 'credit' ? ' · ' + lic.credits_used + '/' + lic.credits_total + ' credits' : ''}</span>`;
+    const delAt = w.delete_scheduled_at ? new Date(w.delete_scheduled_at) : null;
+    const delDays = delAt ? Math.max(0, Math.ceil((delAt - Date.now()) / 86400000)) : 0;
+    const delBanner = delAt ? `<div class="ws-del-banner">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+      <span><b>Permanent deletion in ${delDays} day${delDays === 1 ? '' : 's'}</b><small>Workspace is off. All data will be wiped.</small></span>
+      <button class="btn-soft" data-wsundel="${w.client_id}">Cancel deletion</button>
+    </div>` : '';
+    const budget = w.ai_budget;
+    const budgetText = budget ? `${budget.used}/${budget.cap} AI replies today` : '—';
+    const budgetCtl = budget ? `<div class="ws-ctl">
+          <div><b>AI budget</b><small>${esc(budgetText)} — caps daily AI spend</small></div>
+          <div class="spacer"></div>
+          <button class="btn-soft" data-wsbudget="${w.client_id}" data-cap="${budget.cap}">Edit</button>
+        </div>` : '';
+    return `<div class="ws-card fade-in ${w.suspended ? 'suspended' : ''}">
+      ${delBanner}
+      <div class="ws-top">
+        <span class="ws-avatar" style="background:linear-gradient(135deg,hsl(${hue},65%,55%),hsl(${(hue + 40) % 360},65%,45%));">${esc(avatarInitials(nm))}</span>
+        <div style="min-width:0;flex:1;">
+          <div class="ws-name">${esc(nm)}</div>
+          <div class="ws-sub">@${esc(w.username)} · workspace #${w.client_id || '—'}</div>
         </div>
-        <span style="margin-left:auto; color:var(--green); flex-shrink:0;">${u.active ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5.5"/></svg>' : ''}</span>
       </div>
-      <div class="row" style="margin-top:14px;">
-        ${isAdmin ? '' : `<label class="switch" title="Active"><input type="checkbox" data-utoggle="${u.id}" ${u.active ? 'checked' : ''}><span class="sl"></span></label>
-        <span class="small muted">${u.active ? 'Active' : 'Disabled'}</span>`}
-        <div style="flex:1;"></div>
-        ${isAdmin ? '' : `<button class="btn-soft" data-pwreset="${u.id}">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L21 2m-4 2l3 3"/></svg>
-          Reset password</button>`}
+      <div class="ws-pills">${licPill}${aiPill}${w.active ? '' : '<span class="pill red">LOGIN OFF</span>'}</div>
+      <div class="ws-lic">${licLine}</div>
+      <div class="ws-controls">
+        <div class="ws-ctl">
+          <div><b>AI replies</b><small>${w.ai_paused ? 'Paused — inbox still works' : 'AI answers customers'}</small></div>
+          <div class="spacer"></div>
+          <label class="switch" title="Pause AI for this workspace"><input type="checkbox" data-wsai="${w.client_id}" ${w.ai_paused ? 'checked' : ''} ${w.suspended ? 'disabled' : ''}><span class="sl"></span></label>
+        </div>
+        ${budgetCtl}
+        <div class="ws-ctl">
+          <div><b>Workspace</b><small>${w.suspended ? 'Switched OFF — logins blocked' : 'Running normally'}</small></div>
+          <div class="spacer"></div>
+          <label class="switch" title="Switch workspace off/on"><input type="checkbox" data-wssus="${w.client_id}" ${w.suspended ? '' : 'checked'}><span class="sl"></span></label>
+        </div>
+        <div class="ws-ctl">
+          <div><b>User login</b><small>${w.active ? 'Can sign in' : 'Sign-in disabled'}</small></div>
+          <div class="spacer"></div>
+          <label class="switch" title="Enable/disable login"><input type="checkbox" data-wsuser="${w.id}" ${w.active ? 'checked' : ''}><span class="sl"></span></label>
+        </div>
+      </div>
+      <div class="ws-actions">
+        <button class="btn-soft" data-wsassign="${w.client_id}">Assign license</button>
+        <button class="btn-soft" data-wspw="${w.id}">Reset password</button>
+        ${delAt ? '' : `<button class="btn-soft danger" data-wsdel="${w.client_id}">Delete</button>`}
       </div>
     </div>`;
-  }).join('');
-  document.querySelectorAll('[data-utoggle]').forEach(t => t.onchange = async () => {
-    try { await api(`/api/admin/users/${t.dataset.utoggle}/toggle`, { method: 'POST' }); loadAdmin(); }
+  }).join('') || '<div class="card"><p class="muted">No workspaces yet.</p></div>';
+  document.querySelectorAll('[data-wsai]').forEach(t => t.onchange = async () => {
+    try {
+      await api(`/api/admin/clients/${t.dataset.wsai}/ai-pause`, { method: 'POST', body: JSON.stringify({ paused: t.checked }) });
+      toast(t.checked ? 'AI paused — inbox keeps working' : 'AI resumed');
+      loadAdmin();
+    } catch (e) { toast('Failed: ' + e.message, 'err'); loadAdmin(); }
+  });
+  document.querySelectorAll('[data-wssus]').forEach(t => t.onchange = async () => {
+    const turnOff = !t.checked;
+    if (turnOff && !confirm('Switch this workspace OFF? Its users will be signed out immediately and the widget, API and AI stop working. Data is kept.')) { t.checked = true; return; }
+    try {
+      await api(`/api/admin/clients/${t.dataset.wssus}/suspend`, { method: 'POST', body: JSON.stringify({ suspended: turnOff }) });
+      toast(turnOff ? 'Workspace switched OFF' : 'Workspace switched ON');
+      loadAdmin();
+    } catch (e) { toast('Failed: ' + e.message, 'err'); loadAdmin(); }
+  });
+  document.querySelectorAll('[data-wsuser]').forEach(t => t.onchange = async () => {
+    try { await api(`/api/admin/users/${t.dataset.wsuser}/toggle`, { method: 'POST' }); loadAdmin(); }
     catch (e) { toast('Failed: ' + e.message, 'err'); loadAdmin(); }
   });
-  document.querySelectorAll('[data-pwreset]').forEach(b => b.onclick = () => {
-    const u = users.find(x => String(x.id) === b.dataset.pwreset);
-    state.pwUserId = u.id;
-    $('pw-sub').textContent = `Set a new password for @${u.username}.`;
+  document.querySelectorAll('[data-wsbudget]').forEach(b => b.onclick = async () => {
+    const cur = b.dataset.cap;
+    const v = prompt(`Daily AI reply budget for this workspace (used to cap AI spend):`, cur);
+    if (v === null) return;
+    const cap = Math.floor(Number(v));
+    if (!Number.isFinite(cap) || cap < 0 || cap > 100000) { toast('Enter a number 0–100000', 'err'); return; }
+    try {
+      await api(`/api/admin/clients/${b.dataset.wsbudget}/ai-budget`, { method: 'PUT', body: JSON.stringify({ cap }) });
+      toast(`AI budget set to ${cap}/day`);
+      loadAdmin();
+    } catch (e) { toast('Failed: ' + e.message, 'err'); }
+  });
+  document.querySelectorAll('[data-wsassign]').forEach(b => b.onclick = () => openAssignModal(Number(b.dataset.wsassign), workspaces));
+  document.querySelectorAll('[data-wspw]').forEach(b => b.onclick = () => {
+    state.pwUserId = Number(b.dataset.wspw);
+    const w = workspaces.find(x => x.id === state.pwUserId);
+    $('pw-sub').textContent = `Set a new password for @${w ? w.username : ''}.`;
     $('pw-new').value = '';
     $('pw-modal').classList.remove('hidden');
   });
+  document.querySelectorAll('[data-wsdel]').forEach(b => b.onclick = async () => {
+    const w = workspaces.find(x => x.client_id === Number(b.dataset.wsdel));
+    const name = w ? (w.client_name || w.username) : ('#' + b.dataset.wsdel);
+    if (!confirm(`Delete workspace "${name}"?\n\nIt switches OFF immediately and is permanently wiped after 15 days. You can cancel anytime during the wait.`)) return;
+    if (!confirm(`Last check — really queue "${name}" for deletion?`)) return;
+    try {
+      await api(`/api/admin/clients/${b.dataset.wsdel}/delete-schedule`, { method: 'POST' });
+      toast('Deletion scheduled — 15 day grace period');
+      loadAdmin();
+    } catch (e) { toast('Failed: ' + e.message, 'err'); }
+  });
+  document.querySelectorAll('[data-wsundel]').forEach(b => b.onclick = async () => {
+    if (!confirm('Cancel the scheduled deletion? The workspace will be switched back ON.')) return;
+    try {
+      await api(`/api/admin/clients/${b.dataset.wsundel}/delete-cancel`, { method: 'POST' });
+      toast('Deletion cancelled — workspace restored');
+      loadAdmin();
+    } catch (e) { toast('Failed: ' + e.message, 'err'); }
+  });
 }
+function fmtDate(iso) {
+  try { return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); }
+  catch { return iso; }
+}
+
 function switchAdminTab(tab) {
   state.adminTab = tab;
   document.querySelectorAll('#admin-tabs button').forEach(b => b.classList.toggle('active', b.dataset.at === tab));
   $('atab-resources').classList.toggle('hidden', tab !== 'resources');
   $('atab-users').classList.toggle('hidden', tab !== 'users');
+  $('atab-licensing').classList.toggle('hidden', tab !== 'licensing');
   $('atab-config').classList.toggle('hidden', tab !== 'config');
   $('atab-notify').classList.toggle('hidden', tab !== 'notify');
   $('atab-audit').classList.toggle('hidden', tab !== 'audit');
   if (tab === 'config') loadAdminConfig();
   if (tab === 'notify') loadNotifyTab();
   if (tab === 'audit') loadAdminAudit();
+  if (tab === 'licensing') loadAdminLicensing();
+}
+
+// ---------------- admin: plans & licenses (simple) ----------------
+let _licFeatures = null;
+async function licFeatureList() {
+  if (!_licFeatures) _licFeatures = await api('/api/admin/features');
+  return _licFeatures;
+}
+const KIND_LABEL = { time: 'Package', credit: 'Credit System', feature: 'Feature Based' };
+const PERIOD_LABEL = { monthly: 'Monthly', quarterly: '3-Monthly', yearly: 'Yearly' };
+let _createMode = 'package';   // 'package' | 'credit'
+let _createPeriod = 'monthly';
+
+async function loadAdminLicensing() {
+  const [features, plans, licenses] = await Promise.all([
+    licFeatureList(), api('/api/admin/plans'), api('/api/admin/licenses'),
+  ]);
+  renderCreateSection(features);
+  renderPlanCards(plans);
+  renderLicensesTable(licenses);
+}
+function featureCheckGrid(elId, features, checked) {
+  $(elId).innerHTML = features.map(f => `
+    <label class="check"><input type="checkbox" value="${esc(f.key)}" ${checked ? 'checked' : ''}>
+      <span><b>${esc(f.label)}</b><small>${esc(f.desc)}</small></span></label>`).join('');
+}
+function checkedFeatures(elId) {
+  return [...document.querySelectorAll(`#${elId} input:checked`)].map(i => i.value);
+}
+function planKindMeta(p) {
+  if (p.kind === 'time') return PERIOD_LABEL[p.billing_period] || 'Monthly';
+  if (p.kind === 'credit') return `${p.credits_included} credits`;
+  return 'Per-feature';
+}
+// --- single Create: Package | Credit System toggle, form adapts ---
+function renderCreateSection(features) {
+  featureCheckGrid('crt-features', features, true);
+  document.querySelectorAll('#crt-mode .mode-opt').forEach(b => b.onclick = () => {
+    _createMode = b.dataset.mode;
+    document.querySelectorAll('#crt-mode .mode-opt').forEach(x => x.classList.toggle('sel', x === b));
+    $('crt-period-row').classList.toggle('hidden', _createMode !== 'package');
+    $('crt-credits-row').classList.toggle('hidden', _createMode !== 'credit');
+  });
+  document.querySelectorAll('#crt-period-chips .chip').forEach(b => b.onclick = () => {
+    _createPeriod = b.dataset.p;
+    document.querySelectorAll('#crt-period-chips .chip').forEach(x => x.classList.toggle('sel', x === b));
+  });
+  $('crt-msg').textContent = '';
+  $('btn-create').onclick = async () => {
+    const name = $('crt-name').value.trim();
+    if (!name) { $('crt-msg').textContent = 'Give it a name first.'; return; }
+    const body = _createMode === 'package'
+      ? { name, kind: 'time', billing_period: _createPeriod, features: checkedFeatures('crt-features'), price_bdt: Number($('crt-price').value) || 0 }
+      : { name, kind: 'credit', credits_included: Math.max(1, Number($('crt-credits').value) || 0), features: checkedFeatures('crt-features'), price_bdt: Number($('crt-price').value) || 0 };
+    if (_createMode === 'credit' && !(Number($('crt-credits').value) > 0)) { $('crt-msg').textContent = 'Enter how many credits.'; return; }
+    $('crt-msg').textContent = 'Creating…';
+    try {
+      await api('/api/admin/plans', { method: 'POST', body: JSON.stringify(body) });
+      $('crt-name').value = ''; $('crt-credits').value = ''; $('crt-price').value = '';
+      $('crt-msg').textContent = '';
+      toast('Created'); loadAdminLicensing();
+    } catch (e) { $('crt-msg').textContent = 'Failed: ' + e.message; }
+  };
+}
+// --- existing plans ---
+function renderPlanCards(plans) {
+  $('plans-grid').innerHTML = plans.map(p => `
+    <div class="plan-card">
+      <div class="pn">${esc(p.name)}</div>
+      <div class="prow"><span class="pill blue">${esc(KIND_LABEL[p.kind] || p.kind)}</span>
+        <span class="pill">${esc(planKindMeta(p))}</span>${p.active ? '' : '<span class="pill red">OFF</span>'}</div>
+      <div class="pmeta">${(p.features || []).length} features${p.price_bdt ? ' · ৳' + esc(String(p.price_bdt)) : ''}</div>
+      <button class="btn-soft danger pdel" data-plandel="${p.id}">Delete plan</button>
+    </div>`).join('') || '<div class="card"><p class="muted">No plans yet — create one above.</p></div>';
+  document.querySelectorAll('[data-plandel]').forEach(b => b.onclick = async () => {
+    if (!confirm('Delete this plan? Issued licenses keep working.')) return;
+    try { await api(`/api/admin/plans/${b.dataset.plandel}`, { method: 'DELETE' }); loadAdminLicensing(); }
+    catch (e) { toast('Failed: ' + e.message, 'err'); }
+  });
+}
+// --- assign license from a workspace card ---
+async function openAssignModal(clientId, workspaces) {
+  const w = workspaces.find(x => x.client_id === clientId);
+  const nm = w ? (w.client_name || w.username) : ('#' + clientId);
+  $('assign-sub').textContent = `Pick a plan for "${nm}". It becomes the workspace's license right away.`;
+  const cur = w && w.license
+    ? `<div class="ws-lic"><code>${esc(w.license.code)}</code><span class="muted">${esc(w.license.plan_name || '')} · ${esc(w.license.status)}</span></div>`
+    : '<div class="ws-lic"><span class="muted">No license yet</span></div>';
+  $('assign-current').innerHTML = cur;
+  let plans = [];
+  try { plans = (await api('/api/admin/plans')).filter(p => p.active); }
+  catch (e) { toast('Failed to load plans: ' + e.message, 'err'); return; }
+  $('assign-plans').innerHTML = plans.map(p => `
+    <div class="plan-card" style="margin-bottom:10px;">
+      <div class="pn">${esc(p.name)}</div>
+      <div class="prow"><span class="pill blue">${esc(KIND_LABEL[p.kind] || p.kind)}</span>
+        <span class="pill">${esc(planKindMeta(p))}</span></div>
+      <div class="pmeta">${(p.features || []).length} features${p.price_bdt ? ' · ৳' + esc(String(p.price_bdt)) : ''}</div>
+      <button class="btn-primary btn-soft-assign" data-assign="${p.id}" style="width:100%;">Assign this plan</button>
+    </div>`).join('') || '<p class="muted">No plans yet — create one in Plans & licenses.</p>';
+  document.querySelectorAll('[data-assign]').forEach(b => b.onclick = async () => {
+    const p = plans.find(x => x.id === Number(b.dataset.assign));
+    if (!confirm(`Assign "${p ? p.name : ''}" to "${nm}"?` + (w && w.license ? '\nThe current license will be retired.' : ''))) return;
+    try {
+      const lic = await api(`/api/admin/clients/${clientId}/assign-license`, { method: 'POST', body: JSON.stringify({ planId: b.dataset.assign }) });
+      $('assign-modal').classList.add('hidden');
+      toast('Assigned: ' + lic.code);
+      loadAdmin();
+    } catch (e) { toast('Failed: ' + e.message, 'err'); }
+  });
+  $('assign-modal').classList.remove('hidden');
+}
+// --- licenses table ---
+function licenseValidity(l) {
+  if (l.kind === 'time') {
+    if (!l.ends_at) return '—';
+    const left = Math.max(0, Math.ceil((new Date(l.ends_at) - Date.now()) / 86400000));
+    return `until ${fmtDate(l.ends_at)} · ${left}d left`;
+  }
+  if (l.kind === 'credit') return `${l.credits_used}/${l.credits_total} used`;
+  return (l.feature_grants || []).map(g =>
+    `${esc(g.feature)}: ${g.mode === 'unlimited' ? '∞' : g.credits_used + '/' + g.credits_total}`).join('<br>') || '—';
+}
+function renderLicensesTable(licenses) {
+  const pill = (s) => `<span class="pill ${s === 'active' ? 'green' : s === 'paused' ? 'amber' : 'red'}">${esc(s.toUpperCase())}</span>`;
+  $('licenses-body').innerHTML = licenses.map(l => `
+    <tr>
+      <td data-label="Code"><b style="color:var(--ink); font-family:monospace;">${esc(l.code)}</b></td>
+      <td data-label="Workspace" class="muted">#${l.client_id} · ${esc(l.client_name || '—')}</td>
+      <td data-label="Plan" class="muted">${esc(l.plan_name || 'Custom')} <span class="pill blue" style="font-size:10px;">${esc(KIND_LABEL[l.kind] || l.kind)}</span></td>
+      <td data-label="Validity / Credits" class="small muted">${licenseValidity(l)}</td>
+      <td data-label="Status">${pill(l.status)}</td>
+      <td data-label=""><div style="display:flex; gap:6px; flex-wrap:wrap;">
+        ${l.status === 'active' ? `<button class="btn-soft" data-licpause="${l.id}">Pause</button>` : ''}
+        ${l.status === 'paused' ? `<button class="btn-soft" data-licresume="${l.id}">Resume</button>` : ''}
+        ${l.kind !== 'time' ? `<button class="btn-soft" data-lictopup="${l.id}">+ Credits</button>` : ''}
+        ${['active', 'paused'].includes(l.status) ? `<button class="btn-soft danger" data-liccancel="${l.id}">Cancel</button>` : ''}
+      </div></td>
+    </tr>`).join('') || '<tr><td colspan="6" class="tbl-empty">No licenses issued yet.</td></tr>';
+  document.querySelectorAll('[data-licpause]').forEach(b => b.onclick = () => licAction(b.dataset.licpause, 'pause'));
+  document.querySelectorAll('[data-licresume]').forEach(b => b.onclick = () => licAction(b.dataset.licresume, 'resume'));
+  document.querySelectorAll('[data-liccancel]').forEach(b => b.onclick = async () => {
+    if (!confirm('Cancel this license? The workspace loses its licensed features.')) return;
+    licAction(b.dataset.liccancel, 'cancel');
+  });
+  document.querySelectorAll('[data-lictopup]').forEach(b => b.onclick = async () => {
+    const n = prompt('Add how many credits?');
+    if (!n || !(Number(n) > 0)) return;
+    try { await api(`/api/admin/licenses/${b.dataset.lictopup}/topup`, { method: 'POST', body: JSON.stringify({ credits: Number(n) }) }); loadAdminLicensing(); }
+    catch (e) { toast('Failed: ' + e.message, 'err'); }
+  });
+}
+async function licAction(id, action) {
+  try { await api(`/api/admin/licenses/${id}/${action}`, { method: 'POST' }); loadAdminLicensing(); }
+  catch (e) { toast('Failed: ' + e.message, 'err'); }
 }
 async function loadNotifyTab() {
   const sel = $('nt-target');
@@ -2442,10 +2923,11 @@ async function loadNotifyTab() {
     const users = await api('/api/admin/users');
     const seen = {};
     (users.users || users || []).forEach(u => {
-      if (u.role === 'admin' || !u.clientId || seen[u.clientId]) return;
-      seen[u.clientId] = 1;
+      const cid = u.client_id || u.clientId;
+      if (u.role === 'admin' || !cid || seen[cid]) return;
+      seen[cid] = 1;
       const o = document.createElement('option');
-      o.value = u.clientId; o.textContent = 'Workspace #' + u.clientId + ' (' + (u.username || '') + ')';
+      o.value = cid; o.textContent = 'Workspace #' + cid + ' (' + (u.username || '') + ')';
       sel.appendChild(o);
     });
   } catch {}
@@ -2477,6 +2959,60 @@ async function loadAdminConfig() {
   $('admin-webhook-urls').innerHTML = `
     <div class="code-box"><span class="cl">Meta (Messenger + Instagram)</span>${esc(urls.meta || '—')}</div>
     <div class="code-box"><span class="cl">Telegram bot</span>${esc(urls.telegram || '—')}</div>`;
+  loadTotpBox();
+}
+// ---- admin two-factor (TOTP) ----
+async function loadTotpBox() {
+  const box = $('totp-box');
+  if (!box) return;
+  let st = {};
+  try { st = await api('/api/admin/totp/status'); } catch { box.innerHTML = '<div class="muted small">Could not load 2FA status.</div>'; return; }
+  if (st.enabled) {
+    box.innerHTML = `
+      <div class="kv"><span class="k"><b style="color:var(--ink);">Two-factor is ON</b><br><span class="small">Login requires your authenticator code.</span></span>
+      <span class="pill pill-on">Enabled</span></div>
+      <div class="frow mt16"><label>Current password <span class="muted small">(to disable 2FA)</span></label>
+      <input id="totp-disable-pw" class="input no-icon" type="password" autocomplete="current-password"></div>
+      <button class="btn-ghost" id="btn-totp-disable">Disable two-factor</button>
+      <div id="totp-msg" class="small muted mt8"></div>`;
+    $('btn-totp-disable').onclick = async () => {
+      const pw = $('totp-disable-pw').value;
+      if (!pw) { $('totp-msg').textContent = 'Enter your password first.'; return; }
+      try {
+        await api('/api/admin/totp/disable', { method: 'POST', body: JSON.stringify({ password: pw }) });
+        toast('Two-factor disabled', 'ok'); loadTotpBox();
+      } catch (e) { $('totp-msg').textContent = 'Failed: ' + e.message; }
+    };
+    return;
+  }
+  box.innerHTML = `
+    <div class="kv"><span class="k"><b style="color:var(--ink);">Two-factor is OFF</b><br><span class="small">Add an extra login step for this admin account.</span></span>
+    <span class="pill">Disabled</span></div>
+    <div class="frow mt16"><label>Current password <span class="muted small">(to start setup)</span></label>
+    <input id="totp-setup-pw" class="input no-icon" type="password" autocomplete="current-password"></div>
+    <button class="btn-primary mt16" id="btn-totp-setup">Set up two-factor</button>
+    <div id="totp-setup-area" class="mt16"></div>
+    <div id="totp-msg" class="small muted mt8"></div>`;
+  $('btn-totp-setup').onclick = async () => {
+    const pw = $('totp-setup-pw').value;
+    if (!pw) { $('totp-msg').textContent = 'Enter your password first.'; return; }
+    try {
+      const s = await api('/api/admin/totp/setup', { method: 'POST', body: JSON.stringify({ password: pw }) });
+      $('totp-setup-area').innerHTML = `
+        <p class="small mb16">Add this key to your authenticator app (Google Authenticator, 1Password, …), then enter the 6-digit code to confirm.</p>
+        <div class="code-box mb16"><span class="cl">Manual key</span>${esc(s.secret)}</div>
+        <div class="frow"><label>6-digit code</label><input id="totp-confirm-code" class="input no-icon" inputmode="numeric" maxlength="6" placeholder="123456"></div>
+        <button class="btn-primary" id="btn-totp-enable">Verify & enable</button>`;
+      $('btn-totp-enable').onclick = async () => {
+        const token = $('totp-confirm-code').value.trim();
+        if (!/^\d{6}$/.test(token)) { $('totp-msg').textContent = 'Enter the 6-digit code.'; return; }
+        try {
+          await api('/api/admin/totp/enable', { method: 'POST', body: JSON.stringify({ token }) });
+          toast('Two-factor enabled', 'ok'); loadTotpBox();
+        } catch (e) { $('totp-msg').textContent = 'Failed: ' + e.message; }
+      };
+    } catch (e) { $('totp-msg').textContent = 'Setup failed: ' + e.message; }
+  };
 }
 async function saveAdminConfig() {
   try {
@@ -2552,6 +3088,30 @@ function connectSSE() {
           if (state.view === 'inbox') renderInboxEmpty();
         }
         if (state.view === 'admin') loadAdmin();
+      } else if (evt.type === 'access_changed') {
+        // License/access sync: the admin just changed what a workspace may
+        // do (license assigned/paused/cancelled, AI paused, suspended…).
+        // Only the affected workspace's own client acts on it — the admin
+        // panel has its own refresh and must never self-logout from this.
+        const isAdmin = !state.me || state.me.role === 'admin';
+        const notOurs = evt.clientId != null && String(evt.clientId) !== String(state.clientId);
+        if (!isAdmin && !notOurs) {
+          try {
+            if (evt.access) state.access = evt.access;
+            else state.access = await api('/api/client/access');
+          } catch { try { state.access = await api('/api/client/access'); } catch {} }
+          if (state.access && state.access.suspended) {
+            // Workspace switched off: the session is dead server-side too.
+            toast('This workspace has been suspended by the platform admin.', 'err');
+            try { await api('/api/auth/logout', { method: 'POST' }); } catch {}
+            location.href = '/app';
+            return;
+          }
+          applyAccessGating();
+          toast('Your plan was updated — features refreshed.', '');
+        }
+      } else if (evt.type === 'broadcast_progress') {
+        if (state.view === 'broadcast') renderBroadcast();
       } else if (evt.type === 'lead') {
         if (String(evt.clientId) === String(state.clientId)) {
           if (state.view === 'leads') loadLeads();
@@ -2586,9 +3146,19 @@ document.addEventListener('DOMContentLoaded', () => {
   initOffline();
   initModals();
   initPwa();
+  initBroadcastComposer();
   // draft persistence
   $('msg-input').addEventListener('input', () => { saveDraft(); autosizeComposer(); updateSendBtn(); });
-  // login
+  // login (supports CAPTCHA after repeated failures + TOTP for admins)
+  const refreshLoginCaptcha = async () => {
+    try {
+      const r = await fetch('/api/captcha');
+      const c = await r.json();
+      $('login-captcha-img').innerHTML = c.svg || '';
+      $('login-captcha-token').value = c.token || '';
+      $('login-captcha-answer').value = '';
+    } catch {}
+  };
   $('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const err = $('login-err');
@@ -2598,13 +3168,37 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!username || !password) { err.textContent = 'Enter your username and password.'; err.classList.add('show'); return; }
     $('login-btn').disabled = true;
     try {
+      const body = { username, password };
+      const totpEl = $('login-totp'), capWrap = $('login-captcha-wrap');
+      if (totpEl && !$('login-totp-wrap').classList.contains('hidden') && totpEl.value.trim()) body.totp = totpEl.value.trim();
+      if (capWrap && !capWrap.classList.contains('hidden')) {
+        body.captcha_token = $('login-captcha-token').value;
+        body.captcha_answer = $('login-captcha-answer').value.trim();
+      }
       const res = await fetch('/api/auth/login', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Login failed');
+      if (!res.ok) {
+        if (data.totp_required) {
+          $('login-totp-wrap').classList.remove('hidden');
+          $('login-totp').focus();
+          throw new Error(data.error || 'Enter your two-factor code.');
+        }
+        if (data.captcha_required) {
+          $('login-captcha-wrap').classList.remove('hidden');
+          await refreshLoginCaptcha();
+          $('login-captcha-answer').focus();
+          throw new Error(data.error || 'Please solve the CAPTCHA.');
+        }
+        if (capWrap && !capWrap.classList.contains('hidden')) await refreshLoginCaptcha();
+        throw new Error(data.error || 'Login failed');
+      }
       $('login-password').value = '';
+      if (totpEl) totpEl.value = '';
+      $('login-totp-wrap').classList.add('hidden');
+      $('login-captcha-wrap').classList.add('hidden');
       await boot();
     } catch (e2) {
       err.textContent = e2.message;
@@ -2776,6 +3370,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) { toast('Could not create: ' + e.message, 'err'); }
   };
   $('btn-close-pw').onclick = () => $('pw-modal').classList.add('hidden');
+  $('btn-close-assign').onclick = () => $('assign-modal').classList.add('hidden');
   $('btn-save-pw').onclick = async () => {
     const password = $('pw-new').value;
     if (!password || password.length < 4) return toast('Password must be at least 4 characters', 'err');
@@ -2788,7 +3383,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('btn-save-config').onclick = saveAdminConfig;
 
   // modal backdrop click closes (except QR which cancels the flow explicitly)
-  for (const id of ['lead-modal', 'product-modal', 'user-modal', 'pw-modal', 'meta-pick-modal']) {
+  for (const id of ['lead-modal', 'product-modal', 'user-modal', 'pw-modal', 'meta-pick-modal', 'assign-modal']) {
     $(id).addEventListener('click', e => { if (e.target.id === id) $(id).classList.add('hidden'); });
   }
 
