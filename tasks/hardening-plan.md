@@ -1,0 +1,39 @@
+# Execution Todo List: Codebase Hardening & Gap Remediation
+
+- [x] Priority 1: Secure Repository Contents & Audit Git History
+  - [x] Audit tracked files vs sensitive extensions (`.env`, `.db`, `.wal`, `.shm`, `.pem`, `sessions/`)
+  - [x] Check git history for committed secrets without printing secret values
+  - [x] Verify local `.gitignore` rules prevent staging/committing local artifacts
+  - [x] Generate security summary report of local credentials and verification
+- [x] Priority 2: Fix Go Ingress Reliability & Mandatory Routing
+  - [x] Add `mandatory=true` and return listener on RabbitMQ channel publish
+  - [x] Return HTTP 500 / error if message is unroutable or publisher confirmation rejected
+  - [x] Add event validation / normalization against typed contracts
+  - [x] Add tests for unroutable events, invalid payloads, publish failures
+- [x] Priority 3: Fix Worker Delivery Safety & Session Leases
+  - [x] Implement Redis-backed session lease with fencing token for Telegram worker
+  - [x] Stop worker processing on lease renewal loss
+  - [x] Enforce retry limits with DLQ routing for transient message send failures
+  - [x] Prevent ambiguous send duplication with idempotency tracking
+- [x] Priority 4: Harden Production Configuration
+  - [x] Remove hardcoded fallback passwords in `infra/docker-compose.prod.yml`
+  - [x] Remove public port mapping (5432, 6379, 5672) for DB/Redis/RabbitMQ in production compose
+  - [x] Require environment variables for database/service credentials
+  - [x] Pin image tags to immutable digests or version variables (no mutable defaults)
+- [x] Priority 5: Add CI Dockerfile.dev & Strengthen CI Workflow
+  - [x] Create `infra/Dockerfile.dev` for containerized CI runs (Node 22 + Go toolchain)
+  - [x] Update `.github/workflows/ci.yml` to run `go test ./...`, TypeScript builds, and test suites
+  - [x] Ensure CI runs in strict `pnpm` mode without local builds on production targets
+- [x] Priority 6: Make SQLite-to-Postgres Migration Resumable & Verifiable
+  - [x] Add step-level checkpointing table (`_migration_checkpoints`) in PostgreSQL
+  - [x] Make inserts idempotent (`ON CONFLICT DO NOTHING` or batch reconciliation)
+  - [x] Add automated pre/post row count verification per table
+  - [x] Fail with nonzero exit code on errors; update cutover runbook
+- [x] Priority 7: Implement Core API Modules & Tenant Isolation
+  - [x] Implement `AuthModule` controllers/services (JWT login, 2FA, session check)
+  - [x] Implement `InboxModule` controllers/services (threads, messages, replies scoped to `request.tenantId`)
+  - [x] Implement `CatalogModule` controllers/services (products CRUD scoped to `request.tenantId`)
+  - [x] Bind `TenantGuard` and test cross-tenant isolation
+- [x] Priority 8: Reconcile Documentation & Plans
+  - [x] Update `TODO.md`, `handoff.md`, `AGENTS.md`, and `plans/` with accurate statuses
+  - [x] Verify monorepo builds cleanly with exit code 0 under `pnpm`

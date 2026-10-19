@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tectobox — AI-Powered Unified Inbox</title>
+<link rel="icon" type="image/png" href="/img/tectobox-icon.png?v=20261006l">
+    <link rel="apple-touch-icon" href="/img/apple-touch-icon.png?v=20261006l">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0a0a0b">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Tectobox">
+<link rel="stylesheet" href="/styles.css?v=20261020_topbar_restored">
+<script src="/theme-init.js?v=20261006v"></script>
+</head>
+<body>
+  <div id="preloader" aria-hidden="true">
+    <div class="preloader-inner">
+      <img src="/img/tectobox-icon.png?v=20261006l" alt="" class="preloader-logo">
+      <div class="preloader-name">Tectobox</div>
+      <div class="preloader-bar"><span></span></div>
+    </div>
+  </div>
+
+<!-- ================= LOGIN ================= -->
+<div id="login-view" class="login-bg">
+  <button class="theme-toggle login-theme-toggle" id="btn-theme-login" aria-label="Toggle theme" title="Light / dark mode">
+    <svg id="icon-sun-login" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M2 12h2.5M19.5 12H22M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+    <svg id="icon-moon-login" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+  </button>
+  <div class="login-card card fade-in">
+    <div class="login-logo" style="background:none;box-shadow:none">
+      <img src="/img/tectobox-logo.png?v=20261006l" alt="Tectobox" class="brand-pill" style="height:64px;width:auto">
+    </div>
+    <p class="login-sub">AI-Powered Unified Inbox</p>
+    <div id="login-err" class="login-err"></div>
+    <form id="login-form" autocomplete="off">
+      <div class="field">
+        <label for="login-username">Username</label>
+        <div class="input-wrap">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>
+          <input id="login-username" class="input" type="text" placeholder="your-username" autocomplete="username">
+        </div>
+      </div>
+      <div class="field">
+        <label for="login-password">Password</label>
+        <div class="input-wrap">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+          <input id="login-password" class="input" type="password" placeholder="••••••••" autocomplete="current-password">
+        </div>
+      </div>
+      <div class="field hidden" id="login-totp-wrap">
+        <label for="login-totp">Two-factor code</label>
+        <div class="input-wrap">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+          <input id="login-totp" class="input" type="text" inputmode="numeric" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6">
+        </div>
+      </div>
+      <div class="field hidden" id="login-captcha-wrap">
+        <label for="login-captcha-answer">Security check</label>
+        <div id="login-captcha-img" style="margin-bottom:8px;border-radius:8px;overflow:hidden;display:inline-block"></div>
+        <input type="hidden" id="login-captcha-token">
+        <div class="input-wrap">
+          <input id="login-captcha-answer" class="input" type="text" placeholder="Type the characters above" autocomplete="off" maxlength="6">
+        </div>
+      </div>
+      <button type="submit" id="login-btn" class="btn-primary btn-block">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M17.5 19a4.5 4.5 0 0 0 .4-8.98A6 6 0 0 0 6.2 8.6 4.8 4.8 0 0 0 6.5 19h11z"/></svg>
+        Sign in
+      </button>
+    </form>
+    <div class="login-brand-box">Tectobox · Powered by <a href="https://tect0nic.com" target="_blank" rel="noopener">Tectonic</a></div>
+    <div style="text-align:center;margin-top:12px;"><a href="/welcome" style="font-size:13.5px;color:var(--muted);text-decoration:none;">New here? See what Tectobox does →</a></div>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app-view" class="hidden">
+  <header class="topnav">
+    <div class="brand">
+      <img src="/img/tectobox-logo.png?v=20261006l" alt="Tectobox" class="brand-pill" style="height:36px;width:auto">
+    </div>
+    <nav class="nav-links" id="nav-links"></nav>
+    <div class="topnav-title" id="topnav-title"></div>
+    <div class="nav-right">
+      <button class="theme-toggle" id="btn-theme" aria-label="Toggle theme" title="Light / dark mode">
+        <svg id="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M2 12h2.5M19.5 12H22M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+        <svg id="icon-moon" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+      <button class="link-btn hidden" id="btn-refresh">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>
+        Refresh
+      </button>
+      <span class="user-chip"><span class="avatar" id="user-avatar">?</span><span id="user-name">…</span></span>
+      <button class="link-btn" id="btn-signout">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        Sign out
+      </button>
+    </div>
+  </header>
+
+  <!-- ===== CLIENT ===== -->
+  <div id="view-client" class="hidden">
+
+    <!-- Inbox -->
+    <div id="cview-inbox" class="page hidden" style="max-width:1440px;">
+      <div id="inbox-empty"></div>
+      <div id="inbox-panes" class="inbox">
+        <aside class="pane list-pane">
+          <div class="pane-head inbox-toolbar">
+            <div class="list-title"><span>Chats</span></div>
+            <div class="toolbar-actions">
+              <div class="pop-wrap">
+                <button class="icon-btn" id="btn-filter" title="Filter by channel" aria-label="Filter by channel">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.5V19l4 2v-8.5L22 3z"/></svg>
+                  <span class="fdir-dot hidden" id="filter-dot"></span>
+                </button>
+                <div class="pop hidden" id="filter-pop" role="menu"></div>
+              </div>
+              <div class="search-expand" id="search-expand">
+                <button class="icon-btn" id="btn-search" title="Search" aria-label="Search">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                </button>
+                <input id="conv-search" class="input" type="text" placeholder="Search conversations…" autocomplete="off">
+                <button class="icon-btn hidden" id="btn-search-close" title="Close search" aria-label="Close search">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <button class="icon-btn" id="btn-human" title="Needs human" aria-label="Needs human only">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.9-2.3l-3.4-3.85a2 2 0 0 1 3-2.65L7 15"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="conv-list" id="conv-list"><div class="conv-skel"><div class="sk-av skel"></div><div class="sk-lines"><div class="sk-l1 skel"></div><div class="sk-l2 skel"></div></div></div><div class="conv-skel"><div class="sk-av skel"></div><div class="sk-lines"><div class="sk-l1 skel"></div><div class="sk-l2 skel"></div></div></div><div class="conv-skel"><div class="sk-av skel"></div><div class="sk-lines"><div class="sk-l1 skel"></div><div class="sk-l2 skel"></div></div></div></div>
+        </aside>
+        <section class="pane chat-pane">
+          <div class="chat-head" id="chat-header"></div>
+          <div id="human-banner-slot"></div>
+          <div id="messages"></div>
+          <div class="composer">
+            <div id="slash-popup" class="slash-popup hidden"></div>
+            <div class="quick" id="quick-replies"></div>
+            <div class="send-row">
+              <textarea id="msg-input" class="input" rows="1" placeholder="Write a warm reply… (Enter to send, Shift+Enter for new line, / for quick replies)"></textarea>
+              <button id="btn-send" class="btn-primary" aria-label="Send message" title="Send">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+              </button>
+            </div>
+          </div>
+        </section>
+        <aside class="pane side-pane" id="side-pane">
+          <div class="side-tabs">
+            <button class="side-tab active" data-tab="customer">Customer</button>
+            <button class="side-tab" data-tab="products">Products</button>
+            <button class="side-tab" data-tab="order">New Order</button>
+            <button class="icon-btn m-detail-close" id="btn-detail-close" aria-label="Close">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div class="side-body">
+            <div id="tab-customer"></div>
+            <div id="tab-products" class="hidden">
+              <div class="search mb16">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                <input id="product-search" class="input" type="text" placeholder="Search products…" style="width:100%;">
+              </div>
+              <div id="product-list"></div>
+            </div>
+            <div id="tab-order" class="hidden">
+              <div id="order-lines"></div>
+              <div class="kv" style="margin:10px 0;"><span class="k">Total</span><span class="v" id="order-total" style="font-size:16px;">0 BDT</span></div>
+              <button id="btn-create-order" class="btn-primary btn-block">Create Order</button>
+              <div id="order-msg" class="small muted mt8"></div>
+              <div style="font-weight:800; color:var(--ink); font-size:13.5px; margin:18px 0 10px;">Add items</div>
+              <div id="order-products"></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- Leads -->
+    <div id="cview-leads" class="page hidden">
+      <div class="page-head">
+        <div>
+          <h2>Lead Intelligence</h2>
+          <p>AI scores every customer — stage, intent, likely products and the next best action, live.</p>
+        </div>
+        <div class="spacer"></div>
+        <div class="search">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input id="lead-search" class="input" type="text" placeholder="Search leads…">
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="seg" id="lead-segment-filters">
+          <button data-seg="all" class="active">All</button>
+          <button data-seg="customers">Customers</button>
+          <button data-seg="potential">Potential</button>
+          <button data-seg="new">New leads</button>
+        </div>
+        <div class="seg" id="lead-temp-filters">
+          <button data-lt="all" class="active">All</button>
+          <button data-lt="hot">Hot</button>
+          <button data-lt="warm">Warm</button>
+          <button data-lt="cold">Cold</button>
+        </div>
+        <select id="lead-stage-filter" class="input no-icon" style="max-width:170px;">
+          <option value="all">All stages</option>
+          <option value="new">new</option><option value="contacted">contacted</option>
+          <option value="qualified">qualified</option><option value="intent">intent</option>
+          <option value="verified">verified</option><option value="converted">converted</option>
+          <option value="lost">lost</option><option value="dormant">dormant</option>
+        </select>
+        <div class="spacer" style="flex:1;"></div>
+        <span id="lead-intel-summary" class="small muted"></span>
+        <button class="btn-soft" id="btn-csv">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>
+          CSV
+        </button>
+      </div>
+      <div class="tbl-card"><table class="tbl intel-tbl">
+        <thead><tr><th>Customer</th><th>Stage</th><th>Score</th><th>Wants</th><th>Likely products</th><th>Convert</th><th>Value</th><th>Next action</th><th>Follow-up</th><th>Channel</th><th></th></tr></thead>
+        <tbody id="leads-body"></tbody>
+      </table></div>
+    </div>
+
+    <!-- Broadcast -->
+    <div id="cview-broadcast" class="page hidden">
+      <div class="page-head">
+        <div>
+          <h2>Broadcast</h2>
+          <p>Send a campaign message to your customers — paced safely, per channel.</p>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn-primary" id="btn-bcast-new">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          New campaign
+        </button>
+      </div>
+      <div id="bcast-list"></div>
+      <div class="card hidden" id="bcast-composer" style="max-width:680px;">
+        <div class="ttl" style="font-size:16px; margin-bottom:10px;">New campaign</div>
+        <div class="ca-label">Campaign name</div>
+        <input id="bcast-name" class="input no-icon" placeholder="e.g. Eid offer" style="margin-bottom:10px;">
+        <div class="ca-label">Channel</div>
+        <select id="bcast-channel" class="input no-icon" style="margin-bottom:10px;">
+          <option value="all">All channels</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="telegram">Telegram</option>
+          <option value="messenger">Messenger</option>
+          <option value="instagram">Instagram</option>
+        </select>
+        <div class="ca-label">Message</div>
+        <textarea id="bcast-text" class="input no-icon" rows="4" placeholder="Write the message…" style="margin-bottom:10px;"></textarea>
+        <div class="muted small" id="bcast-audience-hint" style="margin-bottom:10px;"></div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-primary" id="bcast-create">Create draft</button>
+          <button class="btn-soft" id="bcast-cancel-compose">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Products -->
+    <div id="cview-products" class="page hidden">
+      <div class="page-head">
+        <button class="btn-ghost back-btn" data-back="more" title="Back to More">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div>
+          <h2><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1d9bf0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg> Products</h2>
+          <p>Everything the AI quotes to customers comes from this catalog — prices and features are never invented.</p>
+        </div>
+        <div class="spacer"></div>
+        <div class="search">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input id="catalog-search" class="input" type="text" placeholder="Search catalog…">
+        </div>
+        <button class="btn-primary" id="btn-add-product">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Add product
+        </button>
+      </div>
+      <div id="products-empty"></div>
+      <div class="prod-grid" id="product-grid"></div>
+    </div>
+
+    <!-- Settings -->
+    <div id="cview-settings" class="page hidden">
+      <div class="page-head" style="margin-bottom:6px;">
+        <button class="btn-ghost back-btn" data-back="more" title="Back to More">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div>
+          <h2>Settings</h2>
+          <p>Channels, knowledge base and appearance for this workspace.</p>
+        </div>
+      </div>
+      <div id="setup-checklist"></div>
+      <div class="seg mb16" id="settings-tabs">
+        <button data-st="channels" class="active">Channels</button>
+        <button data-st="kb">Knowledge Base</button>
+        <button data-st="appearance">Webchat Widget</button>
+        <button data-st="backup">Backup</button>
+        <button data-st="plan">My Plan</button>
+        <button data-st="apikeys">API Keys</button>
+      </div>
+
+      <div id="stab-channels">
+        <div class="page-head" style="margin-bottom:6px;">
+          <div>
+            <h2 style="font-size:17px;">Connected channels</h2>
+            <p>Gateway accounts under this workspace — isolated from every other account.</p>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn-primary" id="btn-add-channel">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            Add channel
+          </button>
+        </div>
+        <div class="notice info" id="wa-warn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span><b>Secure connection:</b> sessions are encrypted and private to your workspace. Connect in seconds — no security issues.</span>
+        </div>
+        <div id="chan-empty"></div>
+        <div class="chan-grid" id="chan-grid"></div>
+        <div class="card mt16">
+          <div style="font-weight:800; color:var(--ink); margin-bottom:10px; font-size:14.5px;">Webhook URLs <span class="muted small" style="font-weight:400;">(paste into your developer consoles)</span></div>
+          <div id="webhook-urls"></div>
+        </div>
+      </div>
+
+      <div id="stab-kb" class="hidden">
+        <div class="card mb16" style="max-width:880px;">
+          <div style="font-weight:800; color:var(--ink); font-size:16px; margin-bottom:4px; display:flex; align-items:center; gap:9px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1d9bf0" stroke-width="2" stroke-linecap="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>
+            Knowledge Base
+          </div>
+          <p class="muted small" style="margin-bottom:14px;">Everything the AI knows about your business — your documents, one-click presets, and pages imported from your website. <span id="kb-count" class="muted"></span></p>
+          <div class="seg mb16" id="kb-subtabs">
+            <button data-kb="docs" class="active">Documents</button>
+            <button data-kb="presets">Presets</button>
+            <button data-kb="website">Website import</button>
+          </div>
+          <div id="kbtab-docs">
+            <div class="frow" style="margin-bottom:12px; display:flex; gap:10px;">
+              <input id="kb-title" class="input no-icon" type="text" placeholder="Title — e.g. Return policy" style="flex:2;">
+              <select id="kb-category" class="input no-icon" style="flex:1; min-width:150px;">
+                <option value="policy">Return / Policy</option>
+                <option value="shipping">Shipping &amp; delivery</option>
+                <option value="product">Product info</option>
+                <option value="faq">FAQ</option>
+                <option value="marketing">Marketing / offers</option>
+                <option value="general">General</option>
+              </select>
+            </div>
+            <div class="frow" style="margin-bottom:14px;"><textarea id="kb-content" class="input no-icon" rows="4" placeholder="e.g. We accept returns within 7 days if the product is unused and the box is intact. Refunds go to bKash within 48 hours."></textarea></div>
+            <button class="btn-primary" id="btn-save-kb">Save document</button>
+            <div class="ca-label" style="margin-top:18px;">Your documents</div>
+            <div id="kb-list"></div>
+          </div>
+          <div id="kbtab-presets" class="hidden">
+            <p class="muted small" style="margin-bottom:12px;">Start from a ready-made template — it fills the form for you, then edit and save.</p>
+            <div id="kb-presets" class="kb-presets"></div>
+          </div>
+          <div id="kbtab-website" class="hidden">
+            <p class="muted small" style="margin-bottom:12px;">We crawl your site (sitemap + pages) and save each page as a document — the AI then answers from your real content. Re-import anytime to refresh.</p>
+            <div style="display:flex; gap:8px;">
+              <input id="kb-site-url" class="input no-icon" placeholder="https://yourshop.com" style="flex:1; min-width:0;">
+              <button class="btn-primary" id="kb-import-btn">Import</button>
+            </div>
+            <div id="kb-import-progress" style="margin-top:10px;"></div>
+            <div class="ca-label" style="margin-top:16px;">Import history</div>
+            <div id="kb-import-history"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="stab-appearance" class="hidden">
+        <div class="card mb16" style="max-width:680px;" id="appearance-card"></div>
+      </div>
+
+      <div id="stab-backup" class="hidden">
+        <div class="card mb16" style="max-width:680px;" id="backup-card"></div>
+      </div>
+
+      <div id="stab-plan" class="hidden">
+        <div class="card mb16" style="max-width:680px;" id="plan-card"></div>
+      </div>
+
+      <div id="stab-apikeys" class="hidden">
+        <div class="card mb16" style="max-width:680px;" id="apikeys-card"></div>
+      </div>
+    </div>
+
+    <!-- More / Settings (native) -->
+    <div id="cview-guide" class="page hidden">
+      <div class="guide-wrap">
+        <div class="page-head"><div><h2>Help &amp; Guides</h2><p>Learn Tectobox step by step — with pictures.</p></div></div>
+        <div id="guide-list"></div>
+      </div>
+    </div>
+    <div id="cview-more" class="page hidden">
+      <div class="more-wrap">
+        <div class="page-head"><div><h2>More</h2><p>Account &amp; preferences.</p></div></div>
+        
+        <div class="more-acct card" id="more-acct"></div>
+        <div id="more-workspace-wrap">
+          <div class="more-group-title">Workspace</div>
+          <div class="more-group card" id="more-workspace"></div>
+        </div>
+        <div class="more-group-title">Preferences</div>
+        <div class="more-group card" id="more-prefs"></div>
+        <div class="more-group card" id="more-actions"></div>
+        <p class="muted small" style="text-align:center; margin-top:18px;">Tectobox · v2</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ADMIN ===== -->
+  <div id="view-admin" class="hidden">
+    <div class="page" style="max-width:1240px;">
+      <div class="admin-hero">
+        <div class="admin-hero-l">
+          <div class="admin-kicker"><span class="live-dot"></span>PLATFORM OWNER</div>
+          <h2>Platform Panel</h2>
+          <p>Workspaces, licenses &amp; platform health — one place.</p>
+        </div>
+        <div class="admin-hero-stats" id="admin-stats"></div>
+      </div>
+      <div class="seg mb16" id="admin-tabs">
+        <button data-at="resources" class="active">Connected resources</button>
+        <button data-at="users">Workspaces</button>
+        <button data-at="licensing">Plans &amp; licenses</button>
+        <button data-at="config">Platform config</button>
+        <button data-at="notify">Notifications</button>
+        <button data-at="audit">Audit log</button>
+      </div>
+      <div id="atab-resources" class="tbl-card"><table class="tbl">
+        <thead><tr><th>Channel</th><th>Account</th><th>Workspace</th><th>Status</th><th>Last seen</th></tr></thead>
+        <tbody id="resources-body"></tbody>
+      </table></div>
+      <div id="atab-users" class="hidden">
+        <div class="toolbar"><div style="flex:1;"></div>
+          <button class="btn-primary" id="btn-create-user">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            Create workspace user
+          </button>
+        </div>
+        <div class="ws-grid" id="users-grid"></div>
+      </div>
+      <div id="atab-licensing" class="hidden">
+        <div class="lic-sec">
+          <div class="lic-sec-t"><h3>Create</h3><p>One create button — pick a type and the form adapts.</p></div>
+          <div class="card">
+            <div class="mode-toggle" id="crt-mode">
+              <button class="mode-opt sel" data-mode="package">
+                <b>Package</b><span>Monthly / 3-monthly / yearly · unlimited usage</span>
+              </button>
+              <button class="mode-opt" data-mode="credit">
+                <b>Credit System</b><span>Pay per AI reply</span>
+              </button>
+            </div>
+            <div class="frow"><label>Name</label>
+              <input id="crt-name" class="input no-icon" placeholder="e.g. Starter Monthly" style="max-width:320px;">
+            </div>
+            <div class="frow" id="crt-period-row"><label>Billing period</label>
+              <div class="chip-row" id="crt-period-chips">
+                <button class="chip sel" data-p="monthly">Monthly</button>
+                <button class="chip" data-p="quarterly">3-Monthly</button>
+                <button class="chip" data-p="yearly">Yearly</button>
+              </div>
+            </div>
+            <div class="frow hidden" id="crt-credits-row"><label>Credits included</label>
+              <input id="crt-credits" class="input no-icon" type="number" min="1" placeholder="e.g. 1000" style="max-width:200px;">
+            </div>
+            <div class="frow"><label>Features</label><div id="crt-features" class="check-grid"></div></div>
+            <div class="frow"><label>Price (BDT) <span class="muted small">(optional)</span></label>
+              <input id="crt-price" class="input no-icon" type="number" min="0" placeholder="0" style="max-width:200px;">
+            </div>
+            <button class="btn-primary" id="btn-create">Create</button>
+            <div id="crt-msg" class="small muted mt8"></div>
+          </div>
+        </div>
+        <div class="lic-sec">
+          <div class="lic-sec-t"><h3>Plans &amp; packages</h3><p>Existing plans — assign any of them straight from a workspace card.</p></div>
+          <div class="plan-grid" id="plans-grid"></div>
+        </div>
+        <div class="lic-sec">
+          <div class="lic-sec-t"><h3>Licenses</h3><p>Every issued license, newest first.</p></div>
+          <div class="tbl-card"><table class="tbl">
+            <thead><tr><th>Code</th><th>Workspace</th><th>Plan</th><th>Validity / Credits</th><th>Status</th><th></th></tr></thead>
+            <tbody id="licenses-body"></tbody>
+          </table></div>
+        </div>
+      </div>
+      <div id="assign-modal" class="modal-bg hidden">
+        <div class="modal" style="width:540px; max-width:94vw;">
+          <h3>Assign license</h3>
+          <p class="msub" id="assign-sub">Pick a plan for this workspace.</p>
+          <div id="assign-current" style="margin-bottom:12px;"></div>
+          <div class="plan-pick" id="assign-plans" style="max-height:52vh; overflow:auto; padding-right:4px;"></div>
+          <div class="modal-foot">
+            <div style="flex:1;"></div>
+            <button class="btn-ghost" id="btn-close-assign">Cancel</button>
+          </div>
+        </div>
+      </div>
+      <div id="atab-config" class="hidden">
+        <div class="cfg-grid">
+          <div class="card">
+            <div style="font-weight:800; color:var(--ink); font-size:16px; margin-bottom:14px;">AI automation</div>
+            <div class="kv"><span class="k"><b style="color:var(--ink);">Global auto-reply</b><br><span class="small">Master switch for every workspace.</span></span>
+              <label class="switch"><input type="checkbox" id="cfg-autoreply"><span class="sl"></span></label></div>
+            <div class="frow mt16"><label>AI model pool <span class="muted small">(smart router: fastest-first, comma-separated — empty = built-in fast pool)</span></label><textarea id="cfg-modelpool" class="input no-icon" rows="3" placeholder="@cf/zai-org/glm-4.7-flash, @cf/openai/gpt-oss-120b, …"></textarea></div>
+            <div class="frow"><label>AI model <span class="muted small">(legacy — only used when the pool above is empty)</span></label><input id="cfg-model" class="input no-icon" type="text"></div>
+            <div class="frow"><label>AI base URL</label><input id="cfg-baseurl" class="input no-icon" type="text"></div>
+            <button class="btn-primary" id="btn-save-config">Save configuration</button>
+            <div id="cfg-msg" class="small muted mt8"></div>
+          </div>
+          <div class="card">
+            <div style="font-weight:800; color:var(--ink); font-size:16px; margin-bottom:8px;">Webhook reference</div>
+            <p class="muted small mb16">Give these to workspace owners connecting Meta channels.</p>
+            <div id="admin-webhook-urls"></div>
+          </div>
+          <div class="card">
+            <div style="font-weight:800; color:var(--ink); font-size:16px; margin-bottom:8px;">Two-factor authentication</div>
+            <p class="muted small mb16">Protect this admin account with a 6-digit code from any authenticator app.</p>
+            <div id="totp-box"></div>
+          </div>
+        </div>
+      </div>
+      <div id="atab-notify" class="hidden">
+        <div class="card" style="max-width:560px;">
+          <div style="font-weight:800; color:var(--ink); font-size:16px; margin-bottom:4px;">Send notification</div>
+          <p class="muted small mb16">Push a custom notification to installed apps. Users get it even with the app closed.</p>
+          <label class="lbl">Send to</label>
+          <select id="nt-target" class="input mb16">
+            <option value="all">All workspaces</option>
+          </select>
+          <label class="lbl">Title</label>
+          <input id="nt-title" class="input mb16" maxlength="80" placeholder="Tectobox" value="Tectobox">
+          <label class="lbl">Message</label>
+          <textarea id="nt-body" class="input mb16" rows="3" maxlength="200" placeholder="What's the update?"></textarea>
+          <button class="btn-primary" id="btn-send-notif">Send notification</button>
+          <div class="muted small" id="nt-status" style="margin-top:8px;"></div>
+        </div>
+      </div>
+      <div id="atab-audit" class="hidden"><div class="tbl-card" id="audit-list"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODALS ================= -->
+<nav class="bottom-tabs" id="bottom-tabs" aria-label="Primary"></nav>
+<div id="qr-modal" class="modal-bg hidden">
+  <div class="modal" style="width:380px; text-align:center;">
+    <h3 id="qr-title">Scan to connect</h3>
+    <p class="msub" id="qr-sub">Open the app on your phone and scan</p>
+    <div class="qr-box"><img id="qr-img" alt="QR code"></div>
+    <p class="small muted" style="margin-bottom:16px;">Waiting for scan… the code refreshes automatically.</p>
+    <button class="btn-danger-soft" id="btn-close-qr">Cancel</button>
+  </div>
+</div>
+
+<div id="slot-modal" class="modal-bg hidden">
+  <div class="modal" style="width:360px;">
+    <h3 id="slot-title">Name this account</h3>
+    <p class="msub">Give it a short label so you can tell accounts apart.</p>
+    <div class="frow"><input id="slot-label" class="input no-icon" type="text" placeholder="e.g. Support, Sales" maxlength="30"></div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="btn-slot-cancel">Cancel</button>
+      <button class="btn-primary" id="btn-slot-ok">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= COMMAND PALETTE ================= -->
+<div id="cmdk-bg" class="modal-bg hidden" style="align-items:flex-start; padding-top:12vh;">
+  <div class="cmdk" role="dialog" aria-label="Command palette">
+    <div class="cmdk-input-wrap">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="cmdk-input" type="text" placeholder="Type a command or search…" autocomplete="off" aria-label="Command search">
+      <kbd>esc</kbd>
+    </div>
+    <div id="cmdk-list" class="cmdk-list" role="listbox"></div>
+    <div class="cmdk-foot">
+      <span><kbd>↑↓</kbd> navigate</span><span><kbd>↵</kbd> select</span>
+      <span style="margin-left:auto;" class="muted">Tectobox Command</span>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SHORTCUTS HELP ================= -->
+<div id="shortcuts-modal" class="modal-bg hidden">
+  <div class="modal" style="width:440px;">
+    <h3>Keyboard shortcuts</h3>
+    <p class="msub">Work faster with your keyboard.</p>
+    <div class="shortcuts-list">
+      <div class="sc-row"><span>Command palette</span><span><kbd>⌘K</kbd> <kbd>Ctrl K</kbd></span></div>
+      <div class="sc-row"><span>Go to Inbox</span><span><kbd>G</kbd> <kbd>I</kbd></span></div>
+      <div class="sc-row"><span>Go to Leads</span><span><kbd>G</kbd> <kbd>L</kbd></span></div>
+      <div class="sc-row"><span>Go to More</span><span><kbd>G</kbd> <kbd>M</kbd></span></div>
+      <div class="sc-row"><span>Go to Products</span><span><kbd>G</kbd> <kbd>P</kbd></span></div>
+      <div class="sc-row"><span>Go to Settings</span><span><kbd>G</kbd> <kbd>S</kbd></span></div>
+      <div class="sc-row"><span>Close dialog</span><span><kbd>Esc</kbd></span></div>
+    </div>
+    <div class="modal-foot">
+      <div style="flex:1;"></div>
+      <button class="btn-primary" id="btn-close-shortcuts">Done</button>
+    </div>
+  </div>
+</div>
+
+<div id="confirm-modal" class="modal-bg hidden">
+  <div class="modal" style="width:380px;">
+    <h3 id="confirm-title">Are you sure?</h3>
+    <p class="msub" id="confirm-body"></p>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="btn-confirm-cancel">Cancel</button>
+      <button class="btn-primary" id="btn-confirm-ok">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="chan-pick-modal" class="modal-bg hidden">
+  <div class="modal" style="width:380px;">
+    <h3>Add channel</h3>
+    <p class="msub">Pick a channel to connect a new gateway account.</p>
+    <div id="chan-pick-list" style="display:flex; flex-direction:column; gap:8px; margin:12px 0;"></div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="btn-chan-pick-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="meta-pick-modal" class="modal-bg hidden">
+  <div class="modal" style="width:440px;">
+    <h3>Choose your Facebook Page</h3>
+    <p class="msub">Your Facebook account has several Pages — pick the one to connect.</p>
+    <div id="meta-pick-list"></div>
+  </div>
+</div>
+
+<div id="lead-modal" class="modal-bg hidden">
+  <div class="modal lead-drawer">
+    <div class="lead-hero" id="lm-hero">
+      <!-- populated by JS: avatar, name, score ring, stage/temperature -->
+    </div>
+    <div class="seg mb16" id="lm-tabs">
+      <button data-lt="intel" class="active">Intelligence</button>
+      <button data-lt="details">Details</button>
+    </div>
+    <div id="lm-tab-intel"><div id="lm-intel" class="intel-panel"></div></div>
+    <div id="lm-tab-details" class="hidden">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 14px;">
+        <div class="frow"><label>Name</label><input id="lm-name" class="input no-icon" type="text"></div>
+        <div class="frow"><label>Phone</label><input id="lm-phone" class="input no-icon" type="text"></div>
+        <div class="frow"><label>Email</label><input id="lm-email" class="input no-icon" type="text"></div>
+        <div class="frow"><label>WhatsApp ID</label><input id="lm-wa" class="input no-icon" type="text"></div>
+        <div class="frow"><label>Location</label><input id="lm-loc" class="input no-icon" type="text"></div>
+        <div class="frow"><label>Status</label>
+          <select id="lm-status" class="input no-icon">
+            <option value="lead">lead</option><option value="user">user</option><option value="confirmed">confirmed</option>
+          </select></div>
+      </div>
+      <div class="frow"><label>Notes</label><textarea id="lm-notes" class="input no-icon" rows="2"></textarea></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="btn-advance-lead">Advance →</button>
+      <button class="btn-ghost" id="btn-reanalyze-lead" title="Re-run AI analysis now">↻ Re-analyze</button>
+      <div style="flex:1;"></div>
+      <button class="btn-ghost" id="btn-close-lead">Cancel</button>
+      <button class="btn-primary" id="btn-save-lead">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="product-modal" class="modal-bg hidden">
+  <div class="modal">
+    <h3 id="pm-title">Add product</h3>
+    <p class="msub">Catalog entries are quoted verbatim by the AI.</p>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 14px;">
+      <div class="frow"><label>SKU *</label><input id="pm-sku" class="input no-icon" type="text"></div>
+      <div class="frow"><label>Name *</label><input id="pm-name" class="input no-icon" type="text"></div>
+      <div class="frow"><label>Category</label><input id="pm-category" class="input no-icon" type="text"></div>
+      <div class="frow"><label>Price (BDT) *</label><input id="pm-price" class="input no-icon" type="number" min="0" step="1"></div>
+      <div class="frow"><label>Stock</label><input id="pm-stock" class="input no-icon" type="number" min="0" step="1"></div>
+      <div class="frow"><label>Image URL</label><input id="pm-image" class="input no-icon" type="text"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="btn-close-product">Cancel</button>
+      <button class="btn-primary" id="btn-save-product">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="user-modal" class="modal-bg hidden">
+  <div class="modal">
+    <h3>Create workspace user</h3>
+    <p class="msub">Creates a workspace (client) and its login in one step.</p>
+    <div class="frow"><label>Username *</label><input id="um-username" class="input no-icon" type="text" autocomplete="off"></div>
+    <div class="frow"><label>Password *</label><input id="um-password" class="input no-icon" type="text" autocomplete="new-password"></div>
+    <div class="frow"><label>Workspace name *</label><input id="um-workspace" class="input no-icon" type="text"></div>
+    <div class="frow"><label>Business type</label>
+      <select id="um-type" class="input no-icon"><option value="physical">Physical</option><option value="digital">Digital</option></select></div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="btn-close-user">Cancel</button>
+      <button class="btn-primary" id="btn-save-user">Create</button>
+    </div>
+  </div>
+</div>
+
+<div id="pw-modal" class="modal-bg hidden">
+  <div class="modal" style="width:400px;">
+    <h3>Reset password</h3>
+    <p class="msub" id="pw-sub">Set a new password.</p>
+    <div class="frow"><label>New password *</label><input id="pw-new" class="input no-icon" type="text" autocomplete="new-password"></div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="btn-close-pw">Cancel</button>
+      <button class="btn-primary" id="btn-save-pw">Reset</button>
+    </div>
+  </div>
+</div>
+
+<!-- Courier Logistics Configuration Modal -->
+<div id="courier-modal" class="modal-bg hidden">
+  <div class="modal" style="width:480px;">
+    <h3>🚚 Courier Logistics Settings</h3>
+    <p class="msub">Configure automated Steadfast courier parcel booking &amp; customer fraud checks.</p>
+    <div class="frow">
+      <label>Courier Provider</label>
+      <select id="courier-provider" class="input no-icon">
+        <option value="steadfast">Steadfast Courier (Recommended)</option>
+        <option value="pathao">Pathao Courier</option>
+      </select>
+    </div>
+    <div class="frow">
+      <label>Steadfast API Key</label>
+      <input id="sf-api-key" class="input no-icon" type="text" placeholder="e.g. stdf_live_key_...">
+    </div>
+    <div class="frow">
+      <label>Steadfast Secret Key</label>
+      <input id="sf-secret-key" class="input no-icon" type="password" placeholder="e.g. stdf_sec_...">
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;" class="frow">
+      <div>
+        <label>Inside Dhaka Delivery (৳)</label>
+        <input id="sf-charge-inside" class="input no-icon" type="number" value="60">
+      </div>
+      <div>
+        <label>Outside Dhaka Delivery (৳)</label>
+        <input id="sf-charge-outside" class="input no-icon" type="number" value="120">
+      </div>
+    </div>
+    <div class="frow">
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+        <input type="checkbox" id="sf-auto-sms" checked>
+        <span>Send tracking link automatically to customer in chat</span>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="btn-close-courier">Close</button>
+      <button class="btn-primary" id="btn-save-courier">Save Courier Config</button>
+    </div>
+  </div>
+</div>
+
+<!-- Steadfast 1-Click Parcel Booking Modal -->
+<div id="courier-book-modal" class="modal-bg hidden">
+  <div class="modal" style="width:460px;">
+    <h3>🚀 Book Parcel to Steadfast</h3>
+    <p class="msub" id="cb-sub">Confirm recipient delivery details before booking.</p>
+    <input type="hidden" id="cb-order-id">
+    <div class="frow">
+      <label>Recipient Name *</label>
+      <input id="cb-name" class="input no-icon" type="text">
+    </div>
+    <div class="frow">
+      <label>Recipient Phone Number *</label>
+      <input id="cb-phone" class="input no-icon" type="text">
+    </div>
+    <div class="frow">
+      <label>Full Delivery Address (District/Thana/Area) *</label>
+      <textarea id="cb-address" class="input no-icon" rows="2" placeholder="House, Road, Area, District"></textarea>
+    </div>
+    <div class="frow">
+      <label>Cash to Collect (COD Amount in ৳) *</label>
+      <input id="cb-cod" class="input no-icon" type="number">
+    </div>
+    <div class="frow">
+      <label>Parcel Note (Optional)</label>
+      <input id="cb-note" class="input no-icon" type="text" placeholder="e.g. Fragile / Handle with care">
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="btn-close-cbook">Cancel</button>
+      <button class="btn-primary" id="btn-confirm-cbook">🚀 Confirm &amp; Dispatch</button>
+    </div>
+  </div>
+</div>
+
+<!-- 4x6" Thermal Shipping Label Modal -->
+<div id="thermal-label-modal" class="modal-bg hidden">
+  <div class="modal" style="width:480px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h3 style="margin:0;">🖨️ 4x6" Thermal Shipping Slip</h3>
+      <button class="btn-ghost back-btn" id="btn-close-thermal" style="font-size:18px;">✕</button>
+    </div>
+    <div id="thermal-preview-container"></div>
+    <div class="modal-foot" style="margin-top:16px;">
+      <button class="btn-ghost" id="btn-close-thermal-foot">Close</button>
+      <button class="btn-primary" id="btn-print-thermal">🖨️ Print Label (100x150mm)</button>
+    </div>
+  </div>
+</div>
+
+<!-- Canned Quick Replies Manager Modal -->
+<div id="quickreplies-modal" class="modal-bg hidden">
+  <div class="modal" style="width:520px;">
+    <h3>⚡ Canned Quick Replies (/ Shortcuts)</h3>
+    <p class="msub">Type <b>/</b> in chat composer to instantly select and send these templates.</p>
+    <div id="qr-templates-list" style="max-height:280px; overflow-y:auto; margin-bottom:16px;"></div>
+    <div style="border-top:1px solid var(--line); padding-top:14px;">
+      <div style="font-weight:700; font-size:13px; margin-bottom:8px;">Add New Shortcut</div>
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <input id="new-qr-shortcut" class="input no-icon" placeholder="/shortcut (e.g. /bkash)" style="flex:1;">
+        <input id="new-qr-title" class="input no-icon" placeholder="Title (e.g. bKash payment)" style="flex:1.5;">
+      </div>
+      <textarea id="new-qr-body" class="input no-icon" rows="2" placeholder="Full message text that will be inserted..."></textarea>
+      <button class="btn-primary mt8" id="btn-add-qr" style="width:100%;">+ Save Quick Reply Template</button>
+    </div>
+    <div class="modal-foot" style="margin-top:14px;">
+      <button class="btn-ghost" id="btn-close-quickreplies">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- Orders & Shipping Slips Modal -->
+<div id="orders-modal" class="modal-bg hidden">
+  <div class="modal" style="width:720px; max-width:96vw;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div>
+        <h3 style="margin:0;">📦 Customer Orders &amp; Logistics</h3>
+        <p class="msub" style="margin:2px 0 0;">Recent orders, Steadfast courier tracking &amp; thermal shipping labels.</p>
+      </div>
+      <button class="btn-ghost back-btn" id="btn-close-orders" style="font-size:18px;">✕</button>
+    </div>
+    <div id="orders-modal-list" style="max-height:60vh; overflow-y:auto;"></div>
+  </div>
+</div>
+
+<!-- Hidden container used strictly by @media print for thermal sticker -->
+<div id="thermal-print-area" style="display:none;"></div>
+
+<script src="/app.js?v=20261020_topbar_restored"></script>
+    <div class="gs-overlay hidden" id="gs-overlay">
+      <div class="gs-card" id="get-started" role="dialog" aria-label="Get started"></div>
+    </div>
+</body>
+</html>

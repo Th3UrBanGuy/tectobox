@@ -1,4 +1,7 @@
 node_modules/
+dist/
+**/dist/
+*.tsbuildinfo
 .env
 *.db
 *.db-wal
@@ -15,3 +18,28 @@ deployment/
 .ssh-pwhash
 *.sqlite
 *.tar
+
+# Agent/AI session exports
+.commandcode/
+command-code-session-*.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Subagent teamwork workspaces
+.agents/
+
+# Test reports & results
+playwright-report/
+test-results/
+blob-report/
+
+# Scratch & local binaries
+scratch/
+*.bak
+*.exe
+services/ai/ai-service
+**/ai-service

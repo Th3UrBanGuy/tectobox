@@ -1,0 +1,34 @@
+# Production Dockerfile for Node Channel Workers (CI build only)
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages/ ./packages/
+COPY services/workers/ ./services/workers/
+
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @tectonic/contracts run build
+RUN pnpm --filter @tectonic/messaging run build
+RUN pnpm --filter @tectonic/coordination run build
+RUN pnpm --filter @tectonic/workers run build
+
+FROM node:22-alpine AS runner
+
+WORKDIR /app
+ENV NODE_ENV=production
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages/ ./packages/
+COPY services/workers/ ./services/workers/
+
+COPY --from=builder /app/packages ./packages
+COPY --from=builder /app/services/workers/dist ./services/workers/dist
+
+RUN pnpm install --prod --frozen-lockfile
+
+CMD ["pnpm", "--filter", "@tectonic/workers", "run", "start"]

@@ -1,0 +1,17 @@
+{
+  "name": "@tectonic/contracts",
+  "version": "1.0.0",
+  "description": "Shared Zod schemas and TypeScript types for Tectobox",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

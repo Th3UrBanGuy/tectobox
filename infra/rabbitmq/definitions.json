@@ -1,0 +1,46 @@
+{
+  "vhosts": [{ "name": "/" }],
+  "exchanges": [
+    { "name": "tectobox.events", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false },
+    { "name": "tectobox.dlx", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false, "internal": false },
+    { "name": "tectobox.retry", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false, "internal": false }
+  ],
+  "queues": [
+    { "name": "incoming.messages", "vhost": "/", "durable": true, "arguments": { "x-dead-letter-exchange": "tectobox.dlx", "x-dead-letter-routing-key": "incoming.messages.dlq" } },
+    { "name": "incoming.messages.dlq", "vhost": "/", "durable": true },
+    { "name": "outgoing.messages", "vhost": "/", "durable": true, "arguments": { "x-dead-letter-exchange": "tectobox.dlx", "x-dead-letter-routing-key": "outgoing.messages.dlq" } },
+    { "name": "outgoing.messages.dlq", "vhost": "/", "durable": true },
+    { "name": "message.outgoing.whatsapp", "vhost": "/", "durable": true, "arguments": { "x-dead-letter-exchange": "tectobox.dlx", "x-dead-letter-routing-key": "message.outgoing.whatsapp.dlq" } },
+    { "name": "message.outgoing.whatsapp.dlq", "vhost": "/", "durable": true },
+    { "name": "message.outgoing.whatsapp.retry", "vhost": "/", "durable": true, "arguments": { "x-message-ttl": 5000, "x-dead-letter-exchange": "tectobox.events", "x-dead-letter-routing-key": "message.outgoing.whatsapp" } },
+    { "name": "message.outgoing.telegram", "vhost": "/", "durable": true, "arguments": { "x-dead-letter-exchange": "tectobox.dlx", "x-dead-letter-routing-key": "message.outgoing.telegram.dlq" } },
+    { "name": "message.outgoing.telegram.dlq", "vhost": "/", "durable": true },
+    { "name": "message.outgoing.telegram.retry", "vhost": "/", "durable": true, "arguments": { "x-message-ttl": 5000, "x-dead-letter-exchange": "tectobox.events", "x-dead-letter-routing-key": "message.outgoing.telegram" } },
+    { "name": "ai.requests", "vhost": "/", "durable": true, "arguments": { "x-dead-letter-exchange": "tectobox.dlx", "x-dead-letter-routing-key": "ai.requests.dlq" } },
+    { "name": "ai.requests.dlq", "vhost": "/", "durable": true },
+    { "name": "broadcast.jobs", "vhost": "/", "durable": true, "arguments": { "x-dead-letter-exchange": "tectobox.dlx", "x-dead-letter-routing-key": "broadcast.jobs.dlq" } },
+    { "name": "broadcast.jobs.dlq", "vhost": "/", "durable": true }
+  ],
+  "bindings": [
+    { "source": "tectobox.events", "vhost": "/", "destination": "incoming.messages", "destination_type": "queue", "routing_key": "message.incoming.#" },
+    { "source": "tectobox.events", "vhost": "/", "destination": "outgoing.messages", "destination_type": "queue", "routing_key": "message.outgoing.#" },
+    { "source": "tectobox.events", "vhost": "/", "destination": "message.outgoing.whatsapp", "destination_type": "queue", "routing_key": "message.outgoing.whatsapp" },
+    { "source": "tectobox.events", "vhost": "/", "destination": "message.outgoing.telegram", "destination_type": "queue", "routing_key": "message.outgoing.telegram" },
+    { "source": "tectobox.events", "vhost": "/", "destination": "ai.requests", "destination_type": "queue", "routing_key": "ai.request.#" },
+    { "source": "tectobox.events", "vhost": "/", "destination": "broadcast.jobs", "destination_type": "queue", "routing_key": "broadcast.job.#" },
+    { "source": "tectobox.retry", "vhost": "/", "destination": "message.outgoing.whatsapp.retry", "destination_type": "queue", "routing_key": "message.outgoing.whatsapp" },
+    { "source": "tectobox.retry", "vhost": "/", "destination": "message.outgoing.telegram.retry", "destination_type": "queue", "routing_key": "message.outgoing.telegram" },
+    { "source": "tectobox.dlx", "vhost": "/", "destination": "incoming.messages.dlq", "destination_type": "queue", "routing_key": "incoming.messages.dlq" },
+    { "source": "tectobox.dlx", "vhost": "/", "destination": "outgoing.messages.dlq", "destination_type": "queue", "routing_key": "outgoing.messages.dlq" },
+    { "source": "tectobox.dlx", "vhost": "/", "destination": "message.outgoing.whatsapp.dlq", "destination_type": "queue", "routing_key": "message.outgoing.whatsapp.dlq" },
+    { "source": "tectobox.dlx", "vhost": "/", "destination": "message.outgoing.telegram.dlq", "destination_type": "queue", "routing_key": "message.outgoing.telegram.dlq" },
+    { "source": "tectobox.dlx", "vhost": "/", "destination": "ai.requests.dlq", "destination_type": "queue", "routing_key": "ai.requests.dlq" },
+    { "source": "tectobox.dlx", "vhost": "/", "destination": "broadcast.jobs.dlq", "destination_type": "queue", "routing_key": "broadcast.jobs.dlq" }
+  ],
+  "users": [
+    { "name": "tectobox", "password": "tectobox_dev", "tags": ["administrator"] }
+  ],
+  "permissions": [
+    { "user": "tectobox", "vhost": "/", "configure": ".*", "write": ".*", "read": ".*" }
+  ]
+}

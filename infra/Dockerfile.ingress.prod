@@ -1,0 +1,22 @@
+# Production Dockerfile for Go Webhook Ingress (CI build only)
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+COPY services/ingress/go.mod services/ingress/go.sum* ./
+RUN go mod download || true
+
+COPY services/ingress/ ./
+RUN CGO_ENABLED=0 GOOS=linux go build -o ingress ./cmd/ingress
+
+FROM alpine:3.19 AS runner
+
+WORKDIR /app
+
+RUN apk --no-cache add ca-certificates
+
+COPY --from=builder /app/ingress /app/ingress
+
+EXPOSE 8080
+
+CMD ["/app/ingress"]

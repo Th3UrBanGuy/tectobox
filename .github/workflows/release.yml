@@ -1,0 +1,110 @@
+name: Release & Publish Container Images
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches: [main]
+  push:
+    tags: ['v*']
+
+jobs:
+  verify-ci-gating:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Verify CI gating for exact commit SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TARGET_SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # Verify tag resolves to the exact commit SHA being published
+            TAG_SHA=$(git rev-parse -q --verify "${{ github.ref }}^{commit}" || echo "")
+            if [ -n "$TAG_SHA" ] && [ "$TAG_SHA" != "$TARGET_SHA" ]; then
+              echo "Re-resolving TARGET_SHA to tag commit: $TAG_SHA (was: $TARGET_SHA)"
+              TARGET_SHA="$TAG_SHA"
+            fi
+          fi
+          echo "Verifying CI gating for commit: $TARGET_SHA (trigger: ${{ github.event_name }})"
+
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+              echo "ERROR: CI workflow did not succeed for commit $TARGET_SHA (conclusion: ${{ github.event.workflow_run.conclusion }})"
+              exit 1
+            fi
+            echo "CI workflow succeeded for commit $TARGET_SHA."
+          else
+            echo "Querying GitHub Actions for completed successful CI workflow on commit $TARGET_SHA..."
+            SUCCESSFUL_RUNS=$(gh run list --repo "${{ github.repository }}" --workflow="ci.yml" --commit "$TARGET_SHA" --json status,conclusion -q '[.[] | select(.status == "completed" and .conclusion == "success")] | length')
+            if [ -z "$SUCCESSFUL_RUNS" ] || [ "$SUCCESSFUL_RUNS" -eq 0 ]; then
+              echo "ERROR: Release strictly gated on passing CI. No successful CI run found for commit $TARGET_SHA."
+              exit 1
+            fi
+            echo "Verified successful CI run ($SUCCESSFUL_RUNS run(s) found) for commit $TARGET_SHA."
+          fi
+
+  build-and-push:
+    needs: [verify-ci-gating]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        include:
+          - service: api
+            image: tectobox-api
+            dockerfile: infra/Dockerfile.api.prod
+            context: .
+          - service: ingress
+            image: tectobox-ingress
+            dockerfile: infra/Dockerfile.ingress.prod
+            context: .
+          - service: workers
+            image: tectobox-workers
+            dockerfile: infra/Dockerfile.workers.prod
+            context: .
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.workflow_run.head_sha || github.sha }}
+            type=sha,format=long
+            type=sha,format=short
+            type=semver,pattern={{version}}
+
+      - name: Build and Push Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

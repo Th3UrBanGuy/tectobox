@@ -1,0 +1,26 @@
+{
+  "dependencies": {
+    "@open-wa/wa-automate": "^5.3.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "express": "^4.21.2",
+    "https-proxy-agent": "^9.1.0",
+    "playwright-core": "^1.63.0",
+    "qrcode": "^1.5.4",
+    "telegram": "^2.26.22",
+    "undici": "^7.30.0",
+    "web-push": "^3.6.7"
+  },
+  "description": "Unified social-commerce inbox for Tectonic — WhatsApp, Telegram, Messenger and Instagram chats, product catalog, SKU lookup and AI-assisted orders in one interface.",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "license": "MIT",
+  "main": "server.js",
+  "name": "tectonic-inbox",
+  "scripts": {
+    "seed": "node seed.js",
+    "start": "node server.js",
+    "lead-intel:backfill": "node bin/lead-intel-backfill"
+  },
+  "version": "1.0.0"
+}

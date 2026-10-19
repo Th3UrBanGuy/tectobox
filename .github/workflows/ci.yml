@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tectobox
+          POSTGRES_PASSWORD: tectobox_dev
+          POSTGRES_DB: tectobox
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      rabbitmq:
+        image: rabbitmq:3-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: tectobox
+          RABBITMQ_DEFAULT_PASS: tectobox_dev
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: services/ingress/go.sum
+
+      - name: Install Monorepo Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Contracts
+        run: pnpm --filter @tectonic/contracts run build
+
+      - name: Build Messaging & Coordination
+        run: |
+          pnpm --filter @tectonic/messaging run build
+          pnpm --filter @tectonic/coordination run build
+
+      - name: Typecheck & Build Monorepo
+        run: pnpm -r run build
+
+      - name: Run NestJS API Tests
+        run: pnpm --filter api run test
+
+      - name: Run Channel Worker Tests
+        run: pnpm --filter @tectonic/workers run test
+
+      - name: Run SQLite to PostgreSQL Migration Tests
+        run: node --experimental-strip-types --test scripts/migrate.spec.ts
+
+      - name: Verify Go Ingress (Vet & Tests)
+        run: |
+          cd services/ingress
+          go vet ./...
+          go test -v ./...

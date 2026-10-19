@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tectobox API Docs — Integrate in minutes</title>
+<link rel="stylesheet" href="/styles.css?v=20261007b">
+<script src="/theme-init.js?v=20260930c"></script>
+<style>
+  .docs-wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 80px; }
+  .docs-wrap h2 { margin: 34px 0 10px; }
+  .docs-wrap p, .docs-wrap li { line-height: 1.65; }
+  .docs-wrap pre { background: rgba(127,127,127,.12); border: 1px solid rgba(127,127,127,.25);
+    border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 13px; }
+  .docs-wrap code { font-family: ui-monospace, monospace; }
+  .endpoint { display: flex; gap: 10px; align-items: baseline; margin: 14px 0 4px; }
+  .method { font: 700 12px ui-monospace, monospace; padding: 3px 10px; border-radius: 6px;
+    background: #22c55e22; color: #22c55e; border: 1px solid #22c55e55; }
+  .method.post { background: #3b82f622; color: #3b82f6; border-color: #3b82f655; }
+  .method.del { background: #ef444422; color: #ef4444; border-color: #ef444455; }
+  .path { font: 600 14px ui-monospace, monospace; }
+  .back-link { display: inline-block; margin-bottom: 18px; }
+</style>
+</head>
+<body>
+<div class="docs-wrap">
+  <a class="back-link" href="/">← Back to Tectobox</a>
+  <h1>🔌 Tectobox Public API</h1>
+  <p>Integrate your website, app or ERP with Tectobox in minutes. Read conversations, send replies,
+     pull leads and products, and receive real-time event webhooks — all scoped to your workspace.</p>
+
+  <h2>1. Get an API key</h2>
+  <p>In the dashboard, open your workspace <b>Connectors</b> tab → <b>API keys</b> → <b>Create key</b>.
+     The raw key is shown <b>once</b> — copy it immediately. It looks like
+     <code>tk_9f2c…</code>. Treat it like a password.</p>
+
+  <h2>2. Authenticate</h2>
+  <p>Send the key as a Bearer token on every request:</p>
+  <pre><code>curl -H "Authorization: Bearer tk_YOUR_KEY" \
+  https://ss.kalandar.me/api/v1/conversations?limit=10</code></pre>
+
+  <h2>3. Endpoints</h2>
+
+  <div class="endpoint"><span class="method">GET</span><span class="path">/api/v1/conversations</span></div>
+  <p>List conversations. Query params: <code>platform</code> (messenger/instagram/telegram/whatsapp),
+     <code>q</code> (search), <code>limit</code> (default 50, max 200).</p>
+
+  <div class="endpoint"><span class="method">GET</span><span class="path">/api/v1/conversations/:id/messages</span></div>
+  <p>Message history for one conversation. Query param: <code>limit</code> (default 100, max 500).</p>
+
+  <div class="endpoint"><span class="method post">POST</span><span class="path">/api/v1/conversations/:id/reply</span></div>
+  <p>Send a reply as your business. JSON body: <code>{"text": "…"}</code> (max 4000 chars).
+     The message is delivered on the conversation's original platform.</p>
+  <pre><code>curl -X POST -H "Authorization: Bearer tk_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Thanks for reaching out! How can I help?"}' \
+  https://ss.kalandar.me/api/v1/conversations/42/reply</code></pre>
+
+  <div class="endpoint"><span class="method">GET</span><span class="path">/api/v1/leads</span></div>
+  <p>Your leads pipeline. Query param: <code>limit</code> (default 50, max 200).</p>
+
+  <div class="endpoint"><span class="method">GET</span><span class="path">/api/v1/products</span></div>
+  <p>Your product catalog. Query param: <code>q</code> (search).</p>
+
+  <h2>4. Webhooks — real-time events</h2>
+  <p>Register a URL in <b>Connectors → Webhooks</b> to receive signed POSTs when things happen:</p>
+  <ul>
+    <li><code>message.received</code> — a customer messaged you</li>
+    <li><code>lead.created</code> — a new lead entered the pipeline</li>
+    <li><code>order.created</code> — an order was placed</li>
+  </ul>
+  <p>Every delivery carries <code>X-Tectonic-Event</code> and
+     <code>X-Tectonic-Signature: sha256=…</code> headers. Verify the signature with the
+     signing secret shown at registration:</p>
+  <pre><code>// Node.js signature verification
+const crypto = require('crypto');
+const sig = req.headers['x-tectonic-signature']; // "sha256=…"
+const expected = 'sha256=' + crypto.createHmac('sha256', SIGNING_SECRET)
+  .update(JSON.stringify(req.body)).digest('hex');
+const ok = crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));</code></pre>
+  <p>Payload shape:</p>
+  <pre><code>{
+  "event": "message.received",
+  "client_id": 3,
+  "at": "2026-09-30T16:40:00.000Z",
+  "data": { "conversation_id": 42, "platform": "messenger",
+            "platform_user_id": "123", "text": "Price?", "message_id": 9001 }
+}</code></pre>
+
+  <h2>5. Limits &amp; safety</h2>
+  <ul>
+    <li>300 requests/minute per API key; 600 requests/10 min per IP on the API.</li>
+    <li>Keys are workspace-scoped — a key can never see another business's data.</li>
+    <li>Revoke a leaked key instantly from the dashboard; it stops working immediately.</li>
+    <li>Webhook URLs must be public <code>https</code> endpoints (private/loopback targets are rejected).</li>
+  </ul>
+</div>
+</body>
+</html>

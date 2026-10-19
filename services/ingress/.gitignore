@@ -1,0 +1,4 @@
+# Go build artifacts
+/ingress
+/ingress.exe
+*.test

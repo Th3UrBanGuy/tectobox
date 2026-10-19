@@ -1,0 +1,9 @@
+{
+  "name": "@tectobox/ai-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gemini Web to OpenAI API proxy service for Tectobox",
+  "scripts": {
+    "start": "wsl python3 services/ai-proxy/gemini_web2api.py --port 8081"
+  }
+}

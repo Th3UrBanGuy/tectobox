@@ -1,0 +1,17 @@
+{
+  "name": "@tectonic/coordination",
+  "version": "1.0.0",
+  "description": "Redis distributed coordination utilities for Tectobox",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "ioredis": "^5.3.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
