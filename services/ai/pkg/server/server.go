@@ -32,15 +32,35 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
 	mux.HandleFunc("/api/ai/chat", s.handleInternalAIChat)
 
-	// CORS wrapper
+	// High-throughput middleware: CORS, Token Bucket Rate Limiting, and Brute-force protection
+	limiter := router.GetRateLimiterManager()
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Workspace-ID")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+
+		// Brute force & IP rate limiting check (exempting local health check)
+		if r.URL.Path != "/health" {
+			clientIP := r.Header.Get("X-Forwarded-For")
+			if clientIP == "" {
+				clientIP = r.RemoteAddr
+			}
+			if !limiter.AllowIP(clientIP) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"error":       "Too Many Requests - Rate limit exceeded or temporary abuse block",
+					"status_code": 429,
+				})
+				return
+			}
+		}
+
 		mux.ServeHTTP(w, r)
 	})
 }
@@ -172,8 +192,19 @@ func (s *Server) handleInternalAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
+	workspaceID := fmt.Sprintf("%v", req.ClientID)
+	if !router.GetRateLimiterManager().AllowWorkspace(workspaceID) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":       "Workspace AI token bucket depleted. Capacity refilling continuously.",
+			"status_code": 429,
+		})
+		return
+	}
+
 	pctx := router.PromptContext{
-		ClientID:     fmt.Sprintf("%v", req.ClientID),
+		ClientID:     workspaceID,
 		ClientName:   req.ClientName,
 		BusinessType: req.BusinessType,
 		Products:     req.Products,

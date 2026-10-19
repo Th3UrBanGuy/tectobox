@@ -161,6 +161,10 @@ func (c *Client) Generate(ctx context.Context, prompt string, modelName string) 
 }
 
 func (c *Client) doStreamGenerate(ctx context.Context, prompt string, model ModelInfo) (string, error) {
+	return c.doStreamGenerateWithClient(ctx, c.httpClient, prompt, model)
+}
+
+func (c *Client) doStreamGenerateWithClient(ctx context.Context, client *http.Client, prompt string, model ModelInfo) (string, error) {
 	// Build 80-element payload
 	inner := make([]interface{}, 80)
 	inner[0] = []interface{}{prompt, 0, nil, nil, nil, nil, 0}
@@ -210,7 +214,7 @@ func (c *Client) doStreamGenerate(ctx context.Context, prompt string, model Mode
 	req.Header.Set("X-Same-Domain", "1")
 	req.Header.Set("User-Agent", c.userAgent)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

@@ -21,11 +21,11 @@ import (
 )
 
 type ProductItem struct {
-	Name     string `json:"name"`
-	SKU      string `json:"sku,omitempty"`
-	PriceBDT string `json:"price_bdt"`
-	Stock    int    `json:"stock,omitempty"`
-	Category string `json:"category,omitempty"`
+	Name     string      `json:"name"`
+	SKU      string      `json:"sku,omitempty"`
+	PriceBDT interface{} `json:"price_bdt"`
+	Stock    int         `json:"stock,omitempty"`
+	Category string      `json:"category,omitempty"`
 }
 
 type KnowledgeItem struct {
@@ -156,13 +156,13 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 	sb.WriteString("\nCustomer (Current Message): " + cleanMsg + "\nAssistant:")
 	fullPrompt := sb.String()
 
-	// Tier 1: Gemini Web2API (native Go)
+	// Tier 1: Gemini Web2API with per-workspace isolated session pool
 	model := modelPreference
 	if model == "" {
 		model = "gemini-3.6-flash"
 	}
 	t1Ctx, t1Cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
-	if reply, err := e.geminiClient.Generate(t1Ctx, fullPrompt, model); err == nil && len(reply) > 0 {
+	if reply, err := e.geminiClient.GenerateForWorkspace(t1Ctx, pctx.ClientID, fullPrompt, model); err == nil && len(reply) > 0 {
 		t1Cancel()
 		e.setCache(cKey, reply, 5*time.Minute)
 		return reply, lang, "gemini-web2api:" + model, false
@@ -453,11 +453,11 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 
 			switch lang {
 			case detector.LangBangla:
-				return fmt.Sprintf("%s-এর মূল্য %s টাকা। আপনি কি এটি অর্ডার করতে চান?", matchedProduct.Name, matchedProduct.PriceBDT)
+				return fmt.Sprintf("%s-এর মূল্য %v টাকা। আপনি কি এটি অর্ডার করতে চান?", matchedProduct.Name, matchedProduct.PriceBDT)
 			case detector.LangBanglish:
-				return fmt.Sprintf("%s-er price %s BDT. Apni ki eta order korte chan?", matchedProduct.Name, matchedProduct.PriceBDT)
+				return fmt.Sprintf("%s-er price %v BDT. Apni ki eta order korte chan?", matchedProduct.Name, matchedProduct.PriceBDT)
 			default:
-				return fmt.Sprintf("%s is %s BDT. Would you like to order it?", matchedProduct.Name, matchedProduct.PriceBDT)
+				return fmt.Sprintf("%s is %v BDT. Would you like to order it?", matchedProduct.Name, matchedProduct.PriceBDT)
 			}
 		}
 	}
