@@ -388,10 +388,17 @@ CREATE TABLE inbox_events (
 
 -- Indexes for performance
 CREATE INDEX idx_conversations_client ON conversations(client_id);
+CREATE INDEX idx_conversations_client_last_msg ON conversations(client_id, last_message_at DESC);
+CREATE INDEX idx_conversations_platform ON conversations(client_id, platform);
 CREATE INDEX idx_messages_conversation ON messages(conversation_id);
+CREATE INDEX idx_messages_conv_created ON messages(conversation_id, created_at ASC);
 CREATE INDEX idx_products_client ON products(client_id);
 CREATE INDEX idx_orders_client ON orders(client_id);
+CREATE INDEX idx_orders_client_status ON orders(client_id, status, created_at DESC);
 CREATE INDEX idx_leads_client ON leads(client_id);
+CREATE INDEX idx_leads_client_stage ON leads(client_id, stage);
 CREATE INDEX idx_knowledge_client ON knowledge(client_id);
 CREATE INDEX idx_meta_pages_client ON meta_pages(client_id);
+CREATE INDEX idx_licenses_client_status ON licenses(client_id, status);
+CREATE INDEX idx_sessions_user_expires ON sessions(user_id, expires_at);
 CREATE INDEX idx_outbox_unprocessed ON outbox_events(created_at) WHERE processed_at IS NULL;

@@ -24,7 +24,14 @@ export class TenantGuard implements CanActivate {
       const authHeader = request.headers?.authorization;
       if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.split(' ')[1];
-        const jwtSecret = process.env.JWT_SECRET || 'tectobox_jwt_dev_secret_key_2026';
+        const jwtSecret =
+          process.env.JWT_SECRET ||
+          (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test'
+            ? 'tectobox_jwt_dev_secret_key_2026'
+            : undefined);
+        if (!jwtSecret) {
+          throw new UnauthorizedException('Authentication secret not configured');
+        }
 
         let decoded: any;
         try {

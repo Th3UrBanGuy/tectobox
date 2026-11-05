@@ -5,9 +5,16 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { AppModule } from './app.module.js';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
+import { StructuredLogger } from './common/logger/logger.service.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const logger = new StructuredLogger();
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    logger,
+  });
+  app.enableShutdownHooks();
+  app.useGlobalFilters(new AllExceptionsFilter());
   app.use(cookieParser());
   app.enableCors({
     origin: true,

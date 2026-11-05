@@ -29,7 +29,11 @@ export class AuthController {
     }
 
     const { username, password } = parsed.data;
-    const jwtSecret = process.env.JWT_SECRET;
+    const jwtSecret =
+      process.env.JWT_SECRET ||
+      (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test'
+        ? 'tectobox_jwt_dev_secret_key_2026'
+        : undefined);
     if (!jwtSecret) {
       throw new Error('JWT_SECRET is required but not configured');
     }

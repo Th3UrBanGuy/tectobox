@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Patch, Delete, Put, Body, Param, Query, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException } from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
+import { AdminGuard } from '../auth/admin.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import crypto from 'crypto';
@@ -8,7 +9,7 @@ import { hashPassword } from '../auth/password.util.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../auth/totp.util.js';
 
 @Controller('api')
-@UseGuards(TenantGuard)
+@UseGuards(TenantGuard, AdminGuard)
 export class AdminController {
   constructor(@Inject(DB_POOL) private readonly pool: pg.Pool) {}
 
@@ -36,7 +37,7 @@ export class AdminController {
     };
   }
 
-  @Get(['admin/workspaces', 'clients'])
+  @Get(['admin/workspaces', 'admin/clients', 'clients'])
   async listWorkspaces() {
     const result = await this.pool.query(`
       SELECT c.*,
