@@ -29,7 +29,7 @@ test.describe('8. Button-Level Exhaustive Sync & Multi-Mechanism Stress Suite', 
     await expect(page.locator('#app-view')).toBeVisible({ timeout: 12000 });
   }
 
-  async function goToNav(page: Page, nav: 'admin' | 'inbox' | 'leads' | 'more') {
+  async function goToNav(page: Page, nav: string) {
     const btn = page.locator(`#nav-links button[data-nav="${nav}"]`);
     await btn.waitFor({ state: 'visible', timeout: 8000 });
     await btn.click();
@@ -149,11 +149,7 @@ test.describe('8. Button-Level Exhaustive Sync & Multi-Mechanism Stress Suite', 
   // =========================================================================
   test('PRD-01 to PRD-11: Products Catalog Modal, validation, and negative clamping', async ({ page }) => {
     await ensureLoggedIn(page, 'operator');
-    await goToNav(page, 'more');
-
-    const myProdBtn = page.locator('#more-workspace-wrap .mrow:has-text("My Products")');
-    await myProdBtn.waitFor({ state: 'visible', timeout: 6000 });
-    await myProdBtn.click();
+    await goToNav(page, 'products');
     await page.waitForSelector('#cview-products:not(.hidden)', { timeout: 8000 });
 
     const addProductBtn = page.locator('#btn-add-product');
@@ -205,10 +201,11 @@ test.describe('8. Button-Level Exhaustive Sync & Multi-Mechanism Stress Suite', 
   // =========================================================================
   test('CUR-01 to CUR-09: Courier config modal, Steadfast booking COD accuracy', async ({ page }) => {
     await ensureLoggedIn(page, 'operator');
-    await goToNav(page, 'more');
+    await goToNav(page, 'orders');
+    await expect(page.locator('#cview-orders')).toBeVisible({ timeout: 8000 });
 
     // Open Courier Logistics
-    const courierBtn = page.locator('#more-workspace-wrap .mrow:has-text("Courier Logistics")');
+    const courierBtn = page.locator('#btn-open-courier-config');
     await courierBtn.waitFor({ state: 'visible', timeout: 6000 });
     await courierBtn.click();
 
@@ -224,16 +221,8 @@ test.describe('8. Button-Level Exhaustive Sync & Multi-Mechanism Stress Suite', 
     await page.click('#btn-save-courier');
     await expect(courierModal).toBeHidden({ timeout: 8000 });
 
-    // Open Orders Modal
-    const ordersBtn = page.locator('#more-workspace-wrap .mrow:has-text("Orders & Shipping Slips")');
-    await ordersBtn.waitFor({ state: 'visible', timeout: 6000 });
-    await ordersBtn.click();
-
-    const ordersModal = page.locator('#orders-modal:not(.hidden)');
-    await expect(ordersModal).toBeVisible({ timeout: 8000 });
-
     // Check if an order has a 4x6" Thermal Slip button
-    const thermalBtn = page.locator('#orders-modal-list button:has-text("Thermal Slip")').first();
+    const thermalBtn = page.locator('#orders-full-list button:has-text("Thermal Slip")').first();
     if (await thermalBtn.isVisible()) {
       await thermalBtn.click();
       const thermalModal = page.locator('#thermal-label-modal:not(.hidden)');
@@ -247,10 +236,6 @@ test.describe('8. Button-Level Exhaustive Sync & Multi-Mechanism Stress Suite', 
       await page.click('#btn-close-thermal');
       await expect(thermalModal).toBeHidden();
     }
-
-    // Close orders modal
-    await page.click('#btn-close-orders');
-    await expect(ordersModal).toBeHidden();
   });
 
   // =========================================================================
@@ -304,13 +289,7 @@ test.describe('8. Button-Level Exhaustive Sync & Multi-Mechanism Stress Suite', 
   // =========================================================================
   test('KB-01 to KB-07: Knowledge base creation, preset filling, and deletion', async ({ page }) => {
     await ensureLoggedIn(page, 'operator');
-    await goToNav(page, 'more');
-
-    const teachBtn = page.locator('#more-workspace-wrap .mrow:has-text("Teach the AI")');
-    await teachBtn.waitFor({ state: 'visible', timeout: 6000 });
-    await teachBtn.click();
-
-    // Verify on Settings KB tab
+    await goToNav(page, 'kb');
     await page.waitForSelector('#stab-kb:not(.hidden)', { timeout: 8000 });
 
     const kbTitle = page.locator('#kb-title');

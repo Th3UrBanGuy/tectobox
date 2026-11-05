@@ -86,16 +86,11 @@ test.describe('3. Workspace Features, Interfaces & Buttons', () => {
     await expect(csvBtn).toBeVisible();
   });
 
-  test('should navigate to More hub and open Products catalog interface', async ({ page }) => {
-    // Click 'More' in nav
-    const moreTab = page.locator('#nav-links button[data-nav="more"]');
-    await moreTab.click();
-    await expect(page.locator('#cview-more')).toBeVisible();
-
-    // Click "My Products" item in More grid
-    const myProductsCard = page.locator('#cview-more .mrow').filter({ hasText: 'My Products' });
-    await expect(myProductsCard).toBeVisible();
-    await myProductsCard.click();
+  test('should navigate via sidebar and open Products catalog interface', async ({ page }) => {
+    // Click 'My Products' in sidebar
+    const productsTab = page.locator('#nav-links button[data-nav="products"]');
+    await expect(productsTab).toBeVisible();
+    await productsTab.click();
 
     // Verify Products catalog view is displayed
     await expect(page.locator('#cview-products')).toBeVisible();
@@ -122,32 +117,28 @@ test.describe('3. Workspace Features, Interfaces & Buttons', () => {
     await expect(modal).toBeHidden();
   });
 
-  test('should open Settings tabs: Channels, Knowledge Base, Appearance', async ({ page }) => {
-    // Navigate to More -> Connect Channels (Settings)
-    await page.click('#nav-links button[data-nav="more"]');
-    await expect(page.locator('#cview-more')).toBeVisible();
-
-    const connectChannelsCard = page.locator('#cview-more .mrow').filter({ hasText: 'Connect Channels' });
-    await expect(connectChannelsCard).toBeVisible();
-    await connectChannelsCard.click();
-
-    // Verify Settings view
-    await expect(page.locator('#cview-settings')).toBeVisible();
-
-    // 1. Channels tab
-    await page.click('#settings-tabs button[data-st="channels"]');
-    await expect(page.locator('#stab-channels')).toBeVisible();
+  test('should open isolated workspace screens: Channels, Knowledge Base, Appearance', async ({ page }) => {
+    // 1. Connect Channels screen via sidebar
+    const chanTab = page.locator('#nav-links button[data-nav="channels"]');
+    await expect(chanTab).toBeVisible();
+    await chanTab.click();
+    await expect(page.locator('#cview-channels')).toBeVisible();
     await expect(page.locator('#btn-add-channel')).toBeVisible();
 
-    // 2. Knowledge Base tab
-    await page.click('#settings-tabs button[data-st="kb"]');
-    await expect(page.locator('#stab-kb')).toBeVisible();
+    // 2. Knowledge Base screen via sidebar
+    const kbTab = page.locator('#nav-links button[data-nav="kb"]');
+    await expect(kbTab).toBeVisible();
+    await kbTab.click();
+    await expect(page.locator('#cview-kb')).toBeVisible();
     await expect(page.locator('#kb-title')).toBeVisible();
     await expect(page.locator('#kb-content')).toBeVisible();
     await expect(page.locator('#btn-save-kb')).toBeVisible();
 
-    // 3. Appearance tab
-    await page.click('#settings-tabs button[data-st="appearance"]');
-    await expect(page.locator('#stab-appearance')).toBeVisible();
+    // 3. Chat Widget Style screen via sidebar
+    const webchatTab = page.locator('#nav-links button[data-nav="webchat"]');
+    await expect(webchatTab).toBeVisible();
+    await webchatTab.click();
+    await expect(page.locator('#cview-webchat')).toBeVisible();
+    await expect(page.locator('#appearance-card')).toBeVisible();
   });
 });

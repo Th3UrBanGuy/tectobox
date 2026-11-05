@@ -281,12 +281,14 @@ function updateInboxLock() {
   }
 }
 const ICONS = {
-  inbox: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.5L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.5A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.5z"/></svg>',
-  sheets: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>',
-  box: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>',
-  gear: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.9-2.9l.1.1a1.7 1.7 0 0 0 1.9.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0-.3 1.9v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1z"/></svg>',
-  grid: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
-  dots: '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
+  inbox: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
+  sheets: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>',
+  cart: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>',
+  box: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+  gear: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+  send: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+  grid: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+  dots: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/><circle cx="5" cy="12" r="1.5"/></svg>',
   sun: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M2 12h2.5M19.5 12H22M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>',
   zap: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>',
   chat: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8.5v.5z"/></svg>',
@@ -299,45 +301,201 @@ const ICONS = {
   key: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="15" r="4.5"/><path d="M11.2 11.8L20 3m-3 3l2.5 2.5M16 7l2 2"/></svg>',
   chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
 };
-function renderNav(items) {
-  $('nav-links').innerHTML = items.map(i =>
-    `<button class="nav-link" data-nav="${i.id}">${ICONS[i.icon] || ''}${esc(i.label)}</button>`).join('');
-  document.querySelectorAll('#nav-links .nav-link').forEach(b =>
-    b.onclick = () => { showView(b.dataset.nav); if (b.dataset.nav === 'admin') loadAdmin(); });
-  // mobile bottom tab bar
-  $('bottom-tabs').innerHTML = items.map(i =>
-    `<button class="btab" data-nav="${i.id}">${ICONS[i.icon] || ''}<span>${esc(i.label)}</span></button>`).join('');
-  document.querySelectorAll('#bottom-tabs .btab').forEach(b =>
-    b.onclick = () => { showView(b.dataset.nav); if (b.dataset.nav === 'admin') loadAdmin(); });
+
+function renderNav() {
+  const isAdminUser = state.me && isAdmin(state.me.role);
+  const mainItems = [
+    { id: 'inbox', label: 'Inbox', icon: 'inbox' },
+    { id: 'leads', label: 'Leads', icon: 'sheets' },
+    { id: 'orders', label: 'Orders', icon: 'cart' },
+  ];
+  if (isAdminUser) {
+    mainItems.push({ id: 'admin', label: 'Platform Panel', icon: 'grid' });
+  }
+
+  const workspaceItems = [
+    { id: 'products', label: 'My Products', icon: 'box' },
+    { id: 'channels', label: 'Connect Channels', icon: 'gear' },
+    { id: 'kb', label: 'Teach the AI', icon: 'gear' },
+    { id: 'webchat', label: 'Chat Widget Style', icon: 'gear' },
+    { id: 'backup', label: 'Backup My Data', icon: 'gear' },
+    { id: 'plan', label: 'My Plan', icon: 'gear' },
+    { id: 'apikeys', label: 'API Keys', icon: 'gear' },
+    { id: 'broadcast', label: 'Broadcast', icon: 'send' },
+    { id: 'guide', label: 'Help & Guides', icon: 'dots' },
+  ];
+
+  const buildGroup = (headerTitle, items) => `
+    <div class="sidebar-group">
+      <div class="sidebar-group-header">
+        <svg class="sidebar-group-caret" width="10" height="10" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+        <span>${headerTitle}</span>
+      </div>
+      ${items.map(i => `
+        <button class="nav-link" data-nav="${i.id}">
+          <span class="nav-active-bar"></span>
+          ${ICONS[i.icon] || ''}
+          <span class="nav-text">${esc(i.label)}</span>
+        </button>
+      `).join('')}
+    </div>
+  `;
+
+  // Hidden compatibility button for tests / scripts expecting data-nav="more"
+  const legacyMore = '<button class="nav-link hidden-more-btn" data-nav="more" style="display:none;"></button>';
+
+  $('nav-links').innerHTML = buildGroup('MAIN', mainItems) + buildGroup('WORKSPACE', workspaceItems) + legacyMore;
+
+  document.querySelectorAll('#nav-links .nav-link').forEach(b => {
+    b.onclick = () => {
+      showView(b.dataset.nav);
+      if (b.dataset.nav === 'admin') loadAdmin();
+    };
+  });
+
+  // Mobile bottom tab bar
+  const mobileItems = [
+    { id: 'inbox', label: 'Inbox', icon: 'inbox' },
+    { id: 'leads', label: 'Leads', icon: 'sheets' },
+    { id: 'orders', label: 'Orders', icon: 'cart' },
+    { id: 'products', label: 'Products', icon: 'box' },
+  ];
+  if (isAdminUser) mobileItems.unshift({ id: 'admin', label: 'Admin', icon: 'grid' });
+  const bt = $('bottom-tabs');
+  if (bt) {
+    bt.innerHTML = mobileItems.map(i =>
+      `<button class="btab" data-nav="${i.id}">${ICONS[i.icon] || ''}<span>${esc(i.label)}</span></button>`).join('');
+    document.querySelectorAll('#bottom-tabs .btab').forEach(b =>
+      b.onclick = () => { showView(b.dataset.nav); if (b.dataset.nav === 'admin') loadAdmin(); });
+  }
 }
-var VIEW_TITLES = { admin:'Platform Panel', inbox:'Inbox', leads:'Leads', more:'More', products:'Products', settings:'Settings', guide:'Help & Guides', broadcast:'Broadcast' };
+
+var VIEW_TITLES = {
+  admin: 'Platform Panel',
+  inbox: 'Inbox',
+  leads: 'Leads',
+  orders: 'Orders & Logistics',
+  products: 'My Products',
+  channels: 'Connect Channels',
+  kb: 'Teach the AI',
+  webchat: 'Chat Widget Style',
+  backup: 'Backup My Data',
+  plan: 'My Plan',
+  apikeys: 'API Keys',
+  broadcast: 'Broadcast',
+  guide: 'Help & Guides',
+  more: 'More',
+  settings: 'Settings'
+};
+
+const ALL_VIEWS = [
+  'inbox', 'leads', 'orders', 'products', 'channels', 'kb',
+  'webchat', 'backup', 'plan', 'apikeys', 'broadcast', 'guide', 'more', 'settings'
+];
+
 function showView(view) {
   state.view = view;
   var _tt = $('topnav-title'); if (_tt) _tt.textContent = VIEW_TITLES[view] || '';
-  // products/settings now live under More — keep the More tab highlighted there
-  const navView = (view === 'products' || view === 'settings' || view === 'broadcast') ? 'more' : view;
-  document.querySelectorAll('#nav-links .nav-link').forEach(b => b.classList.toggle('active', b.dataset.nav === navView));
-  document.querySelectorAll('#bottom-tabs .btab').forEach(b => b.classList.toggle('active', b.dataset.nav === navView));
-  // reset mobile inbox to list when switching views
+
+  // Active state on sidebar and bottom tabs
+  document.querySelectorAll('#nav-links .nav-link').forEach(b => b.classList.toggle('active', b.dataset.nav === view));
+  document.querySelectorAll('#bottom-tabs .btab').forEach(b => b.classList.toggle('active', b.dataset.nav === view));
+
   $('inbox-panes').classList.remove('m-chat-open', 'm-detail-open');
   const adminMode = state.me && isAdmin(state.me.role);
   const onAdminDash = adminMode && view === 'admin';
   $('view-client').classList.toggle('hidden', onAdminDash);
   $('view-admin').classList.toggle('hidden', !onAdminDash);
-  for (const v of ['inbox', 'leads', 'products', 'settings', 'more', 'guide', 'broadcast']) {
+
+  for (const v of ALL_VIEWS) {
     var _cv = $('cview-' + v);
-    _cv.classList.toggle('hidden', view !== v);
-    if (view === v && !_cv.classList.contains('hidden')) {
-      _cv.classList.remove('view-enter'); void _cv.offsetWidth; _cv.classList.add('view-enter');
+    if (_cv) {
+      const isTarget = (view === v);
+      _cv.classList.toggle('hidden', !isTarget);
+      if (isTarget) {
+        _cv.classList.remove('view-enter'); void _cv.offsetWidth; _cv.classList.add('view-enter');
+      }
     }
   }
+
   if (view === 'inbox') { loadConversations(); if (!state.activeId) renderChatHeader(null); }
   if (view === 'leads') loadLeads();
+  if (view === 'orders') loadOrdersPage();
   if (view === 'products') loadProducts();
-  if (view === 'settings') { switchSettingsTab(state.settingsTab); renderSetupChecklist(); }
-  if (view === 'more') renderMore();
-  if (view === 'guide') renderGuide();
+  if (view === 'channels') { $('stab-channels')?.classList.remove('hidden'); loadConnectors(); }
+  if (view === 'kb') { $('stab-kb')?.classList.remove('hidden'); switchKbSubTab(state.kbSubTab); loadKnowledge(); }
+  if (view === 'webchat') { $('stab-appearance')?.classList.remove('hidden'); loadAppearanceTab(); }
+  if (view === 'backup') { $('stab-backup')?.classList.remove('hidden'); loadBackupTab(); }
+  if (view === 'plan') { $('stab-plan')?.classList.remove('hidden'); renderPlanTab(); }
+  if (view === 'apikeys') { $('stab-apikeys')?.classList.remove('hidden'); renderApiKeysTab(); }
   if (view === 'broadcast') renderBroadcast();
+  if (view === 'guide') renderGuide();
+  if (view === 'more') renderMore();
+  if (view === 'settings') { switchSettingsTab(state.settingsTab); renderSetupChecklist(); }
+  if (view === 'admin') loadAdmin();
+}
+
+async function loadOrdersPage() {
+  const box = $('orders-full-list');
+  if (!box) return;
+  box.innerHTML = '<div class="small muted" style="padding:24px; text-align:center;">Loading orders & logistics...</div>';
+  try {
+    const res = await api('/api/orders');
+    const orders = res.orders || res || [];
+    const statsEl = $('orders-stats-summary');
+    if (statsEl) {
+      const bookedCount = orders.filter(o => o.courier_status === 'booked').length;
+      statsEl.textContent = `${orders.length} orders total · ${bookedCount} booked to courier`;
+    }
+    if (!orders.length) {
+      box.innerHTML = '<div class="warm-empty" style="padding:40px; text-align:center;"><div class="we-ic" style="font-size:36px; margin-bottom:8px;">📦</div><b>No orders placed yet</b><p class="muted small" style="margin-top:4px;">Orders created by AI or operators in chat will appear here automatically.</p></div>';
+      return;
+    }
+    box.innerHTML = orders.map(o => {
+      let items = [];
+      try { items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []); } catch {}
+      const dc = Number(o.delivery_charge_bdt) || 0;
+      const grandTotal = Number(o.total_bdt) || (Number(o.subtotal_bdt || 0) + dc);
+      const isBooked = o.courier_status === 'booked';
+      return `
+        <div class="card order-card-item" style="padding:16px 20px; display:flex; justify-content:space-between; align-items:center; gap:16px;" data-oid="${o.id}">
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+              <b style="font-size:16px; color:var(--ink);">Order #${o.id}</b>
+              <span class="pill ${isBooked ? 'green' : 'amber'}">${isBooked ? '🚚 Booked (Steadfast)' : 'Unbooked'}</span>
+              ${o.courier_consignment_id ? `<span class="small muted">Tracking: <b>${esc(o.courier_consignment_id)}</b></span>` : ''}
+              <span class="small muted" style="margin-left:auto;">${fmtDT(o.created_at)}</span>
+            </div>
+            <div style="font-size:14px; color:var(--body); margin-bottom:4px;">
+              <b>${esc(o.customer_name || 'Customer')}</b> · <span class="muted">${esc(o.customer_phone || '—')}</span>
+            </div>
+            <div class="small muted" style="margin-bottom:6px;">
+              ${items.length ? items.map(i => `${esc(i.name || i.sku)} × ${i.quantity || 1}`).join(', ') : 'Items'}
+            </div>
+            <div style="font-weight:700; color:var(--ink); font-size:14px;">Total COD: ${grandTotal} BDT</div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
+            ${!isBooked ? `<button class="btn-primary" data-book-order="${o.id}" style="font-size:13px; padding:7px 14px;">🚀 Dispatch Parcel</button>` : ''}
+            <button class="btn-soft" data-thermal-order="${o.id}" style="font-size:13px; padding:6px 12px;">🖨️ Thermal Slip</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    box.querySelectorAll('[data-book-order]').forEach(b => {
+      b.onclick = () => {
+        const o = orders.find(x => String(x.id) === b.dataset.bookOrder);
+        if (o) openCourierBookModal(o);
+      };
+    });
+    box.querySelectorAll('[data-thermal-order]').forEach(b => {
+      b.onclick = () => {
+        printThermalShippingLabel(b.dataset.thermalOrder);
+      };
+    });
+  } catch (e) {
+    box.innerHTML = `<div class="notice warn">${esc(e.message)}</div>`;
+  }
 }
 
 // ---------------- command palette (Cmd+K) ----------------
@@ -3781,6 +3939,22 @@ document.addEventListener('DOMContentLoaded', () => {
     showLogin();
   };
   $('btn-refresh').onclick = () => { if (state.view === 'admin') loadAdmin(); };
+  
+  const btnCourierConfig = $('btn-open-courier-config');
+  if (btnCourierConfig) btnCourierConfig.onclick = openCourierConfigModal;
+  const btnRefOrders = $('btn-refresh-orders');
+  if (btnRefOrders) btnRefOrders.onclick = loadOrdersPage;
+  const ordSearch = $('orders-page-search');
+  if (ordSearch) {
+    ordSearch.addEventListener('input', e => {
+      const q = (e.target.value || '').toLowerCase().trim();
+      document.querySelectorAll('#orders-full-list .order-card-item').forEach(card => {
+        const match = !q || card.textContent.toLowerCase().includes(q);
+        card.style.display = match ? 'flex' : 'none';
+      });
+    });
+  }
+
   // Theme toggles (navbar + login page)
   const syncThemeIcon = () => {
     const dark = document.documentElement.getAttribute('data-theme') !== 'light';
