@@ -18,7 +18,8 @@ async function bootstrap() {
   const candidatePublicDirs = [
     path.join(process.cwd(), 'services/api/public'),
     path.join(process.cwd(), 'public'),
-    path.join(process.cwd(), 'old-code/public'),
+    path.resolve(process.cwd(), '..', 'services', 'api', 'public'),
+    path.resolve(process.cwd(), 'old-code', 'public'),
   ];
   const publicDir = candidatePublicDirs.find((d) => fs.existsSync(d)) || candidatePublicDirs[0];
 
@@ -66,8 +67,8 @@ async function bootstrap() {
   // In-memory sliding window token bucket rate limiter & brute force guard
   const ipBuckets = new Map<string, { tokens: number; lastRefill: number; failedAuth: number; blockedUntil?: number }>();
   expressApp.use((req: any, res: any, next: any) => {
-    // Exempt static files and health checks from rate limiting
-    if (req.method === 'GET' && (req.path.startsWith('/img/') || req.path === '/favicon.ico' || req.path === '/api/health')) {
+    // Only rate-limit /api/ endpoints; exempt all static assets, UI routes, and health checks
+    if (!req.path.startsWith('/api/') || req.path === '/api/health') {
       return next();
     }
 

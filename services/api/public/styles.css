@@ -23,6 +23,32 @@
   --material-edge:rgba(255,255,255,.5);
 }
 
+/* ── Global Defensive Image Reset ── */
+img {
+  max-width: 100%;
+}
+.sidebar-brand-icon,
+.sidebar-logo-img {
+  width: 32px !important;
+  height: 32px !important;
+  max-width: 32px !important;
+  max-height: 32px !important;
+  object-fit: cover !important;
+  border-radius: 9px;
+  flex-shrink: 0;
+}
+.login-card .brand-pill {
+  max-width: 140px !important;
+  max-height: 64px !important;
+  height: 64px !important;
+  width: auto !important;
+  object-fit: contain !important;
+}
+.preloader-logo {
+  max-width: 92px !important;
+  max-height: 92px !important;
+}
+
 /* ── :root fallbacks — if data-theme fails to apply, UI still renders (dark defaults) ── */
 :root{
   --bg:#070a11;
