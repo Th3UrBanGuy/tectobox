@@ -97,6 +97,11 @@ export class LicensingController {
       ? new Date(Date.now() + Number(body.days) * 86400000)
       : new Date(Date.now() + 30 * 86400000);
 
+    // Cancel existing active licenses for this client if any
+    if (body.client_id) {
+      await this.pool.query("UPDATE licenses SET status = 'cancelled' WHERE client_id = $1 AND status = 'active'", [body.client_id]);
+    }
+
     const result = await this.pool.query(
       `INSERT INTO licenses (code, client_id, plan_id, kind, starts_at, ends_at, credits_total, status, features_json, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, NOW())
@@ -152,10 +157,12 @@ export class LicensingController {
   }
 
   @Get(['client/access', 'admin/clients/:id/access'])
-  async getClientAccess(@CurrentTenant() tenantId: number) {
-    if (!tenantId) {
+  async getClientAccess(@CurrentTenant() tenantId: number, @Param('id') paramId?: string) {
+    const targetTenantId = paramId ? Number(paramId) : tenantId;
+    if (!targetTenantId) {
       return {
         active: true,
+        mode: 'legacy',
         features: SYSTEM_FEATURES.map((f) => f.id),
         credits: 999999,
       };
@@ -163,33 +170,52 @@ export class LicensingController {
 
     const licRes = await this.pool.query(
       "SELECT * FROM licenses WHERE client_id = $1 AND status = 'active' ORDER BY id DESC LIMIT 1",
-      [tenantId]
+      [targetTenantId]
     );
 
     if (licRes.rows.length === 0) {
-      // Default standard active features if no strict license is assigned
+      if (targetTenantId === 1) {
+        return {
+          active: true,
+          mode: 'legacy',
+          features: SYSTEM_FEATURES.map((f) => f.id),
+          credits: 999999,
+        };
+      }
       return {
-        active: true,
-        features: SYSTEM_FEATURES.map((f) => f.id),
-        credits: 1000,
+        active: false,
+        mode: 'none',
+        features: [],
+        credits: 0,
+        license: null,
       };
     }
 
     const lic = licRes.rows[0];
-    const rawFeatures = typeof lic.features_json === 'string'
-      ? JSON.parse(lic.features_json)
-      : (lic.features_json || []);
-    const features = Array.isArray(rawFeatures) && rawFeatures.length > 0
+    const rawFeatures = lic.features_json != null
+      ? (typeof lic.features_json === 'string' ? JSON.parse(lic.features_json) : lic.features_json)
+      : SYSTEM_FEATURES.map((f) => f.id);
+    const features = Array.isArray(rawFeatures)
       ? rawFeatures
       : SYSTEM_FEATURES.map((f) => f.id);
 
     return {
       active: lic.status === 'active',
+      mode: 'licensed',
       licenseId: lic.id,
       code: lic.code,
       features,
       creditsTotal: lic.credits_total,
       creditsUsed: lic.credits_used,
+      license: {
+        id: lic.id,
+        code: lic.code,
+        status: lic.status,
+        kind: lic.kind,
+        credits_total: lic.credits_total,
+        credits_used: lic.credits_used,
+        features,
+      },
     };
   }
 }

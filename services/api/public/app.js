@@ -201,12 +201,8 @@ async function boot() {
     var _bs2=$('brand-sub'); if(_bs2) _bs2.textContent='Tectobox';
     $('btn-refresh').classList.add('hidden');
     try { state.access = await api('/api/client/access'); } catch { state.access = null; }
+    renderNav();
     applyAccessGating();
-    renderNav([
-      { id: 'inbox', label: 'Inbox', icon: 'inbox' },
-      { id: 'leads', label: 'Leads', icon: 'sheets' },
-      { id: 'more', label: 'More', icon: 'dots' },
-    ]);
     showView('inbox');
     loadClientAll();
   }
@@ -234,6 +230,17 @@ function applyAccessGating() {
   if (state.settingsTab === 'appearance' && !hasFeature('webchat')) state.settingsTab = 'channels';
   if (state.settingsTab === 'kb' && !hasFeature('knowledge')) state.settingsTab = 'channels';
   if (state.settingsTab === 'apikeys' && !hasFeature('api_access')) state.settingsTab = 'channels';
+
+  // Sidebar isolated links gating based on active license features
+  const navKb = document.querySelector('#nav-links [data-nav="kb"]');
+  if (navKb) navKb.style.display = hasFeature('knowledge') ? '' : 'none';
+  const navWebchat = document.querySelector('#nav-links [data-nav="webchat"]');
+  if (navWebchat) navWebchat.style.display = hasFeature('webchat') ? '' : 'none';
+  const navBroadcast = document.querySelector('#nav-links [data-nav="broadcast"]');
+  if (navBroadcast) navBroadcast.style.display = hasFeature('broadcast') ? '' : 'none';
+  const navApiKeys = document.querySelector('#nav-links [data-nav="apikeys"]');
+  if (navApiKeys) navApiKeys.style.display = hasFeature('api_access') ? '' : 'none';
+
   const ltIntel = document.querySelector('#lm-tabs [data-lt="intel"]');
   if (ltIntel) {
     const show = hasFeature('lead_intel');
@@ -265,14 +272,19 @@ function renderLicenseBanner() {
 }
 function updateInboxLock() {
   const locked = state.me && !isAdmin(state.me.role) && state.access
-    && state.access.mode === 'licensed' && !hasFeature('combined_inbox');
+    && (state.access.mode === 'none' || (state.access.mode === 'licensed' && !hasFeature('combined_inbox')));
   const panes = $('inbox-panes');
   let note = $('inbox-locked');
   if (locked) {
     if (panes) panes.classList.add('hidden');
     if (!note) { note = document.createElement('div'); note.id = 'inbox-locked'; $('cview-inbox').prepend(note); }
+    const noLic = state.access.mode === 'none';
     note.innerHTML = `<div class="card" style="max-width:560px; margin:40px auto; text-align:center; padding:36px 28px;">
-      <button class="btn-primary" id="btn-recheck-lic">Recheck license</button></div>`;
+      <div style="font-size:36px; margin-bottom:12px;">🔒</div>
+      <h3 style="font-size:18px; font-weight:800; color:var(--ink); margin-bottom:6px;">${noLic ? 'No Active License' : 'Combined Inbox Locked'}</h3>
+      <p class="muted small mb16">${noLic ? 'This workspace has no active license — contact the platform admin to activate features.' : 'Combined Inbox is not included in your active plan.'}</p>
+      <button class="btn-primary" id="btn-recheck-lic">Recheck license</button>
+    </div>`;
     const rBtn = $('btn-recheck-lic');
     if (rBtn) rBtn.onclick = () => location.reload();
   } else {
@@ -342,12 +354,12 @@ function renderNav() {
   const workspaceItems = [
     { id: 'products', label: 'My Products', icon: 'box' },
     { id: 'channels', label: 'Connect Channels', icon: 'channels' },
-    { id: 'kb', label: 'Teach the AI', icon: 'brain' },
-    { id: 'webchat', label: 'Chat Widget Style', icon: 'palette' },
+    { id: 'kb', label: 'Teach the AI', icon: 'brain', req: 'knowledge' },
+    { id: 'webchat', label: 'Chat Widget Style', icon: 'palette', req: 'webchat' },
     { id: 'backup', label: 'Backup My Data', icon: 'cloud' },
     { id: 'plan', label: 'My Plan', icon: 'crown' },
-    { id: 'apikeys', label: 'API Keys', icon: 'key' },
-    { id: 'broadcast', label: 'Broadcast', icon: 'broadcast' },
+    { id: 'apikeys', label: 'API Keys', icon: 'key', req: 'api_access' },
+    { id: 'broadcast', label: 'Broadcast', icon: 'broadcast', req: 'broadcast' },
     { id: 'guide', label: 'Help & Guides', icon: 'compass' },
   ];
 
@@ -359,8 +371,9 @@ function renderNav() {
       </div>
       ${items.map(i => {
         const pal = NAV_PALETTES[i.id] || { color: '#6366f1', bg: 'rgba(99, 102, 241, 0.12)' };
+        const isHidden = (i.req && !hasFeature(i.req));
         return `
-        <button class="nav-link" data-nav="${i.id}" title="${esc(i.label)}">
+        <button class="nav-link" data-nav="${i.id}" title="${esc(i.label)}" style="${isHidden ? 'display:none;' : ''}">
           <span class="nav-active-bar"></span>
           <span class="nav-icon-badge" style="color:${pal.color}; background:${pal.bg};">
             ${ICONS[i.icon] || ''}
