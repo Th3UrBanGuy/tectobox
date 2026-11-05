@@ -9,7 +9,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/ ./packages/
 COPY services/api/ ./services/api/
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --config.ignore-scripts=true
 RUN pnpm --filter @tectonic/contracts run build
 RUN pnpm --filter @tectonic/messaging run build
 RUN pnpm --filter @tectonic/coordination run build
@@ -29,7 +29,7 @@ COPY services/api/ ./services/api/
 COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/services/api/dist ./services/api/dist
 
-RUN pnpm install --prod --frozen-lockfile
+RUN pnpm install --prod --frozen-lockfile --config.ignore-scripts=true
 
 EXPOSE 3120
 

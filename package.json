@@ -17,8 +17,10 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "bufferutil",
+      "cpu-features",
       "es5-ext",
       "protobufjs",
+      "ssh2",
       "utf-8-validate"
     ]
   },
