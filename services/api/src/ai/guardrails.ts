@@ -40,8 +40,8 @@ const INSTRUCTION_OVERRIDE_REGEXES = [
 
 // 3. Unauthorized price override & catalog tampering
 const PRICE_TAMPERING_REGEXES = [
-  /(?:set|change|make)\s+(?:the\s+)?price\s+(?:to|as)\s+(?:0|zero|free|1\s*bdt|1\s*taka)/i,
-  /(?:give\s+(?:it|product|everything)\s+to\s+me\s+for\s+(?:free|0|nothing|1\s*tk))/i,
+  /(?:set|change|make|override)\s+(?:the\s+)?(?:product\s+|item\s+)?price\s+(?:to|as)?\s*(?:0|zero|free|1\s*bdt|1\s*taka)/i,
+  /(?:give\s+(?:it|product|item|everything)\s+to\s+me\s+for\s+(?:free|0|nothing|1\s*tk|1\s*taka))/i,
   /(?:the\s+owner\s+(?:authorized|told\s+you|said)\s+to\s+give\s+(?:100%|99%|free|zero))/i,
   /(?:override\s+catalog\s+price)/i,
   /(?:apply\s+(?:secret|admin|bypass)\s+coupon)/i,
