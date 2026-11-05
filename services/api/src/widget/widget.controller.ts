@@ -3,6 +3,7 @@ import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
 import { getAIResponse, demoResponder, detectCustomerLanguage, languageDirective, buildSystemPrompt, queryGoAIEngine } from '../ai/router.js';
+import { evaluatePromptSafety } from '../ai/guardrails.js';
 
 @Controller('api/widget')
 export class WidgetController {
@@ -91,7 +92,13 @@ export class WidgetController {
     let replyId: number | null = null;
     let modelUsed = 'gemini-3.6-flash';
 
-    if (isAskingForHuman) {
+    // 5. Evaluate Prompt Safety & Prompt Injection Guardrails
+    const safetyCheck = evaluatePromptSafety(text);
+
+    if (!safetyCheck.isSafe) {
+      replyText = safetyCheck.safeDefusalReply || 'Unauthorized input pattern detected.';
+      modelUsed = `guardrail:${safetyCheck.threatType}`;
+    } else if (isAskingForHuman) {
       await this.pool.query(
         'UPDATE conversations SET needs_human = true WHERE id = $1',
         [conv.id]
