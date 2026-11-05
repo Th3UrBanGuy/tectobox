@@ -69,6 +69,10 @@ jobs:
             image: tectobox-workers
             dockerfile: infra/Dockerfile.workers.prod
             context: .
+          - service: ai
+            image: tectobox-ai
+            dockerfile: infra/Dockerfile.ai.prod
+            context: .
 
     steps:
       - name: Checkout code

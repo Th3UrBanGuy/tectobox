@@ -9,4 +9,14 @@ export class AppController {
   getHello(): string {
     return this.appService.getHello();
   }
+
+  @Get(['healthz', 'api/healthz'])
+  getHealth() {
+    return {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      service: 'tectobox-core-api',
+      uptime: process.uptime(),
+    };
+  }
 }

@@ -1,0 +1,28 @@
+# Production Dockerfile for Go AI Engine (CI build only)
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+COPY services/ai/go.mod services/ai/go.sum* ./
+RUN go mod download || true
+
+COPY services/ai/ ./
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o ai-service ./cmd/server
+
+FROM alpine:3.19 AS runner
+
+WORKDIR /app
+
+RUN apk --no-cache add ca-certificates tzdata \
+    && addgroup -S appgroup && adduser -S appuser -G appgroup
+
+COPY --from=builder /app/ai-service /app/ai-service
+
+USER appuser
+
+EXPOSE 8081
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8081/health || exit 1
+
+CMD ["/app/ai-service", "--port", "8081"]

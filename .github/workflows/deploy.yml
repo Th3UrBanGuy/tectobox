@@ -1,0 +1,109 @@
+name: Continuous Deployment (CD) to VPS
+
+on:
+  workflow_run:
+    workflows: ["Release & Publish Container Images"]
+    types:
+      - completed
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target_host:
+        description: 'Target VPS IP / Host (leave blank to use secret VPS_HOST)'
+        required: false
+        default: ''
+      custom_domain:
+        description: 'Domain for SSL/TLS via Caddy (leave blank for HTTP on IP)'
+        required: false
+        default: ''
+
+jobs:
+  deploy-to-vps:
+    runs-on: ubuntu-latest
+    # Run only if the Release workflow succeeded or if triggered manually
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Check VPS Secrets Configuration
+        id: check-secrets
+        run: |
+          TARGET_HOST="${{ inputs.target_host || secrets.VPS_HOST }}"
+          if [ -z "$TARGET_HOST" ]; then
+            echo "::warning ::VPS_HOST secret is not configured in this repository. Skipping live SSH deployment."
+            echo "To enable automated deployment, add the following GitHub Secrets in Settings -> Secrets and variables -> Actions:"
+            echo "  - VPS_HOST : The IP address of your VPS"
+            echo "  - VPS_USERNAME : SSH username (e.g. root or ubuntu)"
+            echo "  - VPS_PASSWORD or VPS_SSH_KEY : SSH password or private key"
+            echo "  - VPS_PORT : SSH port (default: 22)"
+            echo "configured=false" >> $GITHUB_OUTPUT
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+            echo "target_host=$TARGET_HOST" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Prepare Deployment Bundle
+        if: steps.check-secrets.outputs.configured == 'true'
+        run: |
+          mkdir -p bundle/infra/caddy bundle/infra/postgres bundle/infra/rabbitmq bundle/scripts
+          cp infra/docker-compose.prod.yml bundle/infra/
+          cp infra/caddy/Caddyfile bundle/infra/caddy/
+          cp infra/postgres/init.sql bundle/infra/postgres/
+          cp infra/postgres/schema.sql bundle/infra/postgres/
+          cp infra/rabbitmq/definitions.json bundle/infra/rabbitmq/
+          cp scripts/deploy.sh bundle/scripts/
+          cp scripts/vps-setup.sh bundle/scripts/
+          chmod +x bundle/scripts/*.sh
+          tar -czf tectobox-deploy.tar.gz -C bundle .
+
+      - name: Deploy to VPS via SSH & Docker Compose
+        if: steps.check-secrets.outputs.configured == 'true'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ steps.check-secrets.outputs.target_host }}
+          username: ${{ secrets.VPS_USERNAME || 'root' }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: GITHUB_SHA,DOMAIN_INPUT
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          DOMAIN_INPUT: ${{ inputs.custom_domain || secrets.DOMAIN }}
+        script: |
+          set -e
+          echo "=== Connected to VPS: $(hostname) at $(date) ==="
+          
+          # 1. Ensure installation directory
+          mkdir -p /opt/tectobox/infra/caddy /opt/tectobox/infra/postgres /opt/tectobox/infra/rabbitmq /opt/tectobox/scripts
+          cd /opt/tectobox
+          
+          # 2. Check if Docker is installed, install if needed
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "[+] Installing Docker on VPS..."
+            curl -fsSL https://get.docker.com | sh
+            systemctl enable --now docker
+          fi
+          
+          # 3. Download/sync deployment scripts and compose directly from GitHub
+          echo "[+] Syncing configuration files from repository..."
+          curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/docker-compose.prod.yml" -o /opt/tectobox/infra/docker-compose.prod.yml
+          curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/caddy/Caddyfile" -o /opt/tectobox/infra/caddy/Caddyfile
+          curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/postgres/init.sql" -o /opt/tectobox/infra/postgres/init.sql
+          curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/postgres/schema.sql" -o /opt/tectobox/infra/postgres/schema.sql
+          curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/rabbitmq/definitions.json" -o /opt/tectobox/infra/rabbitmq/definitions.json
+          curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/deploy.sh" -o /opt/tectobox/scripts/deploy.sh
+          chmod +x /opt/tectobox/scripts/deploy.sh
+          
+          # 4. Set domain if passed
+          if [ -n "$DOMAIN_INPUT" ]; then
+            echo "DOMAIN=$DOMAIN_INPUT" >> /opt/tectobox/.env
+          fi
+          
+          # 5. Execute production zero-downtime deployment
+          export IMAGE_REPO_OWNER="${{ github.repository_owner }}"
+          export IMAGE_TAG="latest"
+          bash /opt/tectobox/scripts/deploy.sh
+          
+          echo "=== Deployment Completed Successfully! ==="

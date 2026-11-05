@@ -1,22 +1,42 @@
 version: "3.9"
 
 services:
+  # Edge Gateway / Reverse Proxy with Automatic SSL and Security Headers
+  gateway:
+    image: caddy:2-alpine
+    container_name: tectobox-prod-gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      ingress:
+        condition: service_started
+    networks:
+      - internal-net
+
   postgres:
     image: postgres:16-alpine
     container_name: tectobox-prod-postgres
     restart: unless-stopped
-    expose:
-      - "5432"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
-      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB required}
+      POSTGRES_USER: ${POSTGRES_USER:-tectobox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tectobox_prod_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-tectobox}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
       - ./postgres/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tectobox}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -27,16 +47,14 @@ services:
     image: redis:7-alpine
     container_name: tectobox-prod-redis
     restart: unless-stopped
-    expose:
-      - "6379"
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-tectobox_redis_secret}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD required}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-tectobox_redis_secret}
     networks:
       - internal-net
 
@@ -44,12 +62,9 @@ services:
     image: rabbitmq:3-management-alpine
     container_name: tectobox-prod-rabbitmq
     restart: unless-stopped
-    expose:
-      - "5672"
-      - "15672"
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?RABBITMQ_USER required}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:?RABBITMQ_PASS required}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-tectobox}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-tectobox_rabbit_secret}
       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -rabbitmq_management load_definitions "/etc/rabbitmq/definitions.json"
     volumes:
       - rabbitmqdata:/var/lib/rabbitmq
@@ -62,18 +77,36 @@ services:
     networks:
       - internal-net
 
+  ai:
+    image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-ai:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.ai.prod
+    container_name: tectobox-prod-ai
+    restart: unless-stopped
+    environment:
+      PORT: 8081
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - internal-net
+
   ingress:
-    image: ghcr.io/tect0nicofficial/tectobox-ingress:${IMAGE_TAG:?IMAGE_TAG required}
+    image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-ingress:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.ingress.prod
     container_name: tectobox-prod-ingress
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8080:8080"
     environment:
       PORT: 8080
-      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672/
-      META_APP_SECRET: ${META_APP_SECRET:?META_APP_SECRET required}
-      META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:?META_VERIFY_TOKEN required}
-      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:?TELEGRAM_WEBHOOK_SECRET required}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-tectobox}:${RABBITMQ_PASS:-tectobox_rabbit_secret}@rabbitmq:5672/
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -81,16 +114,26 @@ services:
       - internal-net
 
   api:
-    image: ghcr.io/tect0nicofficial/tectobox-api:${IMAGE_TAG:?IMAGE_TAG required}
+    image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-api:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api.prod
     container_name: tectobox-prod-api
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:3120:3120"
     environment:
       PORT: 3120
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672/
+      DATABASE_URL: postgres://${POSTGRES_USER:-tectobox}:${POSTGRES_PASSWORD:-tectobox_prod_secret}@postgres:5432/${POSTGRES_DB:-tectobox}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-tectobox_redis_secret}@redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-tectobox}:${RABBITMQ_PASS:-tectobox_rabbit_secret}@rabbitmq:5672/
+      GO_AI_URL: http://ai:8081/api/ai/chat
+      GEMINI_WEB2API_URL: http://ai:8081/v1
+      JWT_SECRET: ${JWT_SECRET:-tectobox_default_jwt_secret_change_me}
+      NODE_ENV: production
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3120/api/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       postgres:
         condition: service_healthy
@@ -98,16 +141,21 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      ai:
+        condition: service_healthy
     networks:
       - internal-net
 
   workers:
-    image: ghcr.io/tect0nicofficial/tectobox-workers:${IMAGE_TAG:?IMAGE_TAG required}
+    image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-workers:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.workers.prod
     container_name: tectobox-prod-workers
     restart: unless-stopped
     environment:
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672/
+      REDIS_URL: redis://:${REDIS_PASSWORD:-tectobox_redis_secret}@redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-tectobox}:${RABBITMQ_PASS:-tectobox_rabbit_secret}@rabbitmq:5672/
       SESSION_DIR: /data/sessions
     volumes:
       - sessiondata:/data/sessions
@@ -128,3 +176,5 @@ volumes:
   redisdata:
   rabbitmqdata:
   sessiondata:
+  caddy_data:
+  caddy_config:

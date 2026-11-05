@@ -1,0 +1,57 @@
+{
+	admin off
+	# Global logging
+	log {
+		output stdout
+		format console
+	}
+}
+
+# The site address dynamically defaults to :80 if DOMAIN is not configured,
+# or uses the configured domain (with automatic HTTPS) if DOMAIN is set.
+{$DOMAIN::80} {
+	encode zstd gzip
+
+	# Advanced Security Headers
+	header {
+		# Prevent MIME type sniffing
+		X-Content-Type-Options "nosniff"
+		# Prevent clickjacking
+		X-Frame-Options "SAMEORIGIN"
+		# Referrer policy
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Remove Server header to prevent fingerprinting
+		-Server
+	}
+
+	# Webhook and Ingress routes directed to Go Ingress service
+	handle /api/ingress/* {
+		reverse_proxy ingress:8080 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	handle /webhooks/* {
+		reverse_proxy ingress:8080 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# All other API and Web UI traffic directed to NestJS Core API
+	handle {
+		reverse_proxy api:3120 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up Upgrade {>Upgrade}
+			header_up Connection {>Connection}
+		}
+	}
+}

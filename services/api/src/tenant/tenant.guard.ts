@@ -93,7 +93,7 @@ export class TenantGuard implements CanActivate {
       const queryVal = request.query?.client_id || request.query?.clientId;
       const overrideVal = headerVal || queryVal;
       const overrideTenantId = overrideVal ? Number(overrideVal) : null;
-      request.tenantId = (overrideTenantId && !isNaN(overrideTenantId)) ? overrideTenantId : (user.clientId || 1);
+      request.tenantId = (overrideTenantId && !isNaN(overrideTenantId)) ? overrideTenantId : (user.clientId ?? null);
       return true;
     }
 

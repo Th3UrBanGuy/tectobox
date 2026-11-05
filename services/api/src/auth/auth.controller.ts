@@ -29,7 +29,10 @@ export class AuthController {
     }
 
     const { username, password } = parsed.data;
-    const jwtSecret = process.env.JWT_SECRET || 'tectobox_jwt_dev_secret_key_2026';
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      throw new Error('JWT_SECRET is required but not configured');
+    }
 
     // Query user in PostgreSQL
     const userResult = await this.pool.query(
