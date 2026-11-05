@@ -332,7 +332,7 @@ function renderNav() {
         <span>${headerTitle}</span>
       </div>
       ${items.map(i => `
-        <button class="nav-link" data-nav="${i.id}">
+        <button class="nav-link" data-nav="${i.id}" title="${esc(i.label)}">
           <span class="nav-active-bar"></span>
           ${ICONS[i.icon] || ''}
           <span class="nav-text">${esc(i.label)}</span>
@@ -4152,8 +4152,124 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   initSlashCommands();
+  initSidebarCollapse();
   boot();
 });
+
+function initSidebarCollapse() {
+  const sidebar = $('app-sidebar');
+  const toggleBtn = $('btn-sidebar-collapse');
+  const resizer = $('sidebar-resizer');
+  if (!sidebar) return;
+
+  function setCollapsed(collapsed) {
+    sidebar.classList.toggle('collapsed', collapsed);
+    if (toggleBtn) {
+      toggleBtn.title = collapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)';
+      const arrow = toggleBtn.querySelector('.sidebar-toggle-arrow');
+      if (arrow) arrow.setAttribute('d', collapsed ? 'M10 9l3 3-3 3' : 'M14 9l-3 3 3 3');
+    }
+    try {
+      localStorage.setItem('tectobox_sidebar_collapsed', collapsed ? '1' : '0');
+    } catch (e) {}
+  }
+
+  // Restore saved state
+  try {
+    const isSavedCollapsed = localStorage.getItem('tectobox_sidebar_collapsed') === '1';
+    if (isSavedCollapsed) {
+      setCollapsed(true);
+    }
+  } catch (e) {}
+
+  if (toggleBtn) {
+    toggleBtn.onclick = (e) => {
+      e.stopPropagation();
+      setCollapsed(!sidebar.classList.contains('collapsed'));
+    };
+  }
+
+  // Clicking brand in collapsed mode expands it
+  const brand = $('sidebar-brand-click');
+  if (brand) {
+    brand.onclick = () => {
+      if (sidebar.classList.contains('collapsed')) {
+        setCollapsed(false);
+      }
+    };
+  }
+
+  // Keyboard shortcut Ctrl+B / Cmd+B
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+      const activeTag = document.activeElement ? document.activeElement.tagName : '';
+      if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
+        e.preventDefault();
+        setCollapsed(!sidebar.classList.contains('collapsed'));
+      }
+    }
+  });
+
+  // Resizer dragging logic for "ছোট করা যাবে, বড় করা যাবে"
+  if (resizer) {
+    let isDragging = false;
+    let startX = 0;
+    let startWidth = 250;
+
+    resizer.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      startX = e.clientX;
+      startWidth = sidebar.getBoundingClientRect().width;
+      sidebar.classList.add('is-resizing');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const delta = e.clientX - startX;
+      let newWidth = startWidth + delta;
+      if (newWidth < 120) {
+        setCollapsed(true);
+      } else {
+        if (sidebar.classList.contains('collapsed')) {
+          setCollapsed(false);
+        }
+        if (newWidth > 420) newWidth = 420;
+        if (newWidth < 180) newWidth = 180;
+        sidebar.style.setProperty('--sidebar-width', `${newWidth}px`);
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (!isDragging) return;
+      isDragging = false;
+      sidebar.classList.remove('is-resizing');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      if (!sidebar.classList.contains('collapsed')) {
+        try {
+          const curW = sidebar.getBoundingClientRect().width;
+          localStorage.setItem('tectobox_sidebar_width', `${Math.round(curW)}px`);
+        } catch (e) {}
+      }
+    });
+
+    // Double-click resizer to toggle collapse
+    resizer.addEventListener('dblclick', () => {
+      setCollapsed(!sidebar.classList.contains('collapsed'));
+    });
+  }
+
+  // Restore saved width if not collapsed
+  try {
+    const savedWidth = localStorage.getItem('tectobox_sidebar_width');
+    const isSavedCollapsed = localStorage.getItem('tectobox_sidebar_collapsed') === '1';
+    if (savedWidth && !isSavedCollapsed) {
+      sidebar.style.setProperty('--sidebar-width', savedWidth);
+    }
+  } catch (e) {}
+}
 
 // ---------------- guide / documentation ----------------
 const GUIDES = [

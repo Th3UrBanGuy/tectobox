@@ -2064,9 +2064,10 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
 }
 
 .app-sidebar {
-  width: 250px;
-  min-width: 250px;
-  max-width: 250px;
+  --sidebar-width: 250px;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  max-width: var(--sidebar-width);
   height: 100vh;
   background: var(--card);
   border-right: 1px solid var(--line);
@@ -2075,34 +2076,166 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
   z-index: 50;
   user-select: none;
   box-shadow: 2px 0 12px rgba(0, 0, 0, 0.02);
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              max-width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
 }
 
+.app-sidebar.is-resizing {
+  transition: none !important;
+}
+
+/* Sidebar Resizer Handle */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 60;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.sidebar-resizer:hover,
+.sidebar-resizer.active {
+  background: var(--accent);
+}
+
+/* Brand Area - Clean, No Capsule */
 .sidebar-brand-wrap {
-  padding: 16px 16px 12px;
+  padding: 14px 14px 12px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.sidebar-logo-pill {
-  background: #08090b;
-  border: 1px solid #232733;
-  border-radius: 9999px;
-  padding: 5px 14px;
-  display: inline-flex;
+.sidebar-brand-content {
+  display: flex;
   align-items: center;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  gap: 10px;
+  text-decoration: none;
+  cursor: pointer;
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
 }
 
-.sidebar-logo-img {
-  height: 22px;
-  width: auto;
+.sidebar-brand-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  object-fit: cover;
+}
+
+.sidebar-brand-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sidebar-brand-title {
+  font-size: 15.5px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.sidebar-brand-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1.2;
+  margin-top: 1px;
+}
+
+.sidebar-toggle-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+/* COLLAPSED STATE */
+.app-sidebar.collapsed {
+  --sidebar-width: 68px !important;
+  width: 68px !important;
+  min-width: 68px !important;
+  max-width: 68px !important;
+}
+
+.app-sidebar.collapsed .sidebar-brand-wrap {
+  padding: 12px 6px 10px;
+  justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-sidebar.collapsed .sidebar-brand-info {
+  display: none !important;
+}
+
+.app-sidebar.collapsed .sidebar-group-header {
+  padding: 6px 0;
+  justify-content: center;
+}
+
+.app-sidebar.collapsed .sidebar-group-header span,
+.app-sidebar.collapsed .sidebar-group-caret {
+  display: none !important;
+}
+
+.app-sidebar.collapsed .sidebar-group-header::after {
+  content: "";
   display: block;
+  width: 20px;
+  height: 1px;
+  background: var(--line);
+}
+
+.app-sidebar.collapsed .nav-link {
+  padding: 10px 0;
+  justify-content: center;
+  width: 44px;
+  margin: 3px auto;
+  border-radius: 12px;
+}
+
+.app-sidebar.collapsed .nav-link .nav-text,
+.app-sidebar.collapsed .nav-link .nav-active-bar {
+  display: none !important;
+}
+
+.app-sidebar.collapsed .nav-link.active {
+  background: linear-gradient(180deg, #20222a 0%, #111216 100%) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
 .sidebar-divider {
   height: 1px;
   background: var(--line);
-  margin: 0 16px 8px;
+  margin: 0 14px 8px;
 }
 
 .sidebar-nav {
@@ -2189,7 +2322,7 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
   display: none;
 }
 
-/* Active item matching the user screenshot */
+/* Active item */
 .app-sidebar .nav-link.active {
   background: linear-gradient(180deg, #20222a 0%, #111216 100%) !important;
   color: #ffffff !important;
@@ -2213,32 +2346,36 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
   background: #ffffff;
 }
 
+/* REDESIGNED BOTTOM FOOTER */
 .sidebar-footer {
-  padding: 10px 14px 14px;
+  padding: 10px 12px 12px;
   border-top: 1px solid var(--line);
   background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .sidebar-user-card {
   border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 8px 12px;
+  border-radius: 12px;
+  padding: 7px 10px;
   display: flex;
   align-items: center;
   gap: 10px;
   background: var(--bg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
-  margin-bottom: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  transition: all 0.15s ease;
 }
 
 .sidebar-user-avatar {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: #18191e;
   color: #ffffff;
   font-weight: 800;
-  font-size: 14px;
+  font-size: 13.5px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2252,7 +2389,7 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
 }
 
 .sidebar-user-name {
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--ink);
   overflow: hidden;
@@ -2264,16 +2401,33 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
   font-size: 11px;
   color: #64748b;
   margin-top: 1px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  display: inline-block;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
 }
 
 .sidebar-foot-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
-.sidebar-pill-btn {
+.sidebar-pill-btn,
+.sidebar-action-btn {
   flex: 1;
-  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
   border-radius: 9999px;
   border: 1.5px solid var(--line);
   background: var(--bg);
@@ -2286,14 +2440,70 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
   font-family: inherit;
 }
 
-.sidebar-pill-btn:hover {
-  border-color: #94a3b8;
-  background: rgba(0, 0, 0, 0.03);
+.sidebar-pill-btn svg,
+.sidebar-action-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  flex-shrink: 0;
 }
 
-[data-theme="dark"] .sidebar-pill-btn:hover {
+.sidebar-pill-btn:hover,
+.sidebar-action-btn:hover {
+  border-color: #94a3b8;
+  background: rgba(0, 0, 0, 0.04);
+  transform: translateY(-1px);
+}
+
+[data-theme="dark"] .sidebar-pill-btn:hover,
+[data-theme="dark"] .sidebar-action-btn:hover {
   border-color: #64748b;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-action-btn.signout-btn:hover {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+/* Collapsed footer */
+.app-sidebar.collapsed .sidebar-footer {
+  padding: 10px 4px 12px;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-sidebar.collapsed .sidebar-user-card {
+  padding: 0;
+  background: transparent;
+  border: none;
+  justify-content: center;
+  box-shadow: none;
+}
+
+.app-sidebar.collapsed .sidebar-user-info {
+  display: none !important;
+}
+
+.app-sidebar.collapsed .sidebar-foot-actions {
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  align-items: center;
+}
+
+.app-sidebar.collapsed .sidebar-action-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+  flex: none;
+  justify-content: center;
+}
+
+.app-sidebar.collapsed .sidebar-action-btn .action-label {
+  display: none !important;
 }
 
 .app-main {
