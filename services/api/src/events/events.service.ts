@@ -15,6 +15,16 @@ export interface OutboundPayload {
   timestamp: string;
 }
 
+export interface BroadcastJobPayload {
+  broadcastId: number;
+  recipientId: number;
+  clientId: number;
+  platform: string;
+  platformUserId: string;
+  customerName?: string | null;
+  text: string;
+}
+
 @Injectable()
 export class EventsService implements OnModuleInit, OnModuleDestroy {
   private redis: Redis | null = null;
@@ -120,6 +130,27 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       }
     }
     return null;
+  }
+
+  /**
+   * Publish one broadcast job to the broadcast.jobs queue.
+   * Routing key 'broadcast.job.send' matches the pre-declared binding
+   * 'broadcast.job.#' in infra/rabbitmq/definitions.json.
+   * Returns false when the broker is not connected (caller records the
+   * failure on the recipient instead of silently dropping the job).
+   */
+  async publishBroadcastJob(job: BroadcastJobPayload): Promise<boolean> {
+    if (!this.isConnected || !this.mq) {
+      console.warn('[events] RabbitMQ not connected, cannot publish broadcast job');
+      return false;
+    }
+    try {
+      await this.mq.publish('broadcast.job.send', job);
+      return true;
+    } catch (err: any) {
+      console.warn('[events] Failed to publish broadcast job:', err.message);
+      return false;
+    }
   }
 
   /**

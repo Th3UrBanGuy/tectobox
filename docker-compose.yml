@@ -158,6 +158,7 @@ services:
     container_name: tectobox-prod-workers
     restart: unless-stopped
     environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-tectobox}:${POSTGRES_PASSWORD:-tectobox_prod_secret}@postgres:5432/${POSTGRES_DB:-tectobox}
       REDIS_URL: redis://:${REDIS_PASSWORD:-tectobox_redis_secret}@redis:6379
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-tectobox}:${RABBITMQ_PASS:-tectobox_rabbit_secret}@rabbitmq:5672/
       SESSION_DIR: /data/sessions

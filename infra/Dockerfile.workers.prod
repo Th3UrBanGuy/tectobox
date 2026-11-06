@@ -9,7 +9,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/ ./packages/
 COPY services/workers/ ./services/workers/
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --config.ignore-scripts=true
 RUN pnpm --filter @tectonic/contracts run build
 RUN pnpm --filter @tectonic/messaging run build
 RUN pnpm --filter @tectonic/coordination run build
@@ -29,6 +29,6 @@ COPY services/workers/ ./services/workers/
 COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/services/workers/dist ./services/workers/dist
 
-RUN pnpm install --prod --frozen-lockfile
+RUN pnpm install --prod --frozen-lockfile --config.ignore-scripts=true
 
 CMD ["pnpm", "--filter", "@tectonic/workers", "run", "start"]
