@@ -1906,9 +1906,9 @@ html{ direction:ltr; }
   background:radial-gradient(420px 200px at 12% 0%,rgba(255,255,255,.09),transparent 60%),
              radial-gradient(520px 260px at 95% 100%,rgba(120,140,180,.14),transparent 60%);}
 .admin-hero-l{position:relative;flex:1;min-width:220px;}
-.admin-hero-l h2{font-size:26px;font-weight:600;letter-spacing:-.02em;margin:6px 0 4px;color:var(--ink);}
-.admin-hero-l p{color:var(--muted);font-size:13px;margin:0;}
-.admin-kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;color:var(--muted);}
+.admin-hero-l h2{font-size:26px;font-weight:600;letter-spacing:-.02em;margin:6px 0 4px;color:#f8fafc;}
+.admin-hero-l p{color:rgba(255,255,255,.72);font-size:13px;margin:0;}
+.admin-kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;color:rgba(255,255,255,.78);}
 .live-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
 .admin-hero-stats{position:relative;display:flex;gap:10px;flex-wrap:wrap;}
