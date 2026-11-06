@@ -74,6 +74,11 @@ export async function startBroadcastWorker() {
   await mq.setupRetryTopology('broadcast.jobs', 'broadcast.job.send', {
     dlxExchange: 'tectobox.dlx',
     dlqQueue: 'broadcast.jobs.dlq',
+    // MUST match infra/rabbitmq/definitions.json exactly: the queue already
+    // exists with x-dead-letter-routing-key 'broadcast.jobs.dlq'. The
+    // helper's default (routingKey + '.dlq' = 'broadcast.job.send.dlq')
+    // mismatches and the broker rejects the declare with 406.
+    dlqRoutingKey: 'broadcast.jobs.dlq',
     retryExchange: 'tectobox.retry',
     retryQueue: 'broadcast.jobs.retry',
     retryTtlMs: 5000,
