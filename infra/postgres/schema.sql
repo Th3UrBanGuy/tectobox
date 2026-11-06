@@ -91,6 +91,29 @@ CREATE TABLE orders (
     UNIQUE(client_id, idempotency_key)
 );
 
+-- Payments (Customer claims, bKash/Nagad TrxIDs, one-click verification hub)
+CREATE TABLE IF NOT EXISTS payments (
+    id SERIAL PRIMARY KEY,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+    conversation_id INTEGER REFERENCES conversations(id) ON DELETE SET NULL,
+    customer_name VARCHAR(255),
+    customer_phone VARCHAR(50),
+    channel VARCHAR(50) DEFAULT 'webchat',
+    amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    method VARCHAR(50) NOT NULL DEFAULT 'bkash',
+    transaction_id VARCHAR(255) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    duplicate_flag BOOLEAN DEFAULT FALSE,
+    evidence_text TEXT,
+    verified_by VARCHAR(255),
+    verified_at TIMESTAMPTZ,
+    rejection_reason TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_payments_client_status ON payments(client_id, status);
+CREATE INDEX IF NOT EXISTS idx_payments_trx ON payments(client_id, transaction_id);
+
 -- Leads
 CREATE TABLE leads (
     id SERIAL PRIMARY KEY,

@@ -162,6 +162,10 @@
           <div class="pane-head inbox-toolbar">
             <div class="list-title"><span>Chats</span></div>
             <div class="toolbar-actions">
+              <button class="icon-btn btn-payments-trigger" id="btn-open-payments" title="Live Payments Hub (bKash/Nagad)" aria-label="Live Payments Hub" style="position:relative;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/><circle cx="7" cy="15" r="1"/></svg>
+                <span class="badge-pending-count hidden" id="badge-pending-count">0</span>
+              </button>
               <div class="pop-wrap">
                 <button class="icon-btn" id="btn-filter" title="Filter by channel" aria-label="Filter by channel">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.5V19l4 2v-8.5L22 3z"/></svg>
@@ -1100,6 +1104,82 @@
           <button type="button" class="btn-danger-soft" id="btn-confirm-disable-2fa">Disable 2FA</button>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Live Payments & Verification Hub Modal -->
+<div id="payments-modal" class="modal-bg hidden">
+  <div class="modal payments-modal-card" style="width:780px; max-width:96vw;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+      <div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h3 style="margin:0;">💳 Live Payments &amp; Verification Hub</h3>
+          <span class="live-dot" style="margin-top:2px;"></span>
+        </div>
+        <p class="msub" style="margin:3px 0 0;">Review, verify and confirm customer bKash/Nagad payments in real-time.</p>
+      </div>
+      <button class="btn-ghost back-btn" id="btn-close-payments" style="font-size:18px;">✕</button>
+    </div>
+
+    <!-- Quick Stats Cards -->
+    <div class="payments-stats-grid">
+      <div class="pay-stat-card pending">
+        <div class="pay-stat-val" id="pay-stat-pending">0</div>
+        <div class="pay-stat-label">Pending Verification</div>
+      </div>
+      <div class="pay-stat-card verified">
+        <div class="pay-stat-val" id="pay-stat-verified">0</div>
+        <div class="pay-stat-label">Verified Today</div>
+      </div>
+      <div class="pay-stat-card volume">
+        <div class="pay-stat-val" id="pay-stat-volume">৳0</div>
+        <div class="pay-stat-label">Volume Today</div>
+      </div>
+      <div class="pay-stat-card duplicates">
+        <div class="pay-stat-val" id="pay-stat-duplicates">0</div>
+        <div class="pay-stat-label">Duplicate Alerts</div>
+      </div>
+    </div>
+
+    <!-- Toolbar: Tabs & Manual Record Button -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin:14px 0 10px; flex-wrap:wrap; gap:8px;">
+      <div class="seg" id="payments-tabs">
+        <button data-ptab="pending" class="active">Pending (<span id="tab-cnt-pending">0</span>)</button>
+        <button data-ptab="verified">Verified</button>
+        <button data-ptab="rejected">Rejected</button>
+        <button data-ptab="all">All</button>
+      </div>
+      <button class="btn-ghost btn-sm" id="btn-toggle-manual-pay" style="font-size:12.5px;">
+        + Record Manual Payment
+      </button>
+    </div>
+
+    <!-- Collapsible Manual Payment Form -->
+    <div id="manual-pay-box" class="twofa-flow-box hidden" style="margin-bottom:14px; padding:12px 14px;">
+      <div style="font-weight:700; font-size:13px; margin-bottom:8px;">Record Offline / Cash / Manual Payment</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:8px; margin-bottom:8px;">
+        <input id="man-pay-phone" class="input no-icon" placeholder="Customer Phone" style="padding:8px 10px;font-size:13px;">
+        <input id="man-pay-name" class="input no-icon" placeholder="Customer Name" style="padding:8px 10px;font-size:13px;">
+        <select id="man-pay-method" class="input no-icon" style="padding:8px 10px;font-size:13px;">
+          <option value="bkash">bKash</option>
+          <option value="nagad">Nagad</option>
+          <option value="rocket">Rocket</option>
+          <option value="bank">Bank Deposit</option>
+          <option value="cod">Cash on Delivery</option>
+        </select>
+        <input id="man-pay-amount" class="input no-icon" type="number" placeholder="Amount (৳)" style="padding:8px 10px;font-size:13px;">
+        <input id="man-pay-trx" class="input no-icon" placeholder="TrxID (e.g. 9X7B...)" style="padding:8px 10px;font-size:13px;">
+      </div>
+      <button class="btn-primary btn-sm" id="btn-submit-manual-pay">+ Save &amp; Record Claim</button>
+    </div>
+
+    <!-- Payments List -->
+    <div id="payments-list" style="max-height:55vh; overflow-y:auto; display:flex; flex-direction:column; gap:10px;"></div>
+
+    <div class="modal-foot" style="margin-top:14px;">
+      <div style="flex:1;" class="muted small">Payments automatically send confirmation chat messages when verified.</div>
+      <button class="btn-ghost" id="btn-close-payments-foot">Done</button>
     </div>
   </div>
 </div>

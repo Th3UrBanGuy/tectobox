@@ -18,6 +18,7 @@ import { ConnectorsModule } from './connectors/connectors.module.js';
 import { SseModule } from './sse/sse.module.js';
 import { CourierModule } from './courier/courier.module.js';
 import { BackupModule } from './backup/backup.module.js';
+import { PaymentsModule } from './payments/payments.module.js';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { BackupModule } from './backup/backup.module.js';
     SseModule,
     CourierModule,
     BackupModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

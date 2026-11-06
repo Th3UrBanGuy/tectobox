@@ -2833,3 +2833,166 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
   margin-top: 4px;
 }
 
+/* ========================================================
+   LIVE PAYMENTS & VERIFICATION HUB
+   ======================================================== */
+.badge-pending-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #f43f5e;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 99px;
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.6);
+  animation: pulse-badge 2s infinite ease-in-out;
+}
+@keyframes pulse-badge {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); box-shadow: 0 0 14px rgba(244, 63, 94, 0.85); }
+}
+
+.payments-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+@media (max-width: 640px) {
+  .payments-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.pay-stat-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  text-align: left;
+}
+.pay-stat-card.pending {
+  border-left: 3px solid #f59e0b;
+}
+.pay-stat-card.verified {
+  border-left: 3px solid #10b981;
+}
+.pay-stat-card.volume {
+  border-left: 3px solid #6366f1;
+}
+.pay-stat-card.duplicates {
+  border-left: 3px solid #ef4444;
+}
+.pay-stat-val {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+.pay-stat-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.payment-card-item {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: transform .15s ease, border-color .15s ease;
+}
+.payment-card-item:hover {
+  border-color: var(--accent);
+}
+.payment-card-item.duplicate-border {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.02);
+}
+.payment-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+.payment-cust-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.payment-amount-box {
+  text-align: right;
+}
+.payment-amount-val {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.method-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #fff;
+}
+.method-badge.bkash { background: #e2136e; }
+.method-badge.nagad { background: #f7941d; }
+.method-badge.rocket { background: #8c3494; }
+.method-badge.bank { background: #2563eb; }
+.method-badge.cod { background: #475569; }
+
+.trx-code-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card-solid);
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-family: monospace;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: 1px;
+}
+.duplicate-warning-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+.payment-card-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.payment-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
