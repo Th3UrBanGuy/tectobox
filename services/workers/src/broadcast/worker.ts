@@ -89,12 +89,15 @@ export async function startBroadcastWorker() {
     status: 'sent' | 'failed',
     error?: string | null,
   ): Promise<void> => {
+    // NOTE: do NOT compute sent_at with CASE WHEN $2 = 'sent' in SQL —
+    // Postgres refuses it with "inconsistent types deduced for parameter
+    // $2" (the same $2 is used as a SET value and inside the CASE
+    // condition). Pass the timestamp from JS instead.
     await pool.query(
       `UPDATE broadcast_recipients
-       SET status = $2, error = $3,
-           sent_at = CASE WHEN $2 = 'sent' THEN NOW() ELSE sent_at END
+       SET status = $2, error = $3, sent_at = COALESCE($4, sent_at)
        WHERE id = $1`,
-      [recipientId, status, error ?? null],
+      [recipientId, status, error ?? null, status === 'sent' ? new Date() : null],
     );
   };
 
