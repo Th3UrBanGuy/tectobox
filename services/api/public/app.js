@@ -157,7 +157,11 @@ async function api(path, opts = {}) {
   });
   if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    let msg = data.message || data.error;
+    if (Array.isArray(msg)) msg = msg.join(', ');
+    throw new Error(msg || `HTTP ${res.status}`);
+  }
   return data;
 }
 
@@ -4148,7 +4152,12 @@ document.addEventListener('DOMContentLoaded', () => {
           throw new Error(data.error || 'Please solve the CAPTCHA.');
         }
         if (capWrap && !capWrap.classList.contains('hidden')) await refreshLoginCaptcha();
-        throw new Error(data.error || 'Login failed');
+        let errorMsg = data.message || data.error;
+        if (Array.isArray(errorMsg)) errorMsg = errorMsg.join(', ');
+        if (!errorMsg || errorMsg === 'Unauthorized' || errorMsg === 'Bad Request' || errorMsg === 'Invalid username or password') {
+          errorMsg = 'ইউজারনেম অথবা পাসওয়ার্ড সঠিক নয়। দয়া করে পুনরায় চেক করুন। (Invalid username or password)';
+        }
+        throw new Error(errorMsg);
       }
       $('login-password').value = '';
       if (totpEl) totpEl.value = '';
@@ -4756,7 +4765,8 @@ async function openProfileModal() {
   $('prof-confirm-password').value = '';
 
   try {
-    const prof = await api('/api/auth/profile');
+    const rawProf = await api('/api/auth/profile');
+    const prof = rawProf.user || rawProf;
     currentProfileData = prof;
 
     // Header info
