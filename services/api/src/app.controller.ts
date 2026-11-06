@@ -1,10 +1,13 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, UseGuards, Query } from '@nestjs/common';
 import { AppService } from './app.service.js';
 import { TenantGuard } from './tenant/tenant.guard.js';
 import { CurrentTenant } from './tenant/current-tenant.decorator.js';
+import { ErrorTrackingService } from './common/errors/error-tracking.service.js';
 
 @Controller()
 export class AppController {
+  private readonly tracker = ErrorTrackingService.getInstance();
+
   constructor(private readonly appService: AppService) {}
 
   @Get()
@@ -19,6 +22,7 @@ export class AppController {
       timestamp: new Date().toISOString(),
       service: 'tectobox-core-api',
       uptime: process.uptime(),
+      memory: process.memoryUsage(),
     };
   }
 
@@ -51,5 +55,20 @@ export class AppController {
   getVapidKey() {
     const key = process.env.VAPID_PUBLIC_KEY || null;
     return { key, configured: Boolean(key) };
+  }
+
+  // Diagnostic error tracking endpoint for real-time observability
+  @Get('api/diagnostics/errors')
+  @UseGuards(TenantGuard)
+  getDiagnosticsErrors(
+    @CurrentTenant() tenantId: number,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = limit ? parseInt(limit, 10) : 50;
+    return {
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      errors: this.tracker.getRecentErrors(parsedLimit, tenantId),
+    };
   }
 }

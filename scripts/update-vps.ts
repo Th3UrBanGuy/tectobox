@@ -39,19 +39,22 @@ conn
 
     try {
       console.log('[update] Pulling latest main on VPS...');
-      await execCommand(conn, 'cd /opt/tectobox && git fetch origin && git reset --hard origin/main');
+      await execCommand(conn, 'cd /opt/tectobox && git checkout main && git fetch origin && git reset --hard origin/main');
 
-      console.log('[update] Building api image on VPS...');
+      console.log('[update] Building api and workers images on VPS...');
       await execCommand(conn, 'cd /opt/tectobox && docker compose -f infra/docker-compose.prod.yml build api');
+      await execCommand(conn, 'cd /opt/tectobox && docker compose -f infra/docker-compose.prod.yml build workers');
 
-      console.log('[update] Recreating api container...');
-      await execCommand(conn, 'docker stop tectobox-prod-api && docker rm tectobox-prod-api && cd /opt/tectobox && docker compose -f infra/docker-compose.prod.yml up -d --no-deps api');
+      console.log('[update] Recreating api and workers containers...');
+      await execCommand(conn, 'docker stop tectobox-prod-api tectobox-prod-workers || true');
+      await execCommand(conn, 'docker rm tectobox-prod-api tectobox-prod-workers || true');
+      await execCommand(conn, 'cd /opt/tectobox && docker compose -f infra/docker-compose.prod.yml up -d --no-deps api workers');
 
       console.log('[update] Ensuring network alias and restarting gateway...');
-      await execCommand(conn, 'docker network connect --alias api tectobox_internal-net tectobox-prod-api ; docker restart tectobox-prod-gateway');
+      await execCommand(conn, 'docker network connect --alias api tectobox_internal-net tectobox-prod-api || true ; docker restart tectobox-prod-gateway');
 
       console.log('[update] Checking container health...');
-      await execCommand(conn, 'sleep 3 && docker ps --filter "name=tectobox-prod-api"');
+      await execCommand(conn, 'sleep 4 && docker ps --filter "name=tectobox-prod-"');
     } catch (err) {
       console.error('[update] Error:', err);
     } finally {

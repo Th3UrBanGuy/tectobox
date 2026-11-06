@@ -1,4 +1,12 @@
 // Tectobox — AI-powered unified inbox frontend (vanilla JS + SSE).
+// Global Client-Side Error & Diagnostics Tracker
+window.addEventListener('error', (event) => {
+  console.warn('[Tectobox Client Error]', event.message, event.filename, event.lineno);
+});
+window.addEventListener('unhandledrejection', (event) => {
+  console.warn('[Tectobox Unhandled Rejection]', event.reason);
+});
+
 // Auth-first: client users are auto-scoped server-side; admin gets the Platform panel.
 const PLATFORMS = {
   whatsapp:  { label: 'WhatsApp',  badge: 'WA', cls: 'p-whatsapp',  color: '#25D366' },
