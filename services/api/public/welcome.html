@@ -1405,7 +1405,7 @@ const SCENARIOS = {
         <div class="sim-receipt-card">
           <div class="sim-receipt-header">
             <span>অর্ডার ড্রাফট #ORD-84920</span>
-            <span style="color:var(--emerald);">🔥 Hot Lead (95/100)</span>
+            <span style="color:var(--emerald); display:inline-flex; align-items:center; gap:5px;"><span class="live-dot" style="background:var(--emerald); width:6px; height:6px;"></span>High Intent (95/100)</span>
           </div>
           <div class="sim-receipt-row"><span>পণ্য:</span> <strong>Apex ANC Earbuds</strong></div>
           <div class="sim-receipt-row"><span>মূল্য:</span> <strong>২৪৫০ টাকা</strong></div>
@@ -1422,7 +1422,7 @@ const SCENARIOS = {
         <div class="sim-receipt-card">
           <div class="sim-receipt-header">
             <span>Order Draft #ORD-84920</span>
-            <span style="color:var(--emerald);">🔥 Hot Lead (95/100)</span>
+            <span style="color:var(--emerald); display:inline-flex; align-items:center; gap:5px;"><span class="live-dot" style="background:var(--emerald); width:6px; height:6px;"></span>High Intent (95/100)</span>
           </div>
           <div class="sim-receipt-row"><span>Product:</span> <strong>Apex ANC Earbuds</strong></div>
           <div class="sim-receipt-row"><span>Amount:</span> <strong>2,450 BDT</strong></div>
@@ -1474,8 +1474,9 @@ const SCENARIOS = {
       a: 'আমি দুঃখিত, আমি শুধুমাত্র Apex Electro Store-এর অনুমোদিত পণ্য, মূল্য ও ডেলিভারি পলিসি বিষয়ক তথ্যে সহায়তা করতে পারি। আপনি কি কোনো পণ্য সম্পর্কে জানতে চান?',
       latency: 'Latency: 24ms',
       extra: `
-        <div style="margin-top:8px; font-size:11.5px; color:var(--rose); background:var(--rose-subtle); padding:6px 10px; border-radius:6px; border:1px solid rgba(244,63,94,0.3); font-weight:600;">
-          🛡️ Attack Deflected: System Prompt & Credentials Protected (Zero Leak)
+        <div style="margin-top:8px; font-size:11.5px; color:var(--rose); background:var(--rose-subtle); padding:6px 10px; border-radius:6px; border:1px solid rgba(244,63,94,0.3); font-weight:600; display:inline-flex; align-items:center; gap:6px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Attack Deflected: System Prompt &amp; Credentials Protected
         </div>
       `
     },
@@ -1485,8 +1486,9 @@ const SCENARIOS = {
       a: 'I apologize, but I am strictly restricted to assisting with verified Apex Electro Store products, pricing, and shipping policies. Would you like to explore our product catalog?',
       latency: 'Latency: 24ms',
       extra: `
-        <div style="margin-top:8px; font-size:11.5px; color:var(--rose); background:var(--rose-subtle); padding:6px 10px; border-radius:6px; border:1px solid rgba(244,63,94,0.3); font-weight:600;">
-          🛡️ Attack Deflected: System Prompt & Credentials Protected (Zero Leak)
+        <div style="margin-top:8px; font-size:11.5px; color:var(--rose); background:var(--rose-subtle); padding:6px 10px; border-radius:6px; border:1px solid rgba(244,63,94,0.3); font-weight:600; display:inline-flex; align-items:center; gap:6px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Attack Deflected: System Prompt &amp; Credentials Protected
         </div>
       `
     }
@@ -1498,8 +1500,9 @@ const SCENARIOS = {
       a: 'আমরা আমাদের একজন সাপোর্ট টিম মেম্বারকে জানাচ্ছি। এআই স্বয়ংক্রিয়ভাবে পজ করা হয়েছে, অনুগ্রহ করে কিছুক্ষণ অপেক্ষা করুন, তিনি দ্রুতই আপনার সাথে কথা বলবেন।',
       latency: 'Latency: 31ms',
       extra: `
-        <div style="margin-top:8px; font-size:11.5px; color:var(--amber); background:var(--amber-subtle); padding:6px 10px; border-radius:6px; border:1px solid rgba(245,158,11,0.3); font-weight:600;">
-          🤝 Human Handover Flagged: AI Paused · Live Operator Notified ✓
+        <div style="margin-top:8px; font-size:11.5px; color:var(--amber); background:var(--amber-subtle); padding:6px 10px; border-radius:6px; border:1px solid rgba(245,158,11,0.3); font-weight:600; display:inline-flex; align-items:center; gap:6px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Human Handover Flagged: AI Paused · Live Operator Notified
         </div>
       `
     },
@@ -1509,8 +1512,9 @@ const SCENARIOS = {
       a: 'I am alerting our human support team right now. The AI has paused responses for this conversation; a live operator will join shortly.',
       latency: 'Latency: 31ms',
       extra: `
-        <div style="margin-top:8px; font-size:11.5px; color:var(--amber); background:var(--amber-subtle); padding:6px 10px; border-radius:6px; border:1px solid rgba(245,158,11,0.3); font-weight:600;">
-          🤝 Human Handover Flagged: AI Paused · Live Operator Notified ✓
+        <div style="margin-top:8px; font-size:11.5px; color:var(--amber); background:var(--amber-subtle); padding:6px 10px; border-radius:6px; border:1px solid rgba(245,158,11,0.3); font-weight:600; display:inline-flex; align-items:center; gap:6px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Human Handover Flagged: AI Paused · Live Operator Notified
         </div>
       `
     }

@@ -281,8 +281,8 @@ function updateInboxLock() {
     if (!note) { note = document.createElement('div'); note.id = 'inbox-locked'; $('cview-inbox').prepend(note); }
     const noLic = state.access.mode === 'none';
     note.innerHTML = `<div class="card" style="max-width:560px; margin:40px auto; text-align:center; padding:36px 28px;">
-      <div style="font-size:36px; margin-bottom:12px;">🔒</div>
-      <h3 style="font-size:18px; font-weight:800; color:var(--ink); margin-bottom:6px;">${noLic ? 'No Active License' : 'Combined Inbox Locked'}</h3>
+      <div style="margin-bottom:12px;"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+      <h3 style="font-size:18px; font-weight:600; color:var(--ink); margin-bottom:6px;">${noLic ? 'No active license' : 'Combined inbox locked'}</h3>
       <p class="muted small mb16">${noLic ? 'This workspace has no active license — contact the platform admin to activate features.' : 'Combined Inbox is not included in your active plan.'}</p>
       <button class="btn-primary" id="btn-recheck-lic">Recheck license</button>
     </div>`;
@@ -494,7 +494,7 @@ async function loadOrdersPage() {
       statsEl.textContent = `${orders.length} orders total · ${bookedCount} booked to courier`;
     }
     if (!orders.length) {
-      box.innerHTML = '<div class="warm-empty" style="padding:40px; text-align:center;"><div class="we-ic" style="font-size:36px; margin-bottom:8px;">📦</div><b>No orders placed yet</b><p class="muted small" style="margin-top:4px;">Orders created by AI or operators in chat will appear here automatically.</p></div>';
+      box.innerHTML = '<div class="warm-empty" style="padding:40px; text-align:center;"><div class="we-ic" style="margin-bottom:8px;"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div><b>No orders placed yet</b><p class="muted small" style="margin-top:4px;">Orders created by AI or operators in chat will appear here automatically.</p></div>';
       return;
     }
     box.innerHTML = orders.map(o => {
@@ -508,7 +508,7 @@ async function loadOrdersPage() {
           <div style="flex:1; min-width:0;">
             <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
               <b style="font-size:16px; color:var(--ink);">Order #${o.id}</b>
-              <span class="pill ${isBooked ? 'green' : 'amber'}">${isBooked ? '🚚 Booked (Steadfast)' : 'Unbooked'}</span>
+              <span class="pill ${isBooked ? 'green' : 'amber'}">${isBooked ? 'Booked (Steadfast)' : 'Unbooked'}</span>
               ${o.courier_consignment_id ? `<span class="small muted">Tracking: <b>${esc(o.courier_consignment_id)}</b></span>` : ''}
               <span class="small muted" style="margin-left:auto;">${fmtDT(o.created_at)}</span>
             </div>
@@ -521,8 +521,8 @@ async function loadOrdersPage() {
             <div style="font-weight:700; color:var(--ink); font-size:14px;">Total COD: ${grandTotal} BDT</div>
           </div>
           <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
-            ${!isBooked ? `<button class="btn-primary" data-book-order="${o.id}" style="font-size:13px; padding:7px 14px;">🚀 Dispatch Parcel</button>` : ''}
-            <button class="btn-soft" data-thermal-order="${o.id}" style="font-size:13px; padding:6px 12px;">🖨️ Thermal Slip</button>
+            ${!isBooked ? `<button class="btn-primary" data-book-order="${o.id}" style="font-size:13px; padding:7px 14px;">Dispatch parcel</button>` : ''}
+            <button class="btn-soft" data-thermal-order="${o.id}" style="font-size:13px; padding:6px 12px;">Thermal slip</button>
           </div>
         </div>
       `;
@@ -763,7 +763,7 @@ async function renderMore() {
   if (!isAdmin(me.role)) {
     const categories = [
       {
-        title: '🛍️ Store & Logistics',
+        title: 'Store & Logistics',
         subtitle: 'Products, Orders & Courier Delivery',
         items: [
           { icon: 'card', t: 'Live Payments Hub', s: 'Instant bKash/Nagad verification & fraud alerts', go: () => openPaymentsModal() },
@@ -773,7 +773,7 @@ async function renderMore() {
         ]
       },
       {
-        title: '💬 Channels & Live Chat',
+        title: 'Channels & Live Chat',
         subtitle: 'Social messaging & Website chat',
         items: [
           { icon: 'chat', t: 'Connect Channels', s: 'Link WhatsApp, Telegram, Facebook Messenger', go: () => gotoSettings('channels') },
@@ -782,7 +782,7 @@ async function renderMore() {
         ]
       },
       {
-        title: '🧠 AI & Intelligence',
+        title: 'AI & Intelligence',
         subtitle: 'Knowledge base & customer scoring',
         items: [
           { icon: 'book', t: 'Teach the AI', s: 'Your prices, policies, answers & website crawler', go: () => gotoSettings('kb'), req: 'knowledge' },
@@ -790,14 +790,14 @@ async function renderMore() {
         ]
       },
       {
-        title: '📢 Marketing & Growth',
+        title: 'Marketing & Growth',
         subtitle: 'Promotions & announcements',
         items: [
           { icon: 'chat', t: 'Broadcast Campaigns', s: 'Send bulk campaign messages to customers', go: () => showView('broadcast'), req: 'broadcast' },
         ]
       },
       {
-        title: '⚙️ Settings & System',
+        title: 'Settings & System',
         subtitle: 'Plan, backup, developer API & guides',
         items: [
           { icon: 'shield', t: 'Password & Security (2FA)', s: 'Change password & manage Two-Factor Authentication', go: () => openProfileModal() },
@@ -984,7 +984,7 @@ async function confirmCourierBooking() {
         note: $('cb-note').value.trim(),
       })
     });
-    toast(`🎉 Booked with Steadfast! Tracking: ${res.tracking_code}`);
+    toast(`Booked with Steadfast. Tracking: ${res.tracking_code}`);
     $('courier-book-modal').classList.add('hidden');
     const conv = state.conversations.find(c => c.id === state.activeId);
     if (conv) renderCustomerTab(conv);
@@ -993,7 +993,7 @@ async function confirmCourierBooking() {
     toast('Booking failed: ' + e.message, 'err');
   } finally {
     btn.disabled = false;
-    btn.textContent = '🚀 Confirm & Dispatch';
+    btn.textContent = 'Confirm & dispatch';
   }
 }
 
@@ -1036,8 +1036,8 @@ async function printThermalShippingLabel(orderId) {
       <div class="ts-recipient">
         <div class="ts-lbl">Recipient Delivery Details</div>
         <div class="ts-name">${esc(o.customer_name || 'Valued Customer')}</div>
-        <div class="ts-phone">📞 ${esc(o.customer_phone || '—')}</div>
-        <div class="ts-addr">📍 ${esc(o.customer_address || 'Dhaka, Bangladesh')}</div>
+        <div class="ts-phone">Phone: ${esc(o.customer_phone || '—')}</div>
+        <div class="ts-addr">Address: ${esc(o.customer_address || 'Dhaka, Bangladesh')}</div>
       </div>
 
       <div class="ts-cod-box">
@@ -1078,7 +1078,7 @@ async function openOrdersModal() {
     const res = await api('/api/orders');
     const orders = res.orders || res || [];
     if (!orders.length) {
-      box.innerHTML = '<div class="warm-empty" style="padding:30px;"><div class="we-ic">📦</div><b>No orders yet</b><p>Orders created from inbox chats will appear here.</p></div>';
+      box.innerHTML = '<div class="warm-empty" style="padding:30px;"><div class="we-ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div><b>No orders yet</b><p>Orders created from inbox chats will appear here.</p></div>';
       return;
     }
     box.innerHTML = `
@@ -1094,7 +1094,7 @@ async function openOrdersModal() {
               <div style="flex:1; min-width:0;">
                 <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
                   <b style="font-size:15px; color:var(--ink);">Order #${o.id}</b>
-                  <span class="pill ${isBooked ? 'green' : 'amber'}">${isBooked ? '🚚 Booked' : 'Unbooked'}</span>
+                  <span class="pill ${isBooked ? 'green' : 'amber'}">${isBooked ? 'Booked' : 'Unbooked'}</span>
                   <span class="small muted">${fmtDT(o.created_at)}</span>
                 </div>
                 <div style="font-size:13px; color:var(--body);"><b>${esc(o.customer_name || 'Customer')}</b> (${esc(o.customer_phone || '—')})</div>
@@ -1102,10 +1102,10 @@ async function openOrdersModal() {
                 ${o.courier_tracking_code ? `<div style="font-size:12px; font-weight:700; color:var(--accent); margin-top:4px;">Tracking: ${esc(o.courier_tracking_code)}</div>` : ''}
               </div>
               <div style="text-align:right; flex-shrink:0;">
-                <div style="font-weight:900; font-size:16px; color:var(--ink);">৳${grandTotal.toLocaleString('en-US')}</div>
+                <div style="font-weight:700; font-size:16px; color:var(--ink);">৳${grandTotal.toLocaleString('en-US')}</div>
                 <div style="display:flex; gap:6px; margin-top:8px;">
-                  ${!isBooked ? `<button class="btn-primary" style="padding:6px 12px; font-size:12px;" data-book-order="${o.id}">🚀 Book Courier</button>` : ''}
-                  <button class="btn-soft" style="padding:6px 12px; font-size:12px;" data-print-order="${o.id}">🖨️ Print Label</button>
+                  ${!isBooked ? `<button class="btn-primary" style="padding:6px 12px; font-size:12px;" data-book-order="${o.id}">Book courier</button>` : ''}
+                  <button class="btn-soft" style="padding:6px 12px; font-size:12px;" data-print-order="${o.id}">Print label</button>
                 </div>
               </div>
             </div>
@@ -1317,7 +1317,7 @@ async function loadConversations(quiet) {
   } catch (e) {
     if (gen !== _convGen) return; // superseded by a newer load
     $('conv-list').innerHTML = `<div class="warm-empty">
-      <div class="we-ic">📡</div><b>Couldn't load conversations</b>
+      <div class="we-ic"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg></div><b>Couldn't load conversations</b>
       <p>The connection hiccuped. Your chats are safe — let's try again.</p>
       <button class="btn-primary" id="btn-conv-retry" style="margin-top:6px;">Retry</button>
     </div>`;
@@ -1336,7 +1336,7 @@ function renderConvList() {
   const box = $('conv-list');
   if (!list.length) {
     box.innerHTML = `<div class="conv-empty">
-      <div class="conv-empty-ic">💬</div>
+      <div class="conv-empty-ic"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
       <div><b>No conversations yet</b></div>
       <div class="muted small">New chats from WhatsApp, Telegram and your website will appear here.</div>
     </div>`;
@@ -1429,7 +1429,7 @@ function renderChatHeader(conv) {
     box.innerHTML = '';
     if (hb) hb.innerHTML = '';
     $('messages').innerHTML = `<div class="warm-empty">
-      <div class="we-ic">💌</div><b>Pick a conversation</b>
+      <div class="we-ic"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div><b>Pick a conversation</b>
       <p>Choose someone from the list and you'll be chatting in a second. Every message here is a real person — treat them like a guest.</p>
     </div>`;
     return;
@@ -1522,7 +1522,7 @@ function renderMessages() {
   hideAiThinking();
   if (!state.messages.length) {
     box.innerHTML = `<div class="warm-empty">
-      <div class="we-ic">💬</div><b>No messages yet</b>
+      <div class="we-ic"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div><b>No messages yet</b>
       <p>Say hello! Your first message will appear here — and the AI will keep the conversation warm when you're away.</p>
     </div>`;
     return;
@@ -1696,8 +1696,8 @@ async function quickReplyText(which) {
         ? 'Our catalog is being updated — please ask about any product!'
         : 'Stock info coming right up — which product are you asking about?';
       if (which === 'Share catalog')
-        return '🛍️ Our catalog:\n\n' + ps.map(p => `• ${p.name} — ৳${Number(p.price_bdt).toLocaleString()}`).join('\n');
-      return '📦 Stock update:\n\n' + ps.map(p => `• ${p.name} — ${(p.stock || 0) > 0 ? `In stock (${p.stock} pcs)` : 'Out of stock'}`).join('\n');
+        return 'Our catalog:\n\n' + ps.map(p => `• ${p.name} — ৳${Number(p.price_bdt).toLocaleString()}`).join('\n');
+      return 'Stock update:\n\n' + ps.map(p => `• ${p.name} — ${(p.stock || 0) > 0 ? `In stock (${p.stock} pcs)` : 'Out of stock'}`).join('\n');
     }
     if (which === 'Delivery info') {
       if (!state.knowledge) state.knowledge = await api(`/api/clients/${state.clientId}/knowledge`);
@@ -1777,10 +1777,10 @@ async function renderCustomerTab(conv) {
           <div style="height:100%; width:${pctPaid}%; background:var(--accent-grad); border-radius:99px; transition:width .4s var(--ease);"></div>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:6px; border-top:1px dashed var(--line);">
-          <span class="pill ${isBooked ? 'green' : 'amber'}">${isBooked ? '🚚 ' + esc(o.courier_tracking_code || 'Booked') : 'Unbooked'}</span>
+          <span class="pill ${isBooked ? 'green' : 'amber'}">${isBooked ? esc(o.courier_tracking_code || 'Booked') : 'Unbooked'}</span>
           <div style="display:flex; gap:6px;">
-            ${!isBooked ? `<button class="mini-btn" data-cust-book="${o.id}">🚀 Book Steadfast</button>` : ''}
-            <button class="mini-btn" data-cust-print="${o.id}">🖨️ Label</button>
+            ${!isBooked ? `<button class="mini-btn" data-cust-book="${o.id}">Book courier</button>` : ''}
+            <button class="mini-btn" data-cust-print="${o.id}">Label</button>
           </div>
         </div>
       </div>`;
@@ -1794,12 +1794,14 @@ async function renderCustomerTab(conv) {
         const fb = $('cust-fraud-box');
         if (!fb) return;
         const pCls = f.risk_level === 'high' ? 'red' : f.risk_level === 'medium' ? 'amber' : 'green';
-        const ic = f.risk_level === 'high' ? '⚠️' : f.risk_level === 'medium' ? '⚡' : '🛡️';
+        const icSvg = f.risk_level === 'high'
+          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>';
         fb.innerHTML = `
           <div style="padding:10px 12px; border-radius:12px; background:var(--active); border:1px solid var(--line); font-size:12px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
               <span style="font-weight:700; color:var(--ink); display:flex; align-items:center; gap:6px;">
-                <span>${ic}</span> Courier Reliability
+                <span>${icSvg}</span> Courier Reliability
               </span>
               <span class="pill ${pCls}">${f.success_rate}% Success</span>
             </div>
@@ -2386,10 +2388,10 @@ function appearanceCard() {
             <div class="wc-pv-ht"><b id="wc-pv-title">Chat with us</b><span id="wc-pv-sub">Online — replies instantly</span></div>
           </div>
           <div class="wc-pv-msgs">
-            <div class="wc-pv-in" id="wc-pv-greet">Hi there! 👋 How can I help you today?</div>
+            <div class="wc-pv-in" id="wc-pv-greet">Hi there! How can I help you today?</div>
             <div class="wc-pv-out">Do you have this in blue?</div>
           </div>
-          <div class="wc-pv-input"><span>Type your message…</span><i id="wc-pv-send">➤</i></div>
+          <div class="wc-pv-input"><span>Type your message…</span><i id="wc-pv-send"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></i></div>
         </div>
         <div class="wc-pv-bubwrap"><div class="wc-pv-bubble" id="wc-pv-bubble">
           <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.14 2 11.25c0 2.92 1.56 5.55 4.03 7.35-.1.72-.58 2.6-1.83 3.9 0 0 2.35.13 4.42-1.6.86.23 1.77.35 2.71.35h.67c5.52 0 10-4.14 10-9.25S17.52 2 12 2z"/></svg>
@@ -2440,14 +2442,14 @@ async function loadAppearanceTab() {
 
   $('appearance-card').innerHTML = `
     <div style="background:var(--active); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:20px;">
-      <div style="font-weight:800; font-size:16px; color:var(--ink); margin-bottom:4px; display:flex; align-items:center; gap:8px;">
-        <span style="font-size:18px;">🌐</span> Webchat Website Integration
+      <div style="font-weight:700; font-size:16px; color:var(--ink); margin-bottom:4px; display:flex; align-items:center; gap:8px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> Webchat Website Integration
       </div>
       <p class="muted small" style="margin-bottom:12px;">Paste this script snippet on your website before the <b>&lt;/body&gt;</b> tag. Visitor chats land directly into your Tectobox unified inbox and the AI answers automatically from your products &amp; FAQs.</p>
       <div class="code-box" style="word-break:break-all; font-size:12px; margin-bottom:12px; font-family:ui-monospace,monospace; background:var(--card); padding:12px; border-radius:8px; border:1px solid var(--line);">${esc(snippet)}</div>
       <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button class="btn-primary" id="wc-tab-copy">📋 Copy Embed Code</button>
-        <button class="btn-soft" id="wc-tab-test">🧪 Try Live on This Page</button>
+        <button class="btn-primary" id="wc-tab-copy">Copy embed code</button>
+        <button class="btn-soft" id="wc-tab-test">Try live on this page</button>
       </div>
     </div>
     ${appearanceCard()}
@@ -2577,7 +2579,7 @@ async function renderPlanTab() {
   const featCreditLine = lic && lic.kind === 'feature' && lic.feature_grants
     ? lic.feature_grants.map(g => `<div class="kv"><span>${esc((CLIENT_FEATURES.find(f => f.key === g.feature) || {}).label || g.feature)}</span><b>${g.mode === 'unlimited' ? 'Unlimited' : g.credits_used + ' / ' + g.credits_total + ' used'}</b></div>`).join('') : '';
   card.innerHTML = `
-    <div class="ttl" style="font-size:17px; margin-bottom:4px;">📋 My Plan</div>
+    <div class="ttl" style="font-size:17px; margin-bottom:4px;">My Plan</div>
     <p class="muted small" style="margin-bottom:14px;">What your workspace is licensed for — synced live with the platform.</p>
     <div class="kv"><span>Status</span><b>${esc(modeLabel)}</b></div>
     ${lic ? `<div class="kv"><span>Plan</span><b>${esc(lic.plan_name || lic.kind)}</b></div>
@@ -2601,7 +2603,7 @@ async function renderApiKeysTab() {
   let keys = [];
   try { keys = (await api(`/api/clients/${state.clientId}/api-keys`)).filter(k => !k.revoked); } catch {}
   card.innerHTML = `
-    <div class="ttl" style="font-size:17px; margin-bottom:4px;">🔑 API Keys</div>
+    <div class="ttl" style="font-size:17px; margin-bottom:4px;">API Keys</div>
     <p class="muted small" style="margin-bottom:14px;">Use these keys with the <a href="/api-docs.html" target="_blank" rel="noopener">public API v1</a> (<span class="mono">Authorization: Bearer &lt;key&gt;</span>). The full key is shown once — store it safely.</p>
     <div style="display:flex; gap:8px; margin-bottom:14px;">
       <input id="ak-name" class="input no-icon" placeholder="Key name (e.g. website)" style="flex:1; min-width:0;">
@@ -2638,34 +2640,34 @@ async function loadBackupTab() {
   try { st = await api('/api/backup/drive/status'); } catch {}
   const driveSection = !st.configured ? `
     <div class="card small" style="background:var(--hover); margin-top:14px;">
-      <div class="ttl" style="margin-bottom:6px;">⚙️ Google Drive not configured</div>
+      <div class="ttl" style="margin-bottom:6px;">Google Drive not configured</div>
       <div class="muted small">The workspace owner needs to add Google OAuth credentials
       (<span class="mono">GOOGLE_DRIVE_CLIENT_ID</span> / <span class="mono">GOOGLE_DRIVE_SECRET</span>)
       on the server first. Local download / upload works without it.</div>
     </div>` : st.connected ? `
     <div class="row" style="gap:10px; margin-top:14px; align-items:center;">
       <span class="pill ok">Drive connected${st.email ? ' · ' + esc(st.email) : ''}</span>
-      <button class="mini-btn" data-bk-drive-upload>⬆ Back up to Drive</button>
-      <button class="mini-btn" data-bk-drive-list>📁 View Drive backups</button>
+      <button class="mini-btn" data-bk-drive-upload>Back up to Drive</button>
+      <button class="mini-btn" data-bk-drive-list>View Drive backups</button>
       <button class="mini-btn danger" data-bk-drive-disconnect>Disconnect</button>
     </div>
     <div id="bk-drive-files" style="margin-top:10px;"></div>` : `
     <div style="margin-top:14px;">
-      <a class="btn primary" href="/api/backup/drive/connect?client_id=${state.clientId}" target="_blank" rel="noopener">🔗 Connect Google Drive</a>
+      <a class="btn primary" href="/api/backup/drive/connect?client_id=${state.clientId}" target="_blank" rel="noopener">Connect Google Drive</a>
       <div class="muted small" style="margin-top:8px;">Backups go to a <b>${esc(st.folder || 'Tectobox Backups')}</b> folder in your Drive.</div>
     </div>`;
 
   card.innerHTML = `
-    <div class="ttl" style="font-size:17px; margin-bottom:4px;">💾 Backup & Restore</div>
+    <div class="ttl" style="font-size:17px; margin-bottom:4px;">Backup & Restore</div>
     <p class="muted small" style="margin-bottom:14px;">Export everything — products, knowledge, leads, orders, conversations — as a portable backup. Restore it on any device.</p>
     <div class="row" style="gap:10px; flex-wrap:wrap;">
-      <button class="btn primary" data-bk-export>⬇ Download backup (.json)</button>
-      <button class="mini-btn" data-bk-export-md>📄 Readable summary (.md)</button>
-      <label class="mini-btn" style="cursor:pointer;">📤 Restore from file<input type="file" data-bk-import accept=".json,application/json" style="display:none;"></label>
+      <button class="btn primary" data-bk-export>Download backup (.json)</button>
+      <button class="mini-btn" data-bk-export-md>Export summary (.md)</button>
+      <label class="mini-btn" style="cursor:pointer;">Restore from file<input type="file" data-bk-import accept=".json,application/json" style="display:none;"></label>
     </div>
     <div id="bk-status" class="muted small" style="margin-top:10px;"></div>
     <hr style="margin:16px 0; border:none; border-top:1px solid var(--line);">
-    <div class="ttl" style="margin-bottom:4px;">☁️ Google Drive</div>
+    <div class="ttl" style="margin-bottom:4px;">Google Drive</div>
     ${driveSection}`;
 
   const say = (t, err) => { $('bk-status').innerHTML = `<span class="${err ? 'err' : 'ok'}">${esc(t)}</span>`; };
@@ -2682,7 +2684,7 @@ async function loadBackupTab() {
       const bundle = JSON.parse(await f.text());
       say('Restoring…');
       const r = await api(`/api/clients/${state.clientId}/backup/import`, { method: 'POST', body: JSON.stringify(bundle) });
-      say(`✅ Restored: ${r.imported.products} products, ${r.imported.knowledge} knowledge docs, ${r.imported.leads} leads, ${r.imported.orders} orders.`);
+      say(`Restored: ${r.imported.products} products, ${r.imported.knowledge} knowledge docs, ${r.imported.leads} leads, ${r.imported.orders} orders.`);
     } catch (err) { say('Restore failed: ' + err.message, true); }
     e.target.value = '';
   };
@@ -2691,7 +2693,7 @@ async function loadBackupTab() {
     say('Uploading to Drive…');
     try {
       const r = await api(`/api/clients/${state.clientId}/backup/drive/upload`, { method: 'POST' });
-      say(`✅ Backed up to Drive → ${r.folder}/ (${r.files.map(f => f.name).join(', ')})`);
+      say(`Backed up to Drive → ${r.folder}/ (${r.files.map(f => f.name).join(', ')})`);
       loadBackupTab();
     } catch (e) { say('Drive upload failed: ' + e.message, true); }
   };
@@ -2711,7 +2713,7 @@ async function loadBackupTab() {
         say('Restoring from Drive…');
         try {
           const rr = await api(`/api/clients/${state.clientId}/backup/drive/restore`, { method: 'POST', body: JSON.stringify({ fileId: b.dataset.restore }) });
-          say(`✅ Restored from Drive: ${rr.imported.products} products, ${rr.imported.knowledge} docs, ${rr.imported.leads} leads, ${rr.imported.orders} orders.`);
+          say(`Restored from Drive: ${rr.imported.products} products, ${rr.imported.knowledge} docs, ${rr.imported.leads} leads, ${rr.imported.orders} orders.`);
         } catch (e) { say('Restore failed: ' + e.message, true); }
       });
     } catch (e) { el.innerHTML = `<div class="err small">Failed: ${esc(e.message)}</div>`; }
@@ -2728,7 +2730,7 @@ function wireAppearance() {
   const ap = w.appearance || {};
   const st = {
     title: ap.title || 'Chat with us',
-    greeting: ap.greeting || 'Hi there! 👋 How can I help you today?',
+    greeting: ap.greeting || 'Hi there! How can I help you today?',
     subtitle: ap.subtitle || 'Online — replies instantly',
     color: ap.color || '#7c5cff',
     position: ap.position || 'bottom-right',
@@ -2868,7 +2870,7 @@ async function loadConnectors() {
     // FB comment automation panel (messenger card, when the Page is connected).
     const commentPanel = (ch === 'messenger' && s.status === 'connected')
       ? `<div class="comment-auto" id="comment-auto">
-          <div class="ca-head">💬 Comment automation <span class="ca-sub">comment → AI reply → DM → lead</span></div>
+          <div class="ca-head">Comment automation <span class="ca-sub">comment → AI reply → DM → lead</span></div>
           <div class="ca-toggles">
             <label class="toggle-row">Auto-reply to comments
               <span class="switch" style="margin-left:auto;"><input type="checkbox" id="ca-autoreply"><span class="sl"></span></span></label>
@@ -2879,7 +2881,7 @@ async function loadConnectors() {
           </div>
           <div class="ca-rules">
             <div class="ca-label">Keyword rules <span class="ca-hint">(one per line: keywords =&gt; reply)</span></div>
-            <textarea id="ca-rules" rows="3" placeholder="দাম, price => দাম জানতে ইনবক্স চেক করুন ✨"></textarea>
+            <textarea id="ca-rules" rows="3" placeholder="দাম, price => দাম জানতে ইনবক্স চেক করুন"></textarea>
             <button class="btn-primary" id="ca-save" style="margin-top:8px;">Save comment settings</button>
           </div>
           <div class="ca-label" style="margin-top:12px;">Recent comment activity</div>
@@ -2974,9 +2976,9 @@ async function loadCommentConfig() {
           rules,
         }),
       });
-      btn.textContent = 'Saved ✅';
+      btn.textContent = 'Saved ✓';
     } catch (e) {
-      btn.textContent = 'Save failed ❌';
+      btn.textContent = 'Save failed';
     }
     setTimeout(() => { btn.textContent = old; }, 1800);
   };
@@ -3000,7 +3002,7 @@ async function loadCommentActivity() {
     box.innerHTML = rows.map(c => `
       <div class="ca-item">
         <div class="ca-c"><b>${esc(c.commenter_name || 'Someone')}</b>: ${esc((c.comment_text || '').slice(0, 120))}</div>
-        ${c.reply_text ? `<div class="ca-r">↳ ${esc(c.reply_text.slice(0, 140))}${c.dm_sent ? ' <span class="ca-dm">+DM ✉</span>' : ''}</div>` : '<div class="ca-r ca-skip">↳ skipped</div>'}
+        ${c.reply_text ? `<div class="ca-r">↳ ${esc(c.reply_text.slice(0, 140))}${c.dm_sent ? ' <span class="ca-dm">+DM sent</span>' : ''}</div>` : '<div class="ca-r ca-skip">↳ skipped</div>'}
       </div>`).join('') || '<div class="ca-empty">No comments yet.</div>';
   } catch { box.innerHTML = '<div class="ca-empty">Could not load activity.</div>'; }
 }
@@ -3436,11 +3438,11 @@ function renderWorkspaces(workspaces) {
     const nm = w.client_name || w.username;
     const hue = avatarHue(nm);
     const lic = w.license;
-    const licPill = !lic ? '<span class="pill">NO LICENSE</span>'
+    const licPill = !lic ? '<span class="pill">No license</span>'
       : `<span class="pill ${lic.status === 'active' ? 'green' : lic.status === 'paused' ? 'amber' : 'red'}">${esc(lic.code)}</span>`;
-    const aiPill = w.suspended ? '<span class="pill red">OFF</span>'
-      : w.ai_paused ? '<span class="pill amber">AI PAUSED</span>'
-      : w.ai_allowed ? '<span class="pill green">AI ON</span>' : '<span class="pill amber">AI OFF</span>';
+    const aiPill = w.suspended ? '<span class="pill red">Suspended</span>'
+      : w.ai_paused ? '<span class="pill amber">AI paused</span>'
+      : w.ai_allowed ? '<span class="pill green">AI on</span>' : '<span class="pill amber">AI off</span>';
     const licLine = !lic ? '<span class="muted">Legacy — full access, no license issued</span>'
       : `<code>${esc(lic.code)}</code><span class="muted">${esc(lic.plan_name || KIND_LABEL[lic.kind] || lic.kind)}${lic.kind === 'time' && lic.ends_at ? ' · until ' + esc(fmtDate(lic.ends_at)) : ''}${lic.kind === 'credit' ? ' · ' + lic.credits_used + '/' + lic.credits_total + ' credits' : ''}</span>`;
     const delAt = w.delete_scheduled_at ? new Date(w.delete_scheduled_at) : null;
@@ -3894,7 +3896,7 @@ function connectSSE() {
         playPaymentChime();
         updatePaymentBadge((state.pendingPaymentsCount || 0) + 1);
         const p = evt.payment || {};
-        toast(`💳 New Payment Claim: ${(p.method || 'bKash').toUpperCase()} ৳${p.amount || 0} (TrxID: ${p.transaction_id || ''})`, 'ok');
+        toast(`New payment claim: ${(p.method || 'bKash').toUpperCase()} ৳${p.amount || 0} (TrxID: ${p.transaction_id || ''})`, 'ok');
         if (state.paymentsModalOpen) {
           loadPayments();
           loadPaymentStats();
@@ -4644,8 +4646,8 @@ async function openProfileModal() {
       uInput.disabled = true;
       uInput.readOnly = true;
       uRuleTag.className = 'field-rule-tag locked';
-      uRuleTag.textContent = '🔒 Locked / সংরক্ষিত';
-      uNotice.innerHTML = '<span style="color:#f43f5e;font-size:12px;font-weight:600;">🔒 ইউজারদের ইউজারনেম পরিবর্তনের অনুমতি নেই — শুধুমাত্র পাসওয়ার্ড পরিবর্তন করা যাবে।</span>';
+      uRuleTag.textContent = 'Locked / সংরক্ষিত';
+      uNotice.innerHTML = '<span style="color:var(--muted);font-size:12px;font-weight:500;">ইউজারদের ইউজারনেম পরিবর্তন সুরক্ষিত রাখা হয়েছে — শুধুমাত্র পাসওয়ার্ড পরিবর্তন করা যাবে।</span>';
     }
 
     // 2FA status
@@ -4689,8 +4691,8 @@ function render2FAStatus(enabled) {
   pwdPrompt.classList.add('hidden');
 
   if (enabled) {
-    shield.textContent = '🛡️';
-    title.textContent = 'Two-Factor Authentication is ACTIVE';
+    shield.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>';
+    title.textContent = 'Two-Factor Authentication is Active';
     desc.textContent = 'Your account is secured with TOTP. Authentication code is required on login.';
     badge.textContent = 'Active';
     badge.className = 'pill green';
@@ -4699,7 +4701,7 @@ function render2FAStatus(enabled) {
     disableSec.classList.remove('hidden');
     $('prof-2fa-disable-pwd').value = '';
   } else {
-    shield.textContent = '⚠️';
+    shield.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
     title.textContent = 'Two-Factor Authentication is Disabled';
     desc.textContent = 'Add an extra layer of protection using Google Authenticator, 1Password, or Microsoft Authenticator.';
     badge.textContent = 'Disabled';
@@ -4961,14 +4963,14 @@ async function loadPayments(tab = currentPaymentsTab) {
 
     if (!payments.length) {
       const emptyLabels = {
-        pending: 'No pending payments waiting for verification 🎉',
+        pending: 'No pending payments waiting for verification',
         verified: 'No verified payments recorded yet.',
         rejected: 'No rejected payments.',
         all: 'No payment records found.'
       };
       listEl.innerHTML = `
         <div class="empty-state-box" style="text-align:center;padding:40px 16px;background:var(--card);border-radius:14px;border:1px dashed var(--line);">
-          <div style="font-size:32px;margin-bottom:8px;">${tab === 'pending' ? '🎉' : '💳'}</div>
+          <div style="margin-bottom:8px;"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/><circle cx="7" cy="15" r="1"/></svg></div>
           <div style="font-weight:700;color:var(--ink);font-size:15px;">${emptyLabels[tab] || 'No payments'}</div>
           <p class="muted small" style="margin:4px 0 0;">Customer payments from WhatsApp, Webchat and other channels will appear here in real-time.</p>
         </div>`;
@@ -4987,25 +4989,25 @@ async function loadPayments(tab = currentPaymentsTab) {
       if (p.status === 'pending') {
         actionsHtml = `
           <button class="btn-primary btn-sm btn-verify-pay" data-pay-id="${p.id}" style="background:#10b981;box-shadow:none;">
-            ✓ Verify &amp; Confirm
+            Verify &amp; Confirm
           </button>
           <button class="btn-danger-soft btn-sm btn-reject-pay" data-pay-id="${p.id}">
-            ✕ Reject
+            Reject
           </button>`;
       } else if (p.status === 'verified') {
         actionsHtml = `
-          <span class="pill green" style="font-size:12px;">✓ Verified by ${esc(p.verified_by || 'Admin')}</span>`;
+          <span class="pill green" style="font-size:12px;">Verified by ${esc(p.verified_by || 'Admin')}</span>`;
       } else if (p.status === 'rejected') {
         actionsHtml = `
           <span class="pill" style="color:#ef4444;background:rgba(239,68,68,0.12);font-size:12px;">
-            ✕ Rejected${p.rejection_reason ? ': ' + esc(p.rejection_reason) : ''}
+            Rejected${p.rejection_reason ? ': ' + esc(p.rejection_reason) : ''}
           </span>`;
       }
 
       if (p.conversation_id) {
         actionsHtml += `
           <button class="btn-ghost btn-sm btn-jump-chat" data-conv-id="${p.conversation_id}" style="font-size:12px;">
-            💬 View Chat
+            View chat
           </button>`;
       }
 
@@ -5015,7 +5017,7 @@ async function loadPayments(tab = currentPaymentsTab) {
             <div class="payment-cust-info">
               <span class="method-badge ${esc(method)}">${esc(method.toUpperCase())}</span>
               <div>
-                <div style="font-weight:800;font-size:14.5px;color:var(--ink);">
+                <div style="font-weight:700;font-size:14.5px;color:var(--ink);">
                   ${esc(custName)} ${custPhone ? `<span class="muted small">(${esc(custPhone)})</span>` : ''}
                 </div>
                 <div class="muted small">
@@ -5033,9 +5035,9 @@ async function loadPayments(tab = currentPaymentsTab) {
             <div class="trx-code-badge">
               <span>TrxID:</span>
               <span style="user-select:all;">${esc(p.transaction_id)}</span>
-              <button type="button" class="btn-ghost btn-sm btn-copy-trx" data-trx="${esc(p.transaction_id)}" title="Copy TrxID" style="padding:1px 5px;font-size:11px;">📋</button>
+              <button type="button" class="btn-ghost btn-sm btn-copy-trx" data-trx="${esc(p.transaction_id)}" title="Copy TrxID" style="padding:1px 5px;font-size:11px;">Copy</button>
             </div>
-            ${isDup ? `<div class="duplicate-warning-badge">⚠️ DUPLICATE TrxID — Already used in another order!</div>` : ''}
+            ${isDup ? `<div class="duplicate-warning-badge">Duplicate TrxID — Already used in another order</div>` : ''}
           </div>
 
           ${p.evidence_text ? `<div class="small muted" style="background:var(--hover);padding:6px 10px;border-radius:8px;font-style:italic;">"${esc(p.evidence_text.slice(0, 150))}"</div>` : ''}
@@ -5063,7 +5065,7 @@ async function loadPayments(tab = currentPaymentsTab) {
         } catch (err) {
           toast('Verification failed: ' + err.message, 'err');
           btn.disabled = false;
-          btn.textContent = '✓ Verify & Confirm';
+          btn.textContent = 'Verify & Confirm';
         }
       };
     });
@@ -5183,7 +5185,7 @@ function initPaymentsHub() {
           })
         });
 
-        toast(res.duplicate_warning ? '⚠️ Payment claimed (Duplicate TrxID Warning!)' : 'Payment recorded successfully!', 'ok');
+        toast(res.duplicate_warning ? 'Payment claimed (Duplicate TrxID warning)' : 'Payment recorded successfully', 'ok');
         $('man-pay-trx').value = '';
         $('man-pay-amount').value = '';
         boxMan.classList.add('hidden');
