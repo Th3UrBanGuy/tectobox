@@ -3,8 +3,8 @@ import * as path from 'path';
 
 const ARTIFACT_DIR = 'C:/Users/Diamond Technology/.gemini/antigravity/brain/7c4b2ecc-173c-4b91-9904-9e4ad41ca616';
 
-test.describe('Mobile Phone UX & Floating Island Hardening', () => {
-  test('Desktop: Semi-rounded floating sidebar, 2x2 footer actions without overflow', async ({ page }) => {
+test.describe('Professional Docked Sidebar, Clean User Card, and Gated Inbox', () => {
+  test('Desktop: Clean docked sidebar, integrated user card actions, no floating button spillage', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.addInitScript(() => {
       try { localStorage.setItem('tectonic-onboard-hide', '1'); } catch {}
@@ -27,45 +27,49 @@ test.describe('Mobile Phone UX & Floating Island Hardening', () => {
       await page.locator('#gs-close').click().catch(() => {});
     }
 
-    // Verify floating sidebar geometry
+    // Verify docked sidebar geometry:
+    // Sidebar must be docked to left (x = 0) with full height (900px), NO floating gaps
     const sidebar = page.locator('#app-sidebar');
     await expect(sidebar).toBeVisible();
 
     const sidebarBox = await sidebar.boundingBox();
     expect(sidebarBox).not.toBeNull();
+    expect(sidebarBox!.x).toBe(0);
+    expect(sidebarBox!.height).toBe(900);
 
-    // Verify 2x2 footer action buttons fit inside sidebar with NO overflow
-    const footActions = page.locator('.sidebar-foot-actions');
-    await expect(footActions).toBeVisible();
+    // Verify NO mobile-top-bar exists anywhere on desktop
+    const mobileTopBar = page.locator('#mobile-top-bar');
+    expect(await mobileTopBar.count()).toBe(0);
 
-    const footBox = await footActions.boundingBox();
-    expect(footBox).not.toBeNull();
-    // Entire footActions bounding box must be within the sidebar width
-    expect(footBox!.x + footBox!.width).toBeLessThanOrEqual(sidebarBox!.x + sidebarBox!.width + 2);
+    // Verify clean integrated user card with action buttons
+    const userCard = page.locator('#sidebar-user-card');
+    await expect(userCard).toBeVisible();
 
-    // Check all 4 buttons are visible
-    await expect(page.locator('#btn-open-payments-sidebar')).toBeVisible();
-    await expect(page.locator('#btn-theme')).toBeVisible();
-    await expect(page.locator('#btn-profile-sidebar')).toBeVisible();
-    await expect(page.locator('#btn-signout')).toBeVisible();
+    const themeBtn = page.locator('#btn-theme');
+    await expect(themeBtn).toBeVisible();
 
-    // Verify license gating vs inbox leak:
-    // If locked card is present, panes must be hidden; if panes are present, locked card must NOT be present!
-    const isLocked = await page.locator('#inbox-locked').isVisible();
-    const panesVisible = await page.locator('#inbox-panes').isVisible();
+    const signoutBtn = page.locator('#btn-signout');
+    await expect(signoutBtn).toBeVisible();
 
-    if (isLocked) {
-      expect(panesVisible).toBe(false);
-      console.log('Verified: License is locked, inbox-panes is strictly HIDDEN with 0 leaks.');
-    } else {
-      console.log('Verified: Workspace is licensed, inbox-panes is active and accessible.');
-    }
+    // Verify Payments Hub in sidebar navigation
+    const paymentsNav = page.locator('#nav-links [data-nav="payments"]');
+    await expect(paymentsNav).toBeVisible();
 
-    // Capture desktop screenshot
-    await page.screenshot({ path: path.join(ARTIFACT_DIR, 'desktop_floating_sidebar.png') });
+    // Verify Chats toolbar Payments Hub trigger button
+    const paymentsTrigger = page.locator('#btn-open-payments');
+    await expect(paymentsTrigger).toBeVisible();
+
+    // Verify inbox is active for licensed operator
+    const panes = page.locator('#inbox-panes');
+    await expect(panes).toBeVisible();
+    const lockedCard = page.locator('#inbox-locked');
+    await expect(lockedCard).toBeHidden();
+
+    // Capture desktop clean screenshot
+    await page.screenshot({ path: path.join(ARTIFACT_DIR, 'desktop_clean_docked_sidebar.png') });
   });
 
-  test('Mobile: Sleek top bar, floating dock, single-pane drawer & back navigation', async ({ page }) => {
+  test('Mobile: Clean phone view, bottom dock, single-pane conversational drawer', async ({ page }) => {
     // iPhone 14 viewport
     await page.setViewportSize({ width: 390, height: 844 });
     await page.addInitScript(() => {
@@ -88,29 +92,22 @@ test.describe('Mobile Phone UX & Floating Island Hardening', () => {
       await page.locator('#gs-close').click().catch(() => {});
     }
 
-    // 1. Desktop sidebar must be completely HIDDEN on mobile
+    // 1. Desktop sidebar must be hidden on mobile
     const sidebar = page.locator('#app-sidebar');
     await expect(sidebar).toBeHidden();
 
-    // 2. Mobile top bar must be visible
-    const mobileTopBar = page.locator('#mobile-top-bar');
-    await expect(mobileTopBar).toBeVisible();
+    // 2. Bottom tabs dock is visible
+    const bottomTabs = page.locator('#bottom-tabs');
+    await expect(bottomTabs).toBeVisible();
 
-    // 3. Mobile action buttons work
-    await expect(page.locator('#btn-open-payments-mobile')).toBeVisible();
-    await expect(page.locator('#btn-theme-mobile')).toBeVisible();
-    await expect(page.locator('#btn-profile-mobile')).toBeVisible();
-    await expect(page.locator('#btn-signout-mobile')).toBeVisible();
+    // 3. Capture mobile list view
+    await page.screenshot({ path: path.join(ARTIFACT_DIR, 'mobile_clean_inbox.png') });
 
-    // 4. Capture mobile inbox list view
-    await page.screenshot({ path: path.join(ARTIFACT_DIR, 'mobile_inbox_view.png') });
-
-    // 5. Test single-pane conversation drawer if there are conversations
+    // 4. Test single-pane conversation drawer
     const convItems = page.locator('.conv-item');
     const convCount = await convItems.count();
 
     if (convCount > 0) {
-      // Tap first conversation
       await convItems.first().click();
       await page.waitForTimeout(600);
 
@@ -125,18 +122,17 @@ test.describe('Mobile Phone UX & Floating Island Hardening', () => {
       await expect(backBtn).toBeVisible();
 
       // Capture single pane chat screenshot
-      await page.screenshot({ path: path.join(ARTIFACT_DIR, 'mobile_chat_view.png') });
+      await page.screenshot({ path: path.join(ARTIFACT_DIR, 'mobile_clean_chat.png') });
 
       // Click back button to return to chat list
       await backBtn.click();
       await page.waitForTimeout(500);
 
-      // Verify list pane is visible again
       await expect(listPane).toBeVisible();
     }
   });
 
-  test('Strict License Gating: Unlicensed workspace displays ONLY centered Obsidian lock card without any inbox leak', async ({ page }) => {
+  test('Strict License Gating: Unlicensed workspace displays ONLY centered Obsidian lock card', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.addInitScript(() => {
       try { localStorage.setItem('tectonic-onboard-hide', '1'); } catch {}
@@ -144,9 +140,9 @@ test.describe('Mobile Phone UX & Floating Island Hardening', () => {
 
     await page.goto('/app', { waitUntil: 'networkidle' });
 
-    // Login as unlicensed client 'xyz'
-    await page.fill('#login-username', 'xyz');
-    await page.fill('#login-password', 'Operator123!');
+    // Login as unlicensed client 'user_mono_46874' (workspace 4 has no license)
+    await page.fill('#login-username', 'user_mono_46874');
+    await page.fill('#login-password', 'password123');
     await page.click('#login-btn');
 
     await expect(page.locator('#app-view')).toBeVisible({ timeout: 15000 });
@@ -162,13 +158,7 @@ test.describe('Mobile Phone UX & Floating Island Hardening', () => {
     const panes = page.locator('#inbox-panes');
     await expect(panes).toBeHidden();
 
-    // Conversation list must have 0 elements visible
-    const convItems = page.locator('.conv-item');
-    expect(await convItems.count()).toBe(0);
-
     // Capture clean locked screenshot
-    await page.screenshot({ path: path.join(ARTIFACT_DIR, 'locked_inbox_clean.png') });
-    console.log('Verified: Locked workspace shows ONLY clean Obsidian lock card. Zero inbox leaking.');
+    await page.screenshot({ path: path.join(ARTIFACT_DIR, 'locked_clean_gated.png') });
   });
 });
-

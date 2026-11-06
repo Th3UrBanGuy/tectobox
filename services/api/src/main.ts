@@ -61,7 +61,9 @@ async function bootstrap() {
       maxAge: '7d',
       setHeaders(res: any, filePath: string) {
         if (/\.(html|js|css)$/.test(filePath)) {
-          res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
         } else if (/\.(png|jpg|jpeg|svg|ico|webp|woff2?)$/.test(filePath)) {
           // CDN cacheable for 30 days with stale-while-revalidate
           res.setHeader('Cache-Control', 'public, max-age=2592000, stale-while-revalidate=86400');

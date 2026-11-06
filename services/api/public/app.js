@@ -408,6 +408,7 @@ function renderNav() {
   }
 
   const workspaceItems = [
+    { id: 'payments', label: 'Payments Hub', icon: 'card' },
     { id: 'products', label: 'My Products', icon: 'box' },
     { id: 'channels', label: 'Connect Channels', icon: 'channels' },
     { id: 'kb', label: 'Teach the AI', icon: 'brain', req: 'knowledge' },
@@ -427,6 +428,9 @@ function renderNav() {
       </div>
       ${items.map(i => {
         const isHidden = (i.req && !hasFeature(i.req));
+        const badge = (i.id === 'payments' && state.pendingPaymentsCount > 0)
+          ? `<span class="badge-pending-count" style="margin-left:auto;position:static;display:inline-flex;">${state.pendingPaymentsCount}</span>`
+          : '';
         return `
         <button class="nav-link" data-nav="${i.id}" title="${esc(i.label)}" style="${isHidden ? 'display:none;' : ''}">
           <span class="nav-active-bar"></span>
@@ -434,6 +438,7 @@ function renderNav() {
             ${ICONS[i.icon] || ''}
           </span>
           <span class="nav-text">${esc(i.label)}</span>
+          ${badge}
         </button>
       `;
       }).join('')}
@@ -517,6 +522,7 @@ function showView(view) {
     }
   }
 
+  if (view === 'payments') { openPaymentsModal(); return; }
   if (view === 'inbox') {
     updateInboxLock();
     if (!isInboxLocked()) {
@@ -5029,11 +5035,12 @@ function initProfileSecurityModal() {
 
   // Bind sidebar and user card clicks
   const sidebarUserCard = $('sidebar-user-card');
-  if (sidebarUserCard) sidebarUserCard.onclick = openProfileModal;
-  const btnProfSidebar = $('btn-profile-sidebar');
-  if (btnProfSidebar) btnProfSidebar.onclick = openProfileModal;
-  const btnProfMobile = $('btn-profile-mobile');
-  if (btnProfMobile) btnProfMobile.onclick = openProfileModal;
+  if (sidebarUserCard) {
+    sidebarUserCard.onclick = (e) => {
+      if (e.target.closest('#btn-theme') || e.target.closest('#btn-signout')) return;
+      openProfileModal();
+    };
+  }
 }
 
 // ---------------- Live Payments Hub & Real-time Verification ----------------
