@@ -51,7 +51,8 @@ conn
       await execCommand(conn, 'cd /opt/tectobox && docker compose -f infra/docker-compose.prod.yml up -d --no-deps api workers');
 
       console.log('[update] Ensuring network alias and restarting gateway...');
-      await execCommand(conn, 'docker network connect --alias api tectobox_internal-net tectobox-prod-api || true ; docker restart tectobox-prod-gateway');
+      await execCommand(conn, 'docker network connect --alias api tectobox_internal-net tectobox-prod-api || true ; docker network connect tectobox_internal-net tectobox-prod-workers || true ; docker restart tectobox-prod-gateway');
+
 
       console.log('[update] Checking container health...');
       await execCommand(conn, 'sleep 4 && docker ps --filter "name=tectobox-prod-"');
