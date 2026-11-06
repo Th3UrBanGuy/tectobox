@@ -378,11 +378,13 @@ export class AdminController {
     const days = plan.billing_period === 'yearly' ? 365 : plan.billing_period === 'quarterly' ? 90 : 30;
     const endsAt = new Date(Date.now() + days * 86400000);
 
+    const featuresJson = typeof plan.features_json === 'string' ? plan.features_json : JSON.stringify(plan.features_json || []);
+
     const licRes = await this.pool.query(
       `INSERT INTO licenses (code, client_id, plan_id, kind, starts_at, ends_at, credits_total, status, features_json, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, NOW())
        RETURNING *`,
-      [code, id, plan.id, plan.kind, startsAt, endsAt, plan.credits_included || 0, plan.features_json]
+      [code, id, plan.id, plan.kind, startsAt, endsAt, plan.credits_included || 0, featuresJson]
     );
     return licRes.rows[0];
   }
