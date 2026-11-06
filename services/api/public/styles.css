@@ -2408,6 +2408,8 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
   display: flex;
   flex-direction: column;
   gap: 10px;
+  position: relative;
+  z-index: 70;
 }
 
 .sidebar-user-card {

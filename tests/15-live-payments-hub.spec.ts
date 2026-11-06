@@ -14,6 +14,13 @@ test.describe('15. Live Payments Hub & AI Payment Claim Detection', () => {
     // App view should be visible
     await expect(page.locator('#app-view')).toBeVisible({ timeout: 8000 });
 
+    // Dismiss onboarding popup if active for operator
+    const gsOverlay = page.locator('#gs-overlay');
+    if (await gsOverlay.isVisible().catch(() => false)) {
+      await page.locator('#gs-close').click().catch(() => {});
+      await expect(gsOverlay).toBeHidden();
+    }
+
     // Payments trigger button should be visible in toolbar
     const payTrigger = page.locator('#btn-open-payments');
     await expect(payTrigger).toBeVisible();
