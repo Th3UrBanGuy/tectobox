@@ -68,42 +68,42 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           envs: GITHUB_SHA,DOMAIN_INPUT
+          script: |
+            set -e
+            echo "=== Connected to VPS: $(hostname) at $(date) ==="
+
+            # 1. Ensure installation directory
+            mkdir -p /opt/tectobox/infra/caddy /opt/tectobox/infra/postgres /opt/tectobox/infra/rabbitmq /opt/tectobox/scripts
+            cd /opt/tectobox
+
+            # 2. Check if Docker is installed, install if needed
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "[+] Installing Docker on VPS..."
+              curl -fsSL https://get.docker.com | sh
+              systemctl enable --now docker
+            fi
+
+            # 3. Download/sync deployment scripts and compose directly from GitHub
+            echo "[+] Syncing configuration files from repository..."
+            curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/docker-compose.prod.yml" -o /opt/tectobox/infra/docker-compose.prod.yml
+            curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/caddy/Caddyfile" -o /opt/tectobox/infra/caddy/Caddyfile
+            curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/postgres/init.sql" -o /opt/tectobox/infra/postgres/init.sql
+            curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/postgres/schema.sql" -o /opt/tectobox/infra/postgres/schema.sql
+            curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/rabbitmq/definitions.json" -o /opt/tectobox/infra/rabbitmq/definitions.json
+            curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/deploy.sh" -o /opt/tectobox/scripts/deploy.sh
+            chmod +x /opt/tectobox/scripts/deploy.sh
+
+            # 4. Set domain if passed
+            if [ -n "$DOMAIN_INPUT" ]; then
+              echo "DOMAIN=$DOMAIN_INPUT" >> /opt/tectobox/.env
+            fi
+
+            # 5. Execute production zero-downtime deployment
+            export IMAGE_REPO_OWNER="${{ github.repository_owner }}"
+            export IMAGE_TAG="latest"
+            bash /opt/tectobox/scripts/deploy.sh
+
+            echo "=== Deployment Completed Successfully! ==="
         env:
           GITHUB_SHA: ${{ github.sha }}
           DOMAIN_INPUT: ${{ inputs.custom_domain || secrets.DOMAIN }}
-        script: |
-          set -e
-          echo "=== Connected to VPS: $(hostname) at $(date) ==="
-          
-          # 1. Ensure installation directory
-          mkdir -p /opt/tectobox/infra/caddy /opt/tectobox/infra/postgres /opt/tectobox/infra/rabbitmq /opt/tectobox/scripts
-          cd /opt/tectobox
-          
-          # 2. Check if Docker is installed, install if needed
-          if ! command -v docker >/dev/null 2>&1; then
-            echo "[+] Installing Docker on VPS..."
-            curl -fsSL https://get.docker.com | sh
-            systemctl enable --now docker
-          fi
-          
-          # 3. Download/sync deployment scripts and compose directly from GitHub
-          echo "[+] Syncing configuration files from repository..."
-          curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/docker-compose.prod.yml" -o /opt/tectobox/infra/docker-compose.prod.yml
-          curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/caddy/Caddyfile" -o /opt/tectobox/infra/caddy/Caddyfile
-          curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/postgres/init.sql" -o /opt/tectobox/infra/postgres/init.sql
-          curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/postgres/schema.sql" -o /opt/tectobox/infra/postgres/schema.sql
-          curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/rabbitmq/definitions.json" -o /opt/tectobox/infra/rabbitmq/definitions.json
-          curl -sSL "https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/deploy.sh" -o /opt/tectobox/scripts/deploy.sh
-          chmod +x /opt/tectobox/scripts/deploy.sh
-          
-          # 4. Set domain if passed
-          if [ -n "$DOMAIN_INPUT" ]; then
-            echo "DOMAIN=$DOMAIN_INPUT" >> /opt/tectobox/.env
-          fi
-          
-          # 5. Execute production zero-downtime deployment
-          export IMAGE_REPO_OWNER="${{ github.repository_owner }}"
-          export IMAGE_TAG="latest"
-          bash /opt/tectobox/scripts/deploy.sh
-          
-          echo "=== Deployment Completed Successfully! ==="
