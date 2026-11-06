@@ -4942,14 +4942,14 @@ let currentPaymentsTab = 'pending';
 
 function updatePaymentBadge(count) {
   state.pendingPaymentsCount = Math.max(0, count);
-  const badge = $('badge-pending-count');
-  if (!badge) return;
-  if (state.pendingPaymentsCount > 0) {
-    badge.textContent = state.pendingPaymentsCount > 99 ? '99+' : state.pendingPaymentsCount;
-    badge.classList.remove('hidden');
-  } else {
-    badge.classList.add('hidden');
-  }
+  document.querySelectorAll('.badge-pending-count').forEach(badge => {
+    if (state.pendingPaymentsCount > 0) {
+      badge.textContent = state.pendingPaymentsCount > 99 ? '99+' : state.pendingPaymentsCount;
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  });
 }
 
 async function loadPaymentStats() {
@@ -5140,8 +5140,9 @@ function closePaymentsModal() {
 }
 
 function initPaymentsHub() {
-  const btnTrigger = $('btn-open-payments');
-  if (btnTrigger) btnTrigger.onclick = openPaymentsModal;
+  document.querySelectorAll('.btn-payments-trigger').forEach(b => {
+    b.onclick = openPaymentsModal;
+  });
   const btnClose = $('btn-close-payments');
   if (btnClose) btnClose.onclick = closePaymentsModal;
   const btnCloseFoot = $('btn-close-payments-foot');
