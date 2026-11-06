@@ -12,8 +12,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Tectobox">
-<link rel="stylesheet" href="/styles.css?v=20261107_v7_neo_login">
-<script src="/theme-init.js?v=20261107"></script>
+<link rel="stylesheet" href="/styles.css?v=20261107_v8_mobile_auth_fix">
+<script src="/theme-init.js?v=20261107b"></script>
 </head>
 <body>
   <div id="preloader" aria-hidden="true">
@@ -60,14 +60,14 @@
           <label for="login-username" id="lbl-login-username">Username</label>
           <div class="input-wrap">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>
-            <input id="login-username" class="input" type="text" placeholder="your-username" autocomplete="username">
+            <input id="login-username" class="input" type="text" placeholder="your-username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
           </div>
         </div>
         <div class="field">
           <label for="login-password" id="lbl-login-password">Password</label>
           <div class="input-wrap has-action">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-            <input id="login-password" class="input" type="password" placeholder="••••••••" autocomplete="current-password">
+            <input id="login-password" class="input" type="password" placeholder="••••••••" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false">
             <button type="button" id="btn-toggle-login-pwd" class="btn-input-action" title="Show/Hide Password" aria-label="Toggle password visibility">
               <svg id="eye-show" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
               <svg id="eye-hide" class="hidden" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
@@ -192,6 +192,9 @@
               </div>
               <button class="icon-btn" id="btn-human" title="Needs human" aria-label="Needs human only">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.9-2.3l-3.4-3.85a2 2 0 0 1 3-2.65L7 15"/></svg>
+              </button>
+              <button class="icon-btn mobile-only-signout" id="btn-mobile-signout" title="Sign out" aria-label="Sign out">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
               </button>
             </div>
           </div>
@@ -552,6 +555,10 @@
           <div class="admin-kicker"><span class="live-dot"></span>Platform Owner</div>
           <h2>Platform Panel</h2>
           <p>Workspaces, licenses &amp; platform health — one place.</p>
+          <button class="btn-ghost mobile-only-signout" id="btn-admin-mobile-signout" title="Sign out" aria-label="Sign out" style="margin-top:8px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            <span>Sign out</span>
+          </button>
         </div>
         <div class="admin-hero-stats" id="admin-stats"></div>
       </div>
@@ -1198,7 +1205,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=20261107_v7_neo_login"></script>
+<script src="/app.js?v=20261107_v8_mobile_auth_fix"></script>
     <div class="gs-overlay hidden" id="gs-overlay">
       <div class="gs-card" id="get-started" role="dialog" aria-label="Get started"></div>
     </div>

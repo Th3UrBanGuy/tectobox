@@ -198,12 +198,37 @@ export class LicensingController {
           credits: 999999,
         };
       }
+      // Auto-provision an active enterprise license for any existing workspace without one
+      try {
+        const defaultFeatures = SYSTEM_FEATURES.map((f) => f.id);
+        const code = `TB-AUTO-${targetTenantId}-${Date.now().toString(36).toUpperCase()}`;
+        const newLic = await this.pool.query(
+          `INSERT INTO licenses (client_id, code, kind, starts_at, status, features_json, credits_total, credits_used, created_at)
+           VALUES ($1, $2, 'time', NOW(), 'active', $3::jsonb, 10000, 0, NOW())
+           RETURNING *`,
+          [targetTenantId, code, JSON.stringify(defaultFeatures)]
+        );
+        if (newLic.rows.length > 0) {
+          const l = newLic.rows[0];
+          return {
+            active: true,
+            mode: 'licensed',
+            licenseId: l.id,
+            code: l.code,
+            features: defaultFeatures,
+            creditsTotal: l.credits_total,
+            creditsUsed: l.credits_used || 0,
+            license: l,
+          };
+        }
+      } catch (err) {
+        // Fallback to legacy full access if auto-provisioning encounters race
+      }
       return {
-        active: false,
-        mode: 'none',
-        features: [],
-        credits: 0,
-        license: null,
+        active: true,
+        mode: 'legacy',
+        features: SYSTEM_FEATURES.map((f) => f.id),
+        credits: 999999,
       };
     }
 

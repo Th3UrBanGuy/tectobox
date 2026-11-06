@@ -295,22 +295,32 @@ function renderLicenseBanner() {
 
 function updateInboxLock() {
   const locked = isInboxLocked();
+  const cview = $('cview-inbox');
   const panes = $('inbox-panes');
   const empty = $('inbox-empty');
   let note = $('inbox-locked');
   const licBanner = $('license-banner');
 
+  if (cview) {
+    cview.classList.toggle('is-locked', locked);
+  }
+
   if (locked) {
     if (licBanner) licBanner.remove();
-    if (empty) empty.innerHTML = '';
+    if (empty) {
+      empty.innerHTML = '';
+      empty.classList.add('hidden');
+    }
     if (panes) {
       panes.classList.add('hidden');
       panes.style.setProperty('display', 'none', 'important');
+      panes.style.setProperty('visibility', 'hidden', 'important');
+      panes.style.setProperty('pointer-events', 'none', 'important');
     }
     if (!note) {
       note = document.createElement('div');
       note.id = 'inbox-locked';
-      $('cview-inbox').prepend(note);
+      if (cview) cview.prepend(note);
     }
     const noLic = !state.access || state.access.mode === 'none';
     note.innerHTML = `
@@ -358,8 +368,11 @@ function updateInboxLock() {
   } else {
     if (panes) {
       panes.style.removeProperty('display');
+      panes.style.removeProperty('visibility');
+      panes.style.removeProperty('pointer-events');
       panes.classList.remove('hidden');
     }
+    if (empty) empty.classList.remove('hidden');
     if (note) note.remove();
   }
 }
@@ -458,13 +471,20 @@ function renderNav() {
   });
 
   // Mobile bottom tab bar
-  const mobileItems = [
-    { id: 'inbox', label: 'Inbox', icon: 'inbox' },
-    { id: 'leads', label: 'Leads', icon: 'sheets' },
-    { id: 'orders', label: 'Orders', icon: 'cart' },
-    { id: 'products', label: 'Products', icon: 'box' },
-  ];
-  if (isAdminUser) mobileItems.unshift({ id: 'admin', label: 'Admin', icon: 'grid' });
+  const mobileItems = isAdminUser
+    ? [
+        { id: 'admin', label: 'Admin', icon: 'grid' },
+        { id: 'inbox', label: 'Inbox', icon: 'inbox' },
+        { id: 'leads', label: 'Leads', icon: 'sheets' },
+        { id: 'more', label: 'Account', icon: 'crown' },
+      ]
+    : [
+        { id: 'inbox', label: 'Inbox', icon: 'inbox' },
+        { id: 'leads', label: 'Leads', icon: 'sheets' },
+        { id: 'orders', label: 'Orders', icon: 'cart' },
+        { id: 'products', label: 'Products', icon: 'box' },
+        { id: 'more', label: 'Account', icon: 'crown' },
+      ];
   const bt = $('bottom-tabs');
   if (bt) {
     bt.innerHTML = mobileItems.map(i =>
@@ -4151,6 +4171,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!ok) { toast('Logout failed — check connection and try again', 'err'); return; }
     showLogin();
   };
+  const mSignout = $('btn-mobile-signout');
+  if (mSignout) mSignout.onclick = () => $('btn-signout')?.click();
+  const admMSignout = $('btn-admin-mobile-signout');
+  if (admMSignout) admMSignout.onclick = () => $('btn-signout')?.click();
   $('btn-refresh').onclick = () => { if (state.view === 'admin') loadAdmin(); };
   
   const btnCourierConfig = $('btn-open-courier-config');

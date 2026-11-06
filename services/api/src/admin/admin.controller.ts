@@ -168,6 +168,20 @@ export class AdminController {
       [body.username.trim(), passwordHash, body.role || 'operator', clientId]
     );
 
+    // If workspace has no license, automatically provision an active enterprise license
+    if (clientId) {
+      const existingLicense = await this.pool.query('SELECT id FROM licenses WHERE client_id = $1 LIMIT 1', [clientId]);
+      if (existingLicense.rows.length === 0) {
+        const defaultFeatures = JSON.stringify(['combined_inbox', 'inbox', 'ai_response', 'webchat', 'broadcast', 'lead_intel', 'knowledge', 'api_access']);
+        const licCode = `TB-AUTO-${clientId}-${Date.now().toString(36).toUpperCase()}`;
+        await this.pool.query(
+          `INSERT INTO licenses (client_id, code, kind, starts_at, status, features_json, credits_total, credits_used, created_at)
+           VALUES ($1, $2, 'time', NOW(), 'active', $3::jsonb, 10000, 0, NOW())`,
+          [clientId, licCode, defaultFeatures]
+        );
+      }
+    }
+
     const user = result.rows[0];
     return {
       ok: true,
