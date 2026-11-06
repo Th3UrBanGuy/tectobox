@@ -35,8 +35,16 @@ test.describe('16. Admin Workspaces, Direct Licensing, Payments Hub & Pure Monoc
       await expect(gsOverlay).toBeHidden();
     }
 
-    // Capture monochrome admin view
+    // Capture monochrome admin view (Light)
     await page.screenshot({ path: path.join(artifactDir, 'bw_admin_dashboard.png'), fullPage: false });
+
+    // Toggle theme to dark and capture Dark Mode
+    await page.click('#btn-theme');
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: path.join(artifactDir, 'bw_admin_dark.png'), fullPage: false });
+    // Toggle back to light
+    await page.click('#btn-theme');
+    await page.waitForTimeout(300);
 
     // 4. Create a new Workspace & User via the Admin Workspaces Tab
     const uniqueSuffix = Date.now().toString().slice(-5);

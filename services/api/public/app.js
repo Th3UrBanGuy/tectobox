@@ -195,6 +195,8 @@ async function boot() {
   var _bt2 = $('bottom-tabs'); if (_bt2) _bt2.classList.remove('hidden');
   $('user-name').textContent = me.username;
   $('user-avatar').textContent = (me.username || '?')[0].toUpperCase();
+  const mUn = $('mobile-user-name');
+  if (mUn) mUn.textContent = me.username;
   if (isAdmin(me.role)) {
     var _bs=$('brand-sub'); if(_bs) _bs.textContent='Platform Panel';
     $('btn-refresh').classList.remove('hidden');
@@ -226,8 +228,18 @@ function hasFeature(k) {
   if (!state.me || isAdmin(state.me.role)) return true;
   const a = state.access;
   if (!a) return true; // not loaded yet — never hide before we know
-  return (a.features || []).includes(k);
+  const feats = a.features || [];
+  // Normalize synonyms
+  if ((k === 'combined_inbox' || k === 'inbox') && (feats.includes('combined_inbox') || feats.includes('inbox'))) return true;
+  return feats.includes(k);
 }
+
+function isInboxLocked() {
+  if (!state.me || isAdmin(state.me.role)) return false;
+  if (!state.access) return false;
+  return state.access.mode === 'none' || (state.access.mode === 'licensed' && !hasFeature('combined_inbox'));
+}
+
 function applyAccessGating() {
   const a = state.access;
   if (!a || !state.me || isAdmin(state.me.role)) return;
@@ -264,14 +276,14 @@ function applyAccessGating() {
   renderLicenseBanner();
   updateInboxLock();
 }
+
 function renderLicenseBanner() {
   let el = $('license-banner');
   const a = state.access;
   const admin = !state.me || isAdmin(state.me.role);
-  if (!a || admin) { if (el) el.remove(); return; }
+  if (!a || admin || isInboxLocked()) { if (el) el.remove(); return; }
   const msgs = [];
-  if (a.mode === 'none') msgs.push(['warn', 'This workspace has no active license — contact the platform admin to activate features.']);
-  else if (a.license && a.license.status === 'expired') msgs.push(['warn', 'Your license has expired — AI and licensed features are paused until renewal.']);
+  if (a.license && a.license.status === 'expired') msgs.push(['warn', 'Your license has expired — AI and licensed features are paused until renewal.']);
   if (a.aiPaused) msgs.push(['warn', 'AI replies are paused by the platform admin. Your inbox keeps working — every message still arrives here.']);
   else if (a.aiReason === 'credits_exhausted') msgs.push(['warn', `AI credits exhausted (${a.license.credits_used}/${a.license.credits_total} used). The inbox keeps working — ask the admin for a top-up to resume AI replies.`]);
   else if (a.aiReason === 'feature_not_in_plan' || a.aiReason === 'ai_not_granted') msgs.push(['', 'AI auto-replies are not included in your current plan — reply manually from the inbox.']);
@@ -280,25 +292,74 @@ function renderLicenseBanner() {
   el.innerHTML = msgs.map(([cls, t]) =>
     `<div class="notice ${cls}" style="margin-bottom:10px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span>${esc(t)}</span></div>`).join('');
 }
+
 function updateInboxLock() {
-  const locked = state.me && !isAdmin(state.me.role) && state.access
-    && (state.access.mode === 'none' || (state.access.mode === 'licensed' && !hasFeature('combined_inbox')));
+  const locked = isInboxLocked();
   const panes = $('inbox-panes');
+  const empty = $('inbox-empty');
   let note = $('inbox-locked');
+  const licBanner = $('license-banner');
+
   if (locked) {
-    if (panes) panes.classList.add('hidden');
-    if (!note) { note = document.createElement('div'); note.id = 'inbox-locked'; $('cview-inbox').prepend(note); }
-    const noLic = state.access.mode === 'none';
-    note.innerHTML = `<div class="card" style="max-width:560px; margin:40px auto; text-align:center; padding:36px 28px;">
-      <div style="margin-bottom:12px;"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
-      <h3 style="font-size:18px; font-weight:600; color:var(--ink); margin-bottom:6px;">${noLic ? 'No active license' : 'Combined inbox locked'}</h3>
-      <p class="muted small mb16">${noLic ? 'This workspace has no active license — contact the platform admin to activate features.' : 'Combined Inbox is not included in your active plan.'}</p>
-      <button class="btn-primary" id="btn-recheck-lic">Recheck license</button>
-    </div>`;
+    if (licBanner) licBanner.remove();
+    if (empty) empty.innerHTML = '';
+    if (panes) {
+      panes.classList.add('hidden');
+      panes.style.setProperty('display', 'none', 'important');
+    }
+    if (!note) {
+      note = document.createElement('div');
+      note.id = 'inbox-locked';
+      $('cview-inbox').prepend(note);
+    }
+    const noLic = !state.access || state.access.mode === 'none';
+    note.innerHTML = `
+      <div class="locked-container-card" style="max-width:560px; margin:60px auto; text-align:center; padding:44px 32px; background:var(--card); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow-md);">
+        <div style="width:64px; height:64px; margin:0 auto 18px; border-radius:18px; background:var(--card2); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--ink);">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="3" ry="3"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            <circle cx="12" cy="16" r="1.5"/>
+          </svg>
+        </div>
+        <h2 style="font-size:20px; font-weight:700; color:var(--ink); margin:0 0 8px; letter-spacing:-0.02em;">
+          ${noLic ? 'No Active License' : 'Combined Inbox Locked'}
+        </h2>
+        <p class="muted small" style="margin:0 0 24px; line-height:1.6; max-width:440px; margin-left:auto; margin-right:auto;">
+          ${noLic
+            ? 'This workspace has no active subscription or license assigned. Customer conversations and inbox features remain locked until an active plan is issued by the platform owner.'
+            : 'The Combined Inbox feature is not included in your workspace active plan. Upgrade your plan or contact the platform owner to unlock omnichannel customer chat.'}
+        </p>
+        <div style="display:flex; gap:10px; justify-content:center;">
+          <button class="btn-primary" id="btn-recheck-lic" style="min-width:140px;">
+            <span>Recheck License</span>
+          </button>
+        </div>
+      </div>`;
     const rBtn = $('btn-recheck-lic');
-    if (rBtn) rBtn.onclick = () => location.reload();
+    if (rBtn) {
+      rBtn.onclick = async () => {
+        rBtn.disabled = true;
+        rBtn.textContent = 'Checking…';
+        try {
+          state.access = await api('/api/client/access');
+          applyAccessGating();
+          if (!isInboxLocked()) {
+            loadClientAll();
+          }
+        } catch {
+          location.reload();
+        } finally {
+          rBtn.disabled = false;
+          rBtn.textContent = 'Recheck License';
+        }
+      };
+    }
   } else {
-    if (panes) panes.classList.remove('hidden');
+    if (panes) {
+      panes.style.removeProperty('display');
+      panes.classList.remove('hidden');
+    }
     if (note) note.remove();
   }
 }
@@ -456,7 +517,13 @@ function showView(view) {
     }
   }
 
-  if (view === 'inbox') { loadConversations(); if (!state.activeId) renderChatHeader(null); }
+  if (view === 'inbox') {
+    updateInboxLock();
+    if (!isInboxLocked()) {
+      loadConversations();
+      if (!state.activeId) renderChatHeader(null);
+    }
+  }
   if (view === 'leads') loadLeads();
   if (view === 'orders') loadOrdersPage();
   if (view === 'products') loadProducts();
@@ -1264,6 +1331,11 @@ function toggleMobileDetail(open) {
 
 // ---------------- client: inbox ----------------
 async function loadClientAll() {
+  if (isInboxLocked()) {
+    updateInboxLock();
+    await Promise.all([loadStats(), loadProducts(true)]);
+    return;
+  }
   await Promise.all([loadStats(), loadConversations(true), loadProducts(true)]);
   renderCustomerTab(null);
   setComposerEnabled(false);
@@ -1295,6 +1367,10 @@ function closeFilterPop() { var _p = $('filter-pop'); if (_p) _p.classList.add('
 // and a failed fetch shows a warm retry state instead of a dead skeleton.
 let _convGen = 0;
 async function loadConversations(quiet) {
+  if (isInboxLocked()) {
+    updateInboxLock();
+    return;
+  }
   const gen = ++_convGen;
   const q = new URLSearchParams();
   if (state.platformFilter !== 'all') q.set('platform', state.platformFilter);
@@ -1361,12 +1437,20 @@ function renderConvList() {
 }
 
 async function renderInboxEmpty() {
+  if (isInboxLocked()) {
+    updateInboxLock();
+    return;
+  }
   const empty = $('inbox-empty'), panes = $('inbox-panes');
   let connected = 0;
   try {
     const conns = await api(`/api/clients/${state.clientId}/connectors`);
     connected = Object.values(conns).filter(s => s.status === 'connected').length;
   } catch {}
+  if (isInboxLocked()) {
+    updateInboxLock();
+    return;
+  }
   if (!state.conversations.length && connected === 0) {
     panes.classList.add('hidden');
     empty.innerHTML = `<div class="empty-state fade-in">
@@ -4096,6 +4180,10 @@ document.addEventListener('DOMContentLoaded', () => {
     var _sw = $('sw-theme'); if (_sw) _sw.checked = (next === 'dark');
   };
   $('btn-theme').onclick = toggleTheme;
+  const btnThemeM = $('btn-theme-mobile');
+  if (btnThemeM) btnThemeM.onclick = toggleTheme;
+  const btnSignoutM = $('btn-signout-mobile');
+  if (btnSignoutM) btnSignoutM.onclick = () => $('btn-signout')?.click();
   const loginToggle = $('btn-theme-login');
   if (loginToggle) loginToggle.onclick = toggleTheme;
   // back buttons on sub-views (CSP blocks inline onclick)
@@ -4944,6 +5032,8 @@ function initProfileSecurityModal() {
   if (sidebarUserCard) sidebarUserCard.onclick = openProfileModal;
   const btnProfSidebar = $('btn-profile-sidebar');
   if (btnProfSidebar) btnProfSidebar.onclick = openProfileModal;
+  const btnProfMobile = $('btn-profile-mobile');
+  if (btnProfMobile) btnProfMobile.onclick = openProfileModal;
 }
 
 // ---------------- Live Payments Hub & Real-time Verification ----------------
