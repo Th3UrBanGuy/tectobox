@@ -16,6 +16,7 @@
     "@tectonic/messaging": "workspace:*",
     "@whiskeysockets/baileys": "6.6.0",
     "ioredis": "^5.11.1",
+    "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "telegram": "^2.26.11",
     "undici": "^6.20.0"
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@types/ioredis": "^5.0.0",
     "@types/node": "^22.5.0",
+    "@types/pg": "^8.23.1",
     "@types/qrcode": "^1.5.5",
     "typescript": "^5.6.2"
   }
