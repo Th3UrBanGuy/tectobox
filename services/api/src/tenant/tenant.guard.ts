@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, ForbiddenException, UnauthorizedException, Optional, Inject } from '@nestjs/common';
 import jwt from 'jsonwebtoken';
 import pg from 'pg';
+import crypto from 'crypto';
 import { DB_POOL } from '../database/database.module.js';
 
 export interface AuthenticatedUser {
@@ -93,7 +94,7 @@ export class TenantGuard implements CanActivate {
     }
   }
 
-  private assignTenant(user: AuthenticatedUser, request: any): boolean {
+  private async assignTenant(user: AuthenticatedUser, request: any): Promise<boolean> {
     // Role-based tenant assignment: only genuine admins can perform cross-tenant access via header/query
     if (user.role === 'admin' || (user.role as any) === 'superadmin') {
       const headerVal = request.headers?.['x-tenant-id'];
@@ -104,8 +105,25 @@ export class TenantGuard implements CanActivate {
       return true;
     }
 
-    // Standard client role: NEVER allow x-tenant-id header override
+    // Standard client / operator role: auto-heal if no clientId
     if (!user.clientId) {
+      if (this.pool) {
+        try {
+          const wsRes = await this.pool.query(
+            `INSERT INTO clients (name, business_type, widget_key, created_at)
+             VALUES ($1, 'physical', $2, NOW())
+             RETURNING id`,
+            [`${user.username}'s Workspace`, crypto.randomBytes(16).toString('hex')]
+          );
+          const newCid = wsRes.rows[0].id;
+          await this.pool.query('UPDATE users SET client_id = $1 WHERE id = $2', [newCid, user.id]);
+          user.clientId = newCid;
+          request.tenantId = newCid;
+          return true;
+        } catch {
+          // fall through to exception
+        }
+      }
       throw new ForbiddenException('No tenant workspace associated with this user');
     }
 

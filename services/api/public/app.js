@@ -328,22 +328,6 @@ const ICONS = {
 function renderNav() {
   const isAdminUser = state.me && isAdmin(state.me.role);
 
-  const NAV_PALETTES = {
-    inbox: { color: '#6366f1', bg: 'rgba(99, 102, 241, 0.12)' },
-    leads: { color: '#10b981', bg: 'rgba(16, 185, 129, 0.12)' },
-    orders: { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.12)' },
-    admin: { color: '#a855f7', bg: 'rgba(168, 85, 247, 0.12)' },
-    products: { color: '#06b6d4', bg: 'rgba(6, 182, 212, 0.12)' },
-    channels: { color: '#22c55e', bg: 'rgba(34, 197, 94, 0.12)' },
-    kb: { color: '#ec4899', bg: 'rgba(236, 72, 153, 0.12)' },
-    webchat: { color: '#0ea5e9', bg: 'rgba(14, 165, 233, 0.12)' },
-    backup: { color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.12)' },
-    plan: { color: '#eab308', bg: 'rgba(234, 179, 8, 0.14)' },
-    apikeys: { color: '#f97316', bg: 'rgba(249, 115, 22, 0.12)' },
-    broadcast: { color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.12)' },
-    guide: { color: '#14b8a6', bg: 'rgba(20, 184, 166, 0.12)' },
-  };
-
   const mainItems = [
     { id: 'inbox', label: 'Inbox', icon: 'inbox' },
     { id: 'leads', label: 'Leads', icon: 'leads' },
@@ -365,19 +349,18 @@ function renderNav() {
     { id: 'guide', label: 'Help & Guides', icon: 'compass' },
   ];
 
-  const buildGroup = (headerTitle, dotColor, items) => `
+  const buildGroup = (headerTitle, items) => `
     <div class="sidebar-group">
       <div class="sidebar-group-header">
-        <span class="cat-dot" style="background:${dotColor}; color:${dotColor};"></span>
+        <span class="cat-dot"></span>
         <span>${headerTitle}</span>
       </div>
       ${items.map(i => {
-        const pal = NAV_PALETTES[i.id] || { color: '#6366f1', bg: 'rgba(99, 102, 241, 0.12)' };
         const isHidden = (i.req && !hasFeature(i.req));
         return `
         <button class="nav-link" data-nav="${i.id}" title="${esc(i.label)}" style="${isHidden ? 'display:none;' : ''}">
           <span class="nav-active-bar"></span>
-          <span class="nav-icon-badge" style="color:${pal.color}; background:${pal.bg};">
+          <span class="nav-icon-badge">
             ${ICONS[i.icon] || ''}
           </span>
           <span class="nav-text">${esc(i.label)}</span>
@@ -390,7 +373,7 @@ function renderNav() {
   // Hidden compatibility button for tests / scripts expecting data-nav="more"
   const legacyMore = '<button class="nav-link hidden-more-btn" data-nav="more" style="display:none;"></button>';
 
-  $('nav-links').innerHTML = buildGroup('MAIN', '#6366f1', mainItems) + buildGroup('WORKSPACE', '#10b981', workspaceItems) + legacyMore;
+  $('nav-links').innerHTML = buildGroup('MAIN', mainItems) + buildGroup('WORKSPACE', workspaceItems) + legacyMore;
 
   document.querySelectorAll('#nav-links .nav-link').forEach(b => {
     b.onclick = () => {
@@ -3587,9 +3570,16 @@ let _createMode = 'package';   // 'package' | 'credit'
 let _createPeriod = 'monthly';
 
 async function loadAdminLicensing() {
-  const [features, plans, licenses] = await Promise.all([
-    licFeatureList(), api('/api/admin/plans'), api('/api/admin/licenses'),
+  const [features, plans, licenses, workspaces] = await Promise.all([
+    licFeatureList(), api('/api/admin/plans'), api('/api/admin/licenses'), api('/api/admin/workspaces').catch(() => []),
   ]);
+  const wsSel = $('crt-workspace');
+  if (wsSel) {
+    const curVal = wsSel.value;
+    wsSel.innerHTML = '<option value="">Save as plan template only</option>' +
+      (workspaces || []).map(w => `<option value="${w.client_id || w.id}">Issue to: ${esc(w.client_name || w.username || ('#' + (w.client_id || w.id)))}</option>`).join('');
+    if (curVal) wsSel.value = curVal;
+  }
   renderCreateSection(features);
   renderPlanCards(plans);
   renderLicensesTable(licenses);
@@ -3628,16 +3618,24 @@ function renderCreateSection(features) {
   $('btn-create').onclick = async () => {
     const name = $('crt-name').value.trim();
     if (!name) { $('crt-msg').textContent = 'Give it a name first.'; return; }
+    const targetWs = $('crt-workspace') ? $('crt-workspace').value : '';
     const body = _createMode === 'package'
       ? { name, kind: 'time', billing_period: _createPeriod, features: checkedFeatures('crt-features'), price_bdt: Number($('crt-price').value) || 0 }
       : { name, kind: 'credit', credits_included: Math.max(1, Number($('crt-credits').value) || 0), features: checkedFeatures('crt-features'), price_bdt: Number($('crt-price').value) || 0 };
     if (_createMode === 'credit' && !(Number($('crt-credits').value) > 0)) { $('crt-msg').textContent = 'Enter how many credits.'; return; }
     $('crt-msg').textContent = 'Creating…';
     try {
-      await api('/api/admin/plans', { method: 'POST', body: JSON.stringify(body) });
+      const plan = await api('/api/admin/plans', { method: 'POST', body: JSON.stringify(body) });
+      if (targetWs) {
+        const lic = await api(`/api/admin/clients/${targetWs}/assign-license`, { method: 'POST', body: JSON.stringify({ planId: plan.id }) });
+        toast(`License issued: ${lic.code} to workspace!`, 'ok');
+      } else {
+        toast(`Plan "${plan.name}" created!`, 'ok');
+      }
       $('crt-name').value = ''; $('crt-credits').value = ''; $('crt-price').value = '';
       $('crt-msg').textContent = '';
-      toast('Created'); loadAdminLicensing();
+      await loadAdminLicensing();
+      loadAdmin();
     } catch (e) { $('crt-msg').textContent = 'Failed: ' + e.message; }
   };
 }
@@ -4211,17 +4209,33 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('#admin-tabs button').forEach(b => b.onclick = () => switchAdminTab(b.dataset.at));
   $('btn-create-user').onclick = () => {
     $('um-username').value = ''; $('um-password').value = ''; $('um-workspace').value = ''; $('um-type').value = 'physical';
+    const errEl = $('um-err'); if (errEl) { errEl.textContent = ''; errEl.classList.remove('show'); }
     $('user-modal').classList.remove('hidden');
   };
   $('btn-close-user').onclick = () => $('user-modal').classList.add('hidden');
   $('btn-save-user').onclick = async () => {
+    const errEl = $('um-err');
+    if (errEl) { errEl.textContent = ''; errEl.classList.remove('show'); }
     const username = $('um-username').value.trim(), password = $('um-password').value, workspaceName = $('um-workspace').value.trim();
-    if (!username || !password || !workspaceName) return toast('Username, password and workspace name are required', 'err');
+    if (!username || !password || !workspaceName) {
+      if (errEl) { errEl.textContent = 'Username, password and workspace name are required'; errEl.classList.add('show'); }
+      return toast('Username, password and workspace name are required', 'err');
+    }
+    const saveBtn = $('btn-save-user');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Creating…';
     try {
-      await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ username, password, workspaceName, businessType: $('um-type').value }) });
+      const res = await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ username, password, workspaceName, businessType: $('um-type').value }) });
       $('user-modal').classList.add('hidden');
-      loadAdmin();
-    } catch (e) { toast('Could not create: ' + e.message, 'err'); }
+      toast(`Workspace "${res.client_name || workspaceName}" created successfully!`, 'ok');
+      await loadAdmin();
+    } catch (e) {
+      if (errEl) { errEl.textContent = e.message; errEl.classList.add('show'); }
+      toast('Could not create: ' + e.message, 'err');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Create workspace';
+    }
   };
   $('btn-close-pw').onclick = () => $('pw-modal').classList.add('hidden');
   $('btn-close-assign').onclick = () => $('assign-modal').classList.add('hidden');
@@ -5176,6 +5190,7 @@ function initPaymentsHub() {
         const res = await api('/api/payments/claim', {
           method: 'POST',
           body: JSON.stringify({
+            client_id: state.clientId || 1,
             customer_name: name || 'Direct Customer',
             customer_phone: phone,
             method,

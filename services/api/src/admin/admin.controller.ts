@@ -112,7 +112,9 @@ export class AdminController {
   }
 
   @Delete('clients/:id')
+  @Delete(['clients/:id', 'admin/clients/:id', 'admin/workspaces/:id'])
   async deleteWorkspace(@Param('id', ParseIntPipe) id: number) {
+    await this.pool.query('DELETE FROM users WHERE client_id = $1', [id]);
     await this.pool.query('DELETE FROM clients WHERE id = $1', [id]);
     return { ok: true, success: true };
   }
@@ -130,14 +132,49 @@ export class AdminController {
 
   @Post('admin/users')
   async createUser(@Body() body: any) {
-    const passwordHash = await hashPassword(body.password || 'password123');
+    if (!body.username || !body.password) {
+      throw new BadRequestException('Username and password are required');
+    }
+
+    // Check if username already exists
+    const existing = await this.pool.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [body.username.trim()]);
+    if (existing.rows.length > 0) {
+      throw new BadRequestException('Username already exists. Please choose a different username.');
+    }
+
+    let clientId: number | null = body.client_id ? Number(body.client_id) : null;
+    let clientName: string | null = body.workspaceName || body.workspace_name || null;
+
+    // If no client_id, create a new workspace (client)
+    if (!clientId) {
+      const wsName = clientName || `${body.username.trim()}'s Workspace`;
+      const bType = body.businessType || body.business_type || 'physical';
+      const widgetKey = crypto.randomBytes(16).toString('hex');
+      const wsRes = await this.pool.query(
+        `INSERT INTO clients (name, business_type, widget_key, created_at)
+         VALUES ($1, $2, $3, NOW())
+         RETURNING id, name`,
+        [wsName, bType, widgetKey]
+      );
+      clientId = wsRes.rows[0].id;
+      clientName = wsRes.rows[0].name;
+    }
+
+    const passwordHash = await hashPassword(body.password);
     const result = await this.pool.query(
       `INSERT INTO users (username, password_hash, role, client_id, active, created_at)
        VALUES ($1, $2, $3, $4, true, NOW())
        RETURNING id, username, role, client_id, active, created_at`,
-      [body.username, passwordHash, body.role || 'client', body.client_id || null]
+      [body.username.trim(), passwordHash, body.role || 'operator', clientId]
     );
-    return result.rows[0];
+
+    const user = result.rows[0];
+    return {
+      ok: true,
+      success: true,
+      ...user,
+      client_name: clientName,
+    };
   }
 
   @Post('admin/users/:id/reset-password')

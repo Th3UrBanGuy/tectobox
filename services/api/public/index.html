@@ -581,8 +581,11 @@
                 <b>Credit System</b><span>Pay per AI reply</span>
               </button>
             </div>
-            <div class="frow"><label>Name</label>
+            <div class="frow"><label>Name *</label>
               <input id="crt-name" class="input no-icon" placeholder="e.g. Starter Monthly" style="max-width:320px;">
+            </div>
+            <div class="frow"><label>Directly issue to workspace</label>
+              <select id="crt-workspace" class="input no-icon" style="max-width:320px;"><option value="">Save as plan template only</option></select>
             </div>
             <div class="frow" id="crt-period-row"><label>Billing period</label>
               <div class="chip-row" id="crt-period-chips">
@@ -820,14 +823,15 @@
   <div class="modal">
     <h3>Create workspace user</h3>
     <p class="msub">Creates a workspace (client) and its login in one step.</p>
-    <div class="frow"><label>Username *</label><input id="um-username" class="input no-icon" type="text" autocomplete="off"></div>
-    <div class="frow"><label>Password *</label><input id="um-password" class="input no-icon" type="text" autocomplete="new-password"></div>
-    <div class="frow"><label>Workspace name *</label><input id="um-workspace" class="input no-icon" type="text"></div>
+    <div id="um-err" class="login-err" style="margin-bottom:12px;"></div>
+    <div class="frow"><label>Username *</label><input id="um-username" class="input no-icon" type="text" autocomplete="off" placeholder="e.g. merchant_ops"></div>
+    <div class="frow"><label>Password *</label><input id="um-password" class="input no-icon" type="text" autocomplete="new-password" placeholder="••••••••"></div>
+    <div class="frow"><label>Workspace name *</label><input id="um-workspace" class="input no-icon" type="text" placeholder="e.g. Apex Electronics"></div>
     <div class="frow"><label>Business type</label>
-      <select id="um-type" class="input no-icon"><option value="physical">Physical</option><option value="digital">Digital</option></select></div>
+      <select id="um-type" class="input no-icon"><option value="physical">Physical goods &amp; Delivery</option><option value="digital">Digital / Software services</option></select></div>
     <div class="modal-foot">
       <button class="btn-ghost" id="btn-close-user">Cancel</button>
-      <button class="btn-primary" id="btn-save-user">Create</button>
+      <button class="btn-primary" id="btn-save-user">Create workspace</button>
     </div>
   </div>
 </div>

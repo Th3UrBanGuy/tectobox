@@ -59,58 +59,72 @@ export class PaymentsController implements OnModuleInit {
 
   @Get('payments')
   async getPayments(
-    @CurrentTenant() tenantId: number,
+    @CurrentTenant() tenantId: number | null,
     @Query('status') status?: string,
     @Query('limit') limitStr?: string,
+    @Query('client_id') queryClientId?: string,
   ) {
     const limit = Math.min(100, Math.max(1, Number(limitStr) || 50));
+    const targetTenantId = tenantId || (queryClientId ? Number(queryClientId) : null);
+
     let sql = `
       SELECT p.*,
+             c_info.name as client_name,
              o.total_bdt as order_total,
              o.items_json as order_items,
              o.status as order_status,
              c.platform as conversation_platform
       FROM payments p
+      LEFT JOIN clients c_info ON c_info.id = p.client_id
       LEFT JOIN orders o ON o.id = p.order_id
       LEFT JOIN conversations c ON c.id = p.conversation_id
-      WHERE p.client_id = $1
+      WHERE 1=1
     `;
-    const params: any[] = [tenantId];
+    const params: any[] = [];
+
+    if (targetTenantId) {
+      params.push(targetTenantId);
+      sql += ` AND p.client_id = $${params.length}`;
+    }
 
     if (status && status !== 'all') {
       params.push(status);
       sql += ` AND p.status = $${params.length}`;
     }
 
-    sql += ` ORDER BY p.created_at DESC LIMIT $${params.length + 1}`;
     params.push(limit);
+    sql += ` ORDER BY p.created_at DESC LIMIT $${params.length}`;
 
     const result = await this.pool.query(sql, params);
     return {
       ok: true,
       payments: result.rows,
-      tenantId,
+      tenantId: targetTenantId,
     };
   }
 
   @Get('payments/stats')
-  async getStats(@CurrentTenant() tenantId: number) {
+  async getStats(@CurrentTenant() tenantId: number | null) {
     return this.getStatsInternal(tenantId);
   }
 
-  private async getStatsInternal(tenantId: number) {
-    const countsRes = await this.pool.query(
-      `SELECT
-         COUNT(*) FILTER (WHERE status = 'pending') as pending_count,
-         COUNT(*) FILTER (WHERE status = 'verified') as verified_count,
-         COUNT(*) FILTER (WHERE status = 'rejected') as rejected_count,
-         COUNT(*) FILTER (WHERE duplicate_flag = true) as duplicate_count,
-         COALESCE(SUM(amount) FILTER (WHERE status = 'verified' AND verified_at >= CURRENT_DATE), 0) as verified_volume_today
-       FROM payments
-       WHERE client_id = $1`,
-      [tenantId],
-    );
+  private async getStatsInternal(tenantId: number | null) {
+    let sql = `
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'pending') as pending_count,
+        COUNT(*) FILTER (WHERE status = 'verified') as verified_count,
+        COUNT(*) FILTER (WHERE status = 'rejected') as rejected_count,
+        COUNT(*) FILTER (WHERE duplicate_flag = true) as duplicate_count,
+        COALESCE(SUM(amount) FILTER (WHERE status = 'verified' AND verified_at >= CURRENT_DATE), 0) as verified_volume_today
+      FROM payments
+    `;
+    const params: any[] = [];
+    if (tenantId) {
+      sql += ` WHERE client_id = $1`;
+      params.push(tenantId);
+    }
 
+    const countsRes = await this.pool.query(sql, params);
     const r = countsRes.rows[0] || {};
     return {
       pending: Number(r.pending_count || 0),
@@ -123,7 +137,7 @@ export class PaymentsController implements OnModuleInit {
 
   @Post('payments/claim')
   async claimPayment(
-    @CurrentTenant() tenantId: number,
+    @CurrentTenant() tenantId: number | null,
     @Body() body: any,
   ) {
     const trxId = String(body.transaction_id || body.trx_id || '').trim();
@@ -131,6 +145,7 @@ export class PaymentsController implements OnModuleInit {
       throw new BadRequestException('Transaction ID (TrxID) is required.');
     }
 
+    const effectiveTenantId = tenantId || (body.client_id ? Number(body.client_id) : 1);
     const amount = Math.max(0, Number(body.amount) || 0);
     const method = String(body.method || 'bkash').toLowerCase().trim();
     const customerName = body.customer_name ? String(body.customer_name).slice(0, 200) : null;
@@ -145,7 +160,7 @@ export class PaymentsController implements OnModuleInit {
       `SELECT id, order_id, created_at, status FROM payments
        WHERE client_id = $1 AND UPPER(transaction_id) = UPPER($2) AND status != 'rejected'
        LIMIT 1`,
-      [tenantId, trxId],
+      [effectiveTenantId, trxId],
     );
     const duplicateFlag = dupCheck.rows.length > 0;
 
@@ -155,7 +170,7 @@ export class PaymentsController implements OnModuleInit {
         `SELECT id FROM orders
          WHERE client_id = $1 AND conversation_id = $2
          ORDER BY created_at DESC LIMIT 1`,
-        [tenantId, conversationId],
+        [effectiveTenantId, conversationId],
       );
       if (orderSearch.rows.length > 0) {
         orderId = orderSearch.rows[0].id;
@@ -170,7 +185,7 @@ export class PaymentsController implements OnModuleInit {
        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, NOW())
        RETURNING *`,
       [
-        tenantId,
+        effectiveTenantId,
         orderId,
         conversationId,
         customerName,
@@ -192,14 +207,14 @@ export class PaymentsController implements OnModuleInit {
         `UPDATE orders
          SET transaction_id = $1, payment_status = 'verification_pending'
          WHERE id = $2 AND client_id = $3`,
-        [trxId, orderId, tenantId],
+        [trxId, orderId, effectiveTenantId],
       );
     }
 
     // Broadcast real-time SSE event to tenant dashboard!
-    const stats = await this.getStatsInternal(tenantId);
+    const stats = await this.getStatsInternal(effectiveTenantId);
     if (this.eventsService) {
-      await this.eventsService.broadcastTenantEvent(tenantId, {
+      await this.eventsService.broadcastTenantEvent(effectiveTenantId, {
         type: 'payment:received',
         payment,
         stats,
@@ -217,28 +232,30 @@ export class PaymentsController implements OnModuleInit {
 
   @Post('payments/:id/verify')
   async verifyPayment(
-    @CurrentTenant() tenantId: number,
+    @CurrentTenant() tenantId: number | null,
     @Param('id', ParseIntPipe) paymentId: number,
     @Body() body: any,
   ) {
-    const check = await this.pool.query(
-      'SELECT * FROM payments WHERE id = $1 AND client_id = $2 LIMIT 1',
-      [paymentId, tenantId],
-    );
+    const checkSql = tenantId
+      ? 'SELECT * FROM payments WHERE id = $1 AND client_id = $2 LIMIT 1'
+      : 'SELECT * FROM payments WHERE id = $1 LIMIT 1';
+    const checkParams = tenantId ? [paymentId, tenantId] : [paymentId];
+
+    const check = await this.pool.query(checkSql, checkParams);
     if (!check.rows.length) {
       throw new NotFoundException('Payment not found');
     }
     const payment = check.rows[0];
-
+    const targetClientId = payment.client_id;
     const verifiedBy = body.verified_by || 'Admin';
 
     // Update payment record
     const updRes = await this.pool.query(
       `UPDATE payments
        SET status = 'verified', verified_by = $1, verified_at = NOW(), rejection_reason = NULL
-       WHERE id = $2 AND client_id = $3
+       WHERE id = $2
        RETURNING *`,
-      [verifiedBy, paymentId, tenantId],
+      [verifiedBy, paymentId],
     );
     const updatedPayment = updRes.rows[0];
 
@@ -248,14 +265,14 @@ export class PaymentsController implements OnModuleInit {
         `UPDATE orders
          SET status = 'confirmed', payment_status = 'paid', advance_paid_bdt = $1
          WHERE id = $2 AND client_id = $3`,
-        [payment.amount, payment.order_id, tenantId],
+        [payment.amount, payment.order_id, targetClientId],
       );
     }
 
     // Auto-send friendly confirmation message in customer chat
     if (payment.conversation_id) {
       const formattedAmount = Number(payment.amount) > 0 ? `৳${payment.amount}` : '';
-      const replyText = `✅ আপনার পেমেন্ট (TrxID: ${payment.transaction_id}${formattedAmount ? ', ' + formattedAmount : ''}) সফলভাবে যাচাই ও গ্রহণ করা হয়েছে! আপনার অর্ডারটি নিশ্চিত করা হয়েছে এবং দ্রুত ডেলিভারির জন্য প্রস্তুত করা হচ্ছে। ধন্যবাদ!`;
+      const replyText = `আপনার পেমেন্ট (TrxID: ${payment.transaction_id}${formattedAmount ? ', ' + formattedAmount : ''}) সফলভাবে যাচাই ও গ্রহণ করা হয়েছে। আপনার অর্ডারটি নিশ্চিত করা হয়েছে এবং ডেলিভারির জন্য প্রস্তুত করা হচ্ছে। ধন্যবাদ!`;
 
       const outMsg = await this.pool.query(
         `INSERT INTO messages (conversation_id, direction, text, raw_json, created_at)
@@ -269,7 +286,7 @@ export class PaymentsController implements OnModuleInit {
       );
 
       if (this.eventsService) {
-        await this.eventsService.broadcastTenantEvent(tenantId, {
+        await this.eventsService.broadcastTenantEvent(targetClientId, {
           type: 'message',
           conversationId: payment.conversation_id,
           outbound: outMsg.rows[0],
@@ -278,9 +295,9 @@ export class PaymentsController implements OnModuleInit {
     }
 
     // Broadcast SSE payment update
-    const stats = await this.getStatsInternal(tenantId);
+    const stats = await this.getStatsInternal(targetClientId);
     if (this.eventsService) {
-      await this.eventsService.broadcastTenantEvent(tenantId, {
+      await this.eventsService.broadcastTenantEvent(targetClientId, {
         type: 'payment:updated',
         payment: updatedPayment,
         stats,
@@ -298,28 +315,30 @@ export class PaymentsController implements OnModuleInit {
 
   @Post('payments/:id/reject')
   async rejectPayment(
-    @CurrentTenant() tenantId: number,
+    @CurrentTenant() tenantId: number | null,
     @Param('id', ParseIntPipe) paymentId: number,
     @Body() body: any,
   ) {
-    const check = await this.pool.query(
-      'SELECT * FROM payments WHERE id = $1 AND client_id = $2 LIMIT 1',
-      [paymentId, tenantId],
-    );
+    const checkSql = tenantId
+      ? 'SELECT * FROM payments WHERE id = $1 AND client_id = $2 LIMIT 1'
+      : 'SELECT * FROM payments WHERE id = $1 LIMIT 1';
+    const checkParams = tenantId ? [paymentId, tenantId] : [paymentId];
+
+    const check = await this.pool.query(checkSql, checkParams);
     if (!check.rows.length) {
       throw new NotFoundException('Payment not found');
     }
     const payment = check.rows[0];
-
+    const targetClientId = payment.client_id;
     const reason = body.reason || 'TrxID স্টেটমেন্টে পাওয়া যায়নি / টাকা ক্রেডিট হয়নি';
 
     // Update payment record
     const updRes = await this.pool.query(
       `UPDATE payments
        SET status = 'rejected', rejection_reason = $1, verified_at = NULL
-       WHERE id = $2 AND client_id = $3
+       WHERE id = $2
        RETURNING *`,
-      [reason, paymentId, tenantId],
+      [reason, paymentId],
     );
     const updatedPayment = updRes.rows[0];
 
@@ -329,13 +348,13 @@ export class PaymentsController implements OnModuleInit {
         `UPDATE orders
          SET payment_status = 'rejected'
          WHERE id = $1 AND client_id = $2`,
-        [payment.order_id, tenantId],
+        [payment.order_id, targetClientId],
       );
     }
 
     // Auto-send polite rejection / clarification message in customer chat
     if (payment.conversation_id) {
-      const replyText = `⚠️ দুঃখিত, আপনার দেওয়া TrxID (${payment.transaction_id}) এর বিপরীতে কোনো পেমেন্ট পাওয়া যায়নি (${reason})। অনুগ্রহ করে আপনার স্টেটমেন্ট চেক করে সঠিক TrxID অথবা পেমেন্ট স্লিপের স্ক্রিনশট পাঠিয়ে সহায়তা করুন।`;
+      const replyText = `দুঃখিত, আপনার দেওয়া TrxID (${payment.transaction_id}) এর বিপরীতে কোনো পেমেন্ট পাওয়া যায়নি (${reason})। অনুগ্রহ করে আপনার স্টেটমেন্ট চেক করে সঠিক TrxID অথবা পেমেন্ট স্লিপের স্ক্রিনশট পাঠিয়ে সহায়তা করুন।`;
 
       const outMsg = await this.pool.query(
         `INSERT INTO messages (conversation_id, direction, text, raw_json, created_at)
@@ -349,7 +368,7 @@ export class PaymentsController implements OnModuleInit {
       );
 
       if (this.eventsService) {
-        await this.eventsService.broadcastTenantEvent(tenantId, {
+        await this.eventsService.broadcastTenantEvent(targetClientId, {
           type: 'message',
           conversationId: payment.conversation_id,
           outbound: outMsg.rows[0],
@@ -358,9 +377,9 @@ export class PaymentsController implements OnModuleInit {
     }
 
     // Broadcast SSE payment update
-    const stats = await this.getStatsInternal(tenantId);
+    const stats = await this.getStatsInternal(targetClientId);
     if (this.eventsService) {
-      await this.eventsService.broadcastTenantEvent(tenantId, {
+      await this.eventsService.broadcastTenantEvent(targetClientId, {
         type: 'payment:updated',
         payment: updatedPayment,
         stats,

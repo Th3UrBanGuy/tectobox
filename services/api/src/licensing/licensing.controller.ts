@@ -93,13 +93,29 @@ export class LicensingController {
   async issueLicense(@Body() body: any) {
     const code = 'LIC-' + crypto.randomBytes(6).toString('hex').toUpperCase();
     const startsAt = new Date();
-    const endsAt = body.days
-      ? new Date(Date.now() + Number(body.days) * 86400000)
-      : new Date(Date.now() + 30 * 86400000);
+    let days = body.days ? Number(body.days) : 30;
+    let kind = body.kind || 'time';
+    let featuresJson = JSON.stringify(body.features || []);
+    let credits = Number(body.credits || body.credits_total || 0);
+    const planId = body.plan_id || body.planId || null;
+    const clientId = body.client_id ? Number(body.client_id) : null;
+
+    if (planId) {
+      const pRes = await this.pool.query('SELECT * FROM plans WHERE id = $1', [planId]);
+      if (pRes.rows.length > 0) {
+        const p = pRes.rows[0];
+        kind = p.kind;
+        featuresJson = typeof p.features_json === 'string' ? p.features_json : JSON.stringify(p.features_json || []);
+        credits = Number(p.credits_included || 0);
+        days = p.billing_period === 'yearly' ? 365 : p.billing_period === 'quarterly' ? 90 : 30;
+      }
+    }
+
+    const endsAt = new Date(Date.now() + days * 86400000);
 
     // Cancel existing active licenses for this client if any
-    if (body.client_id) {
-      await this.pool.query("UPDATE licenses SET status = 'cancelled' WHERE client_id = $1 AND status = 'active'", [body.client_id]);
+    if (clientId) {
+      await this.pool.query("UPDATE licenses SET status = 'cancelled' WHERE client_id = $1 AND status = 'active'", [clientId]);
     }
 
     const result = await this.pool.query(
@@ -108,13 +124,13 @@ export class LicensingController {
        RETURNING *`,
       [
         code,
-        body.client_id,
-        body.plan_id || null,
-        body.kind || 'time',
+        clientId,
+        planId,
+        kind,
         startsAt,
         endsAt,
-        body.credits || 0,
-        JSON.stringify(body.features || []),
+        credits,
+        featuresJson,
       ]
     );
     return result.rows[0];
