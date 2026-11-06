@@ -10,7 +10,10 @@ describe('AuthController', () => {
   beforeEach(() => {
     process.env.JWT_SECRET = 'test_jwt_secret_12345';
     mockPool = {
-      query: vi.fn(),
+      // Default: every query returns a rows-shaped result. login() issues
+      // three queries (user lookup, admin_totp, session insert); tests
+      // override the first call with mockResolvedValueOnce for the user row.
+      query: vi.fn().mockResolvedValue({ rows: [] }),
     };
     controller = new AuthController(mockPool);
   });
