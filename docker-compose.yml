@@ -85,6 +85,9 @@ services:
     restart: unless-stopped
     environment:
       PORT: 8081
+      GEMINI_WEB2API_URL: http://host.docker.internal:8083/v1/chat/completions
+      GEMINI_WEB2API_KEY: ${GEMINI_WEB2API_KEY}
+      GEMINI_WEB2API_MODEL: gemini-3.6-flash
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health"]
       interval: 10s
@@ -92,6 +95,8 @@ services:
       retries: 3
     networks:
       - internal-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   ingress:
     image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-ingress:${IMAGE_TAG:-latest}
