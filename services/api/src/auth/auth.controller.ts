@@ -43,6 +43,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async login(
     @Body() body: any,
+    @Req() req?: Request,
     @Res({ passthrough: true }) res?: Response
   ) {
     const parsed = LoginDto.safeParse(body);
@@ -134,10 +135,14 @@ export class AuthController {
 
     // Set cookie if response object is available (passthrough)
     if (res && typeof res.setHeader === 'function') {
-      const isProd = process.env.NODE_ENV === 'production';
+      const isHttps = Boolean(
+        req?.secure ||
+        req?.headers?.['x-forwarded-proto'] === 'https' ||
+        (process.env.COOKIE_SECURE === 'true')
+      );
       res.setHeader(
         'Set-Cookie',
-        `tb_session=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${isProd ? '; Secure' : ''}`
+        `tb_session=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${isHttps ? '; Secure' : ''}`
       );
     }
 

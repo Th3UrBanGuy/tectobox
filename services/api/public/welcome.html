@@ -874,8 +874,13 @@ footer {
     </div>
 
     <div class="nav-actions">
-      <!-- Language Toggle Pill -->
-      <button class="pill-toggle" id="btn-lang-toggle" title="Switch Language / ভাষা পরিবর্তন">
+      <!-- Segmented Language Switcher with individual and toggle access -->
+      <div class="lang-switch-segment" style="display:inline-flex;align-items:center;background:var(--surface-1);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:2px;">
+        <button type="button" class="lang-pill active" id="btn-lang-bn" style="border:none;background:var(--accent);color:#fff;padding:4px 9px;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">বাংলা</button>
+        <button type="button" class="lang-pill" id="btn-lang-en" style="border:none;background:transparent;color:var(--muted);padding:4px 9px;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">English</button>
+      </div>
+
+      <button class="pill-toggle" id="btn-lang-toggle" style="display:none;" title="Switch Language / ভাষা পরিবর্তন">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg>
         <span id="lang-label">English</span>
       </button>
@@ -901,8 +906,8 @@ footer {
     <span data-i18n="hero_pill">v2.6 রিলিজ — সরাসরি হোয়াটসঅ্যাপ, টেলিগ্রাম, ওয়েবচ্যাট ও বিকাশ ভেরিফিকেশন</span>
   </div>
 
-  <h1 data-i18n="hero_title">
-    সোশ্যাল কমার্সের প্রতিটি ইনকোয়ারি এক প্ল্যাটফর্মে।<br>
+  <h1 id="hero-title" data-i18n="hero_title">
+    সব কাস্টমার চ্যাট এক ইনবক্সে।<br>
     <span class="hero-highlight">গ্রাউন্ডেড AI ক্যাটালগ ও রিয়েল-টাইম কুরিয়ার অটোমেশন।</span>
   </h1>
 
@@ -939,7 +944,7 @@ footer {
   </div>
 
   <!-- INTERACTIVE PRODUCT DEMO (FIGMA SPEC WINDOW) -->
-  <div class="window-frame" id="demo">
+  <div class="window-frame sim-container" id="demo">
     <!-- macOS Window Titlebar -->
     <div class="window-titlebar">
       <div class="traffic-lights">
@@ -994,7 +999,7 @@ footer {
       <div class="sim-viewport">
         <div class="sim-messages" id="sim-chat-area">
           <!-- Incoming Customer Bubble -->
-          <div class="sim-bubble-wrap customer">
+          <div class="sim-bubble-wrap customer sim-msg user">
             <div class="sim-bubble">
               <span id="sim-user-text">ভাইয়া Apex Smart Watch Ultra এর দাম কত এবং ডেলিভারি চার্জ কত?</span>
             </div>
@@ -1006,7 +1011,7 @@ footer {
           </div>
 
           <!-- Outgoing AI Bubble -->
-          <div class="sim-bubble-wrap ai">
+          <div class="sim-bubble-wrap ai sim-msg bot">
             <div class="sim-bubble">
               <span id="sim-ai-text">Apex Smart Watch Ultra-এর মূল্য ৩৮০০ টাকা। ঢাকার ভেতরে ডেলিভারি চার্জ ৬০ টাকা (২৪-৪৮ ঘণ্টা) এবং বাইরে ১২০ টাকা। ক্যাশ অন ডেলিভারি সুবিধা রয়েছে। আপনি কি এটি অর্ডার করতে চান?</span>
               <div id="sim-extra-widget"></div>
@@ -1023,23 +1028,23 @@ footer {
         <div class="sim-controls-dock">
           <div class="sim-controls-title" data-i18n="sim_scenarios_label">নিচের বাস্তব পরিস্থিতিগুলোতে ক্লিক করে এআই টেস্ট করুন:</div>
           <div class="sim-tabs-row">
-            <button class="sim-tab-btn active" data-scenario="price" id="btn-sc-price">
+            <button class="sim-tab-btn sim-prompt-btn active" data-scenario="price" id="btn-sc-price">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
               <span>দাম ও স্টক কোয়েরি</span>
             </button>
-            <button class="sim-tab-btn" data-scenario="order" id="btn-sc-order">
+            <button class="sim-tab-btn sim-prompt-btn" data-scenario="order" id="btn-sc-order">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
               <span>অর্ডার ও হট লিড</span>
             </button>
-            <button class="sim-tab-btn" data-scenario="payment" id="btn-sc-payment">
+            <button class="sim-tab-btn sim-prompt-btn" data-scenario="payment" id="btn-sc-payment">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
               <span>বিকাশ/নগদ পেমেন্ট ভেরিফাই</span>
             </button>
-            <button class="sim-tab-btn" data-scenario="injection" id="btn-sc-injection">
+            <button class="sim-tab-btn sim-prompt-btn" data-scenario="injection" id="btn-sc-injection">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
               <span>প্রম্পট ডিফেন্স</span>
             </button>
-            <button class="sim-tab-btn" data-scenario="handover" id="btn-sc-handover">
+            <button class="sim-tab-btn sim-prompt-btn" data-scenario="handover" id="btn-sc-handover">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
               <span>হিউম্যান হ্যান্ডওভার</span>
             </button>
@@ -1211,7 +1216,7 @@ const I18N = {
   bn: {
     lang_btn: 'English',
     hero_pill: 'v2.6 রিলিজ — সরাসরি হোয়াটসঅ্যাপ, টেলিগ্রাম, ওয়েবচ্যাট ও বিকাশ ভেরিফিকেশন',
-    hero_title: 'সোশ্যাল কমার্সের প্রতিটি ইনকোয়ারি এক প্ল্যাটফর্মে।<br><span class="hero-highlight">গ্রাউন্ডেড AI ক্যাটালগ ও রিয়েল-টাইম কুরিয়ার অটোমেশন।</span>',
+    hero_title: 'সব কাস্টমার চ্যাট এক ইনবক্সে।<br><span class="hero-highlight">গ্রাউন্ডেড AI ক্যাটালগ ও রিয়েল-টাইম কুরিয়ার অটোমেশন।</span>',
     hero_sub: 'Tectobox বিভিন্ন সোশ্যাল চ্যানেলের হাজারো মেসেজ একত্রিত করে একটি সুপারফাস্ট ইনবক্সে আনে। পণ্যের আসল দাম, স্টক ও পলিসি অনুযায়ী AI তাৎক্ষণিক উত্তর দেয়, বিকাশ/নগদ পেমেন্ট ভেরিফাই করে এবং এক ক্লিকে কুরিয়ার বুকিং সম্পন্ন করে।',
     btn_get_started: 'লগইন ও ওয়ার্কস্পেসে প্রবেশ',
     btn_demo: 'লাইভ সিমুলেটর দেখুন',
@@ -1263,7 +1268,7 @@ const I18N = {
   en: {
     lang_btn: 'বাংলা',
     hero_pill: 'v2.6 Release — WhatsApp, Telegram, Webchat & Live bKash Verification',
-    hero_title: 'Every customer inquiry on one unified platform.<br><span class="hero-highlight">Grounded AI catalog and real-time courier automation.</span>',
+    hero_title: 'All Customer Chats. One Unified Platform.<br><span class="hero-highlight">Grounded AI catalog and real-time courier automation.</span>',
     hero_sub: 'Tectobox unifies customer conversations across WhatsApp, Telegram, Facebook, and Webchat into one blazing-fast workspace. Your AI quotes real prices, verifies bKash payments, and books couriers with a single click.',
     btn_get_started: 'Launch Workspace',
     btn_demo: 'Explore Live Demo',
@@ -1322,7 +1327,19 @@ function applyLanguage(lang) {
   document.documentElement.lang = lang;
   
   const dict = I18N[lang];
-  document.getElementById('lang-label').textContent = dict.lang_btn;
+  const langLabel = document.getElementById('lang-label');
+  if (langLabel) langLabel.textContent = dict.lang_btn;
+
+  const btnBn = document.getElementById('btn-lang-bn');
+  const btnEn = document.getElementById('btn-lang-en');
+  if (btnBn) {
+    btnBn.style.background = lang === 'bn' ? 'var(--accent)' : 'transparent';
+    btnBn.style.color = lang === 'bn' ? '#fff' : 'var(--muted)';
+  }
+  if (btnEn) {
+    btnEn.style.background = lang === 'en' ? 'var(--accent)' : 'transparent';
+    btnEn.style.color = lang === 'en' ? '#fff' : 'var(--muted)';
+  }
 
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const k = el.getAttribute('data-i18n');
@@ -1335,9 +1352,14 @@ function applyLanguage(lang) {
   }
 }
 
-document.getElementById('btn-lang-toggle').onclick = () => {
-  applyLanguage(currentLang === 'bn' ? 'en' : 'bn');
-};
+const btnLangToggle = document.getElementById('btn-lang-toggle');
+if (btnLangToggle) btnLangToggle.onclick = () => applyLanguage(currentLang === 'bn' ? 'en' : 'bn');
+
+const btnBn = document.getElementById('btn-lang-bn');
+if (btnBn) btnBn.onclick = () => applyLanguage('bn');
+
+const btnEn = document.getElementById('btn-lang-en');
+if (btnEn) btnEn.onclick = () => applyLanguage('en');
 
 // ================= THEME TOGGLE =================
 function setTheme(theme) {
