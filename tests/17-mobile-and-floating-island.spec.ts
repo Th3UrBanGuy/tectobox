@@ -140,9 +140,9 @@ test.describe('Professional Docked Sidebar, Clean User Card, and Gated Inbox', (
 
     await page.goto('/app', { waitUntil: 'networkidle' });
 
-    // Login as unlicensed client 'user_mono_46874' (workspace 4 has no license)
-    await page.fill('#login-username', 'user_mono_46874');
-    await page.fill('#login-password', 'password123');
+    // Login as unlicensed client 'xyz' (workspace has no license)
+    await page.fill('#login-username', 'xyz');
+    await page.fill('#login-password', 'Operator123!');
     await page.click('#login-btn');
 
     await expect(page.locator('#app-view')).toBeVisible({ timeout: 15000 });
