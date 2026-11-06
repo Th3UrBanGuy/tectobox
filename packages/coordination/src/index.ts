@@ -202,8 +202,26 @@ export class RedisSubscriber {
   private redis: Redis;
   private handlers = new Map<string, Set<RedisEventHandler>>();
 
-  constructor(options: { host: string; port: number }) {
-    this.redis = new Redis(options);
+  constructor(options: { url?: string; host?: string; port?: number; password?: string }) {
+    // Prefer a full URL (ioredis parses host/port/password from it); fall back
+    // to discrete host/port/password. Subscriber connections are dedicated:
+    // an ioredis connection in subscriber mode cannot run commands.
+    this.redis = options.url
+      ? new Redis(options.url, {
+          retryStrategy: (times: number) => Math.min(times * 1000, 10000),
+          maxRetriesPerRequest: 1,
+        })
+      : new Redis({
+          host: options.host ?? 'localhost',
+          port: options.port ?? 6379,
+          password: options.password,
+          retryStrategy: (times: number) => Math.min(times * 1000, 10000),
+          maxRetriesPerRequest: 1,
+        });
+    // Swallow connection errors instead of crashing the process with an
+    // "Unhandled error event"; subscribe() still rejects on init failure,
+    // which the caller logs.
+    this.redis.on('error', () => {});
     
     this.redis.on('message', (channel: string, message: string) => {
       const channelHandlers = this.handlers.get(channel);

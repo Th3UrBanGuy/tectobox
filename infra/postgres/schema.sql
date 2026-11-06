@@ -86,6 +86,11 @@ CREATE TABLE orders (
     status VARCHAR(50) DEFAULT 'confirmed',
     customer_name VARCHAR(255),
     customer_phone VARCHAR(50),
+    customer_address TEXT,
+    courier_name VARCHAR(255),
+    courier_tracking_code VARCHAR(255),
+    courier_consignment_id VARCHAR(255),
+    courier_status VARCHAR(50),
     idempotency_key VARCHAR(255),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(client_id, idempotency_key)

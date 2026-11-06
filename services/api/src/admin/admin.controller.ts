@@ -270,23 +270,6 @@ export class AdminController {
     }));
   }
 
-  @Get('status')
-  async getStatus(@CurrentTenant() tenantId: number) {
-    const metaToken = Boolean(process.env.META_PAGE_ACCESS_TOKEN);
-    const tgToken = Boolean(process.env.TELEGRAM_BOT_TOKEN);
-
-    return {
-      status: 'healthy',
-      ok: true,
-      platforms: {
-        whatsapp: { mode: 'live', note: 'Baileys worker active' },
-        telegram: { mode: tgToken ? 'live' : 'demo', note: tgToken ? 'Bot token configured' : 'Add token' },
-        messenger: { mode: metaToken ? 'live' : 'demo', note: metaToken ? 'Meta token present' : 'Connect Facebook Page' },
-        instagram: { mode: metaToken ? 'live' : 'demo', note: metaToken ? 'Meta token present' : 'Connect Instagram' },
-      },
-    };
-  }
-
   @Get('stats')
   async getTenantStats(@CurrentTenant() tenantId: number) {
     const convCount = await this.pool.query('SELECT COUNT(*) as count FROM conversations WHERE client_id = $1', [tenantId]);
