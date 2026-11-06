@@ -106,24 +106,26 @@ test.describe('16. Admin Workspaces, Direct Licensing, Payments Hub & Pure Monoc
     await page.click('#btn-toggle-manual-pay');
     await expect(page.locator('#manual-pay-box')).toBeVisible();
 
-    await page.fill('#man-trxid', manualTrxId);
-    await page.fill('#man-amount', '4200');
-    await page.selectOption('#man-method', 'bkash');
+    await page.fill('#man-pay-trx', manualTrxId);
+    await page.fill('#man-pay-amount', '4200');
+    await page.fill('#man-pay-name', 'Mono Customer');
+    await page.fill('#man-pay-phone', '01700000000');
+    await page.selectOption('#man-pay-method', 'bkash');
     await page.click('#btn-submit-manual-pay');
 
-    // Verify payment record appears in pending table
-    await expect(page.locator('#payments-tbody')).toContainText(manualTrxId, { timeout: 8000 });
+    // Verify payment record appears in pending list
+    await expect(page.locator('#payments-list')).toContainText(manualTrxId, { timeout: 8000 });
 
     // Find and click Verify button on this payment
-    const row = page.locator('#payments-tbody tr', { hasText: manualTrxId });
-    await expect(row).toBeVisible();
-    const verifyBtn = row.locator('button.btn-verify-pay');
+    const card = page.locator('#payments-list .payment-card-item', { hasText: manualTrxId });
+    await expect(card).toBeVisible();
+    const verifyBtn = card.locator('button.btn-verify-pay');
     await expect(verifyBtn).toBeVisible();
     await verifyBtn.click();
 
     // Switch to Verified tab and confirm it appears there
     await page.click('#payments-tabs button[data-ptab="verified"]');
-    await expect(page.locator('#payments-tbody')).toContainText(manualTrxId, { timeout: 8000 });
+    await expect(page.locator('#payments-list')).toContainText(manualTrxId, { timeout: 8000 });
 
     // Close payments modal
     await page.click('#btn-close-payments');

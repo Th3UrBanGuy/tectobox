@@ -124,6 +124,15 @@ function fmtDay(iso) {
   if (same(d, yest)) return 'Yesterday';
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
+function timeAgo(date) {
+  if (!date) return '';
+  const d = new Date(date);
+  const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (diffSec < 60) return 'just now';
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+  return `${Math.floor(diffSec / 86400)}d ago`;
+}
 function platBadge(p, size) {
   const m = PLATFORMS[p] || { badge: '?', cls: '' };
   return `<span class="plat-badge ${m.cls}" title="${esc(m.label || p)}" ${size ? `style="width:${size}px;height:${size}px;border-radius:${size / 3}px;font-size:${size / 2.7}px;"` : ''}>${m.badge}</span>`;
