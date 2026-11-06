@@ -3,6 +3,9 @@ import { test, expect } from '@playwright/test';
 test.describe('15. Live Payments Hub & AI Payment Claim Detection', () => {
 
   test('UI renders payments trigger button, pending badge and modal', async ({ page }) => {
+    await page.addInitScript(() => {
+      try { localStorage.setItem('tectonic-onboard-hide', '1'); } catch {}
+    });
     await page.goto('/app');
     await expect(page.locator('#login-view')).toBeVisible();
 
