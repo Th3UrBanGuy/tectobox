@@ -845,7 +845,7 @@ table.tbl tr.rowlink:hover td{background:var(--hover);}
 }
 
 /* login page floating theme toggle */
-.login-theme-toggle{position:fixed; top:18px; right:18px; z-index:80;}
+.login-theme-toggle{position:static; z-index:80;}
 
 /* ═══════════════ NATIVE LAYER · floating dock · settings · chat ═══════════════ */
 
