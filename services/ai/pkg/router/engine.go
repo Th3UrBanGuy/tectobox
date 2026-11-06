@@ -206,6 +206,24 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 }
 
 func (e *Engine) tryDirectAPIs(ctx context.Context, sysPrompt, userMsg string) (string, string, error) {
+	// 0. Gemini via local gemini-web2api-go (OpenAI-compatible endpoint).
+	// Runs first: it is the configured backend. web2api drives the Gemini
+	// web UI, so first replies take ~5s — the 2s Tier-3 context would
+	// always time out, hence a detached 25s context here.
+	if url := os.Getenv("GEMINI_WEB2API_URL"); url != "" {
+		if key := os.Getenv("GEMINI_WEB2API_KEY"); key != "" {
+			model := os.Getenv("GEMINI_WEB2API_MODEL")
+			if model == "" {
+				model = "gemini-3.6-flash"
+			}
+			wCtx, wCancel := context.WithTimeout(context.WithoutCancel(ctx), 25*time.Second)
+			defer wCancel()
+			if reply, err := e.callOpenAICompatible(wCtx, url, key, model, sysPrompt, userMsg); err == nil && reply != "" {
+				return reply, "gemini-web2api:" + model, nil
+			}
+		}
+	}
+
 	// 1. OpenRouter
 	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
 		reply, err := e.callOpenAICompatible(ctx, "https://openrouter.ai/api/v1/chat/completions", key, "google/gemini-2.5-flash", sysPrompt, userMsg)
