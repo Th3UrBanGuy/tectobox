@@ -133,6 +133,8 @@ services:
       GEMINI_WEB2API_URL: http://ai:8081/v1
       JWT_SECRET: ${JWT_SECRET:-tectobox_default_jwt_secret_change_me}
       NODE_ENV: production
+      # Public base URL for inbound webhook URLs (Connect Channels page).
+      BASE_URL: https://${DOMAIN:-box.tect0nic.com}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3120/api/healthz"]
       interval: 10s
