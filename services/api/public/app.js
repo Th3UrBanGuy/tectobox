@@ -3743,8 +3743,20 @@ async function loadAdminWatchdog() {
     const statusText = metrics.status || 'UNKNOWN';
 
     const recentErrors = (errorsRes && errorsRes.errors) ? errorsRes.errors : [];
-    const slowRequests = metrics.slowRequests || [];
-    const endpoints = metrics.endpoints || [];
+    const slowRequests = metrics.recentSlowRequests || metrics.slowRequests || [];
+    const rawEndpoints = metrics.endpoints || {};
+    const endpoints = Array.isArray(rawEndpoints)
+      ? rawEndpoints
+      : Object.entries(rawEndpoints).map(([endpoint, stat]) => ({
+          endpoint,
+          hits: stat.hits || 0,
+          avgDurationMs: stat.avgDurationMs || 0,
+          errors: stat.errors || 0,
+          lastAccess: stat.lastAccess || new Date().toISOString(),
+        })).sort((a, b) => b.hits - a.hits);
+
+    const memRss = metrics.memory?.rssMb ?? metrics.memoryRssMb ?? 0;
+    const memHeap = metrics.memory?.heapUsedMb ?? metrics.memoryHeapMb ?? 0;
 
     hud.innerHTML = `
       <div class="watchdog-header" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
@@ -3784,8 +3796,8 @@ async function loadAdminWatchdog() {
         </div>
         <div class="watchdog-stat-card">
           <div class="stat-card-label">Memory RSS</div>
-          <div class="stat-card-val">${metrics.memoryRssMb ?? 0}<span style="font-size:13px; font-weight:500;">MB</span></div>
-          <div class="stat-card-sub">Heap: ${metrics.memoryHeapMb ?? 0}MB</div>
+          <div class="stat-card-val">${memRss}<span style="font-size:13px; font-weight:500;">MB</span></div>
+          <div class="stat-card-sub">Heap: ${memHeap}MB</div>
         </div>
       </div>
 
