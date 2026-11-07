@@ -671,8 +671,10 @@ async function loadOrdersPage() {
         printThermalShippingLabel(b.dataset.thermalOrder);
       };
     });
+    return orders.length;
   } catch (e) {
     box.innerHTML = `<div class="notice warn">${esc(e.message)}</div>`;
+    return null;
   }
 }
 
@@ -831,6 +833,10 @@ function initBroadcastComposer() {
   $('bcast-create').onclick = async () => {
     const name = $('bcast-name').value.trim() || 'Campaign';
     const channel = $('bcast-channel').value;
+    // Messenger / Instagram are "Coming soon" (META_CONNECTORS_VISIBLE is
+    // false) — the options are disabled, but guard anyway in case a stale
+    // value is submitted.
+    if (channel === 'messenger' || channel === 'instagram') { toast('Messenger and Instagram broadcasts are coming soon — pick WhatsApp, Telegram, or All channels.', 'err'); return; }
     const text = $('bcast-text').value.trim();
     if (!text) { toast('Write the message first.', 'err'); return; }
     try {
@@ -1423,7 +1429,7 @@ function renderPlatformChips() {
   if (pop) {
     pop.innerHTML = all.map(c => `
       <button class="pop-item ${state.platformFilter === c.id ? 'active' : ''}" data-p="${c.id}" role="menuitem">
-        ${c.id !== 'all' ? platDot(c.id) : '<span class="plat-dot" style="background:var(--accent)"></span>'}${esc(c.label)}
+        ${c.id !== 'all' ? platDot(c.id) : '<span class="plat-dot" style="background:var(--muted)"></span>'}${esc(c.label)}
         <span class="tick">✓</span>
       </button>`).join('');
     pop.querySelectorAll('.pop-item').forEach(b =>
@@ -2302,6 +2308,8 @@ async function saveLeadModal() {
   if (conv) renderCustomerTab(conv);
 }
 function exportLeadsCSV() {
+  // Empty workspace: say so instead of silently "downloading" a headers-only file.
+  if (!state.leads.length) { toast('No leads to export yet.'); return; }
   const rows = [['Name', 'Phone', 'Email', 'Location', 'Platform', 'Status', 'Stage', 'Score', 'Temperature', 'Wants', 'Likely products', 'Convert %', 'Value BDT', 'Next action', 'Follow-up due', 'Verification']];
   for (const l of state.leads) {
     let aff = [];
@@ -2312,12 +2320,21 @@ function exportLeadsCSV() {
       l.predicted_value_bdt || '', l.next_action, l.followup_due_at || '', l.verification_state]
       .map(v => v == null ? '' : String(v)));
   }
-  const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  a.download = 'leads.csv';
-  a.click();
-  URL.revokeObjectURL(a.href);
+  try {
+    const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'leads.csv';
+    // Must be in the DOM and the blob URL must outlive the click: revoking
+    // synchronously after click() aborts the download in some browsers,
+    // which made the button look dead.
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`Downloaded ${state.leads.length} lead${state.leads.length === 1 ? '' : 's'} as CSV`);
+  } catch (e) { toast('CSV export failed: ' + (e && e.message ? e.message : 'unknown error'), 'err'); }
 }
 
 // ---------------- client: products ----------------
@@ -2734,7 +2751,7 @@ async function renderPlanTab() {
     <div class="ttl" style="font-size:17px; margin-bottom:4px;">My Plan</div>
     <p class="muted small" style="margin-bottom:14px;">What your workspace is licensed for — synced live with the platform.</p>
     <div class="kv"><span>Status</span><b>${esc(modeLabel)}</b></div>
-    ${lic ? `<div class="kv"><span>Plan</span><b>${esc(lic.plan_name || lic.kind)}</b></div>
+    ${lic ? `<div class="kv"><span>Plan</span><b>${esc(lic.plan_name || 'Licensed plan')}</b></div>
     <div class="kv"><span>License code</span><code>${esc(lic.code)}</code></div>
     ${lic.kind === 'time' && lic.ends_at ? `<div class="kv"><span>Renews / expires</span><b>${esc(fmtDate(lic.ends_at))}</b></div>` : ''}` : ''}
     ${a.aiPaused ? `<div class="notice warn" style="margin:10px 0;">AI replies are paused by the platform admin. Your inbox keeps working.</div>` : ''}
@@ -4437,7 +4454,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnCourierConfig = $('btn-open-courier-config');
   if (btnCourierConfig) btnCourierConfig.onclick = openCourierConfigModal;
   const btnRefOrders = $('btn-refresh-orders');
-  if (btnRefOrders) btnRefOrders.onclick = loadOrdersPage;
+  if (btnRefOrders) btnRefOrders.onclick = async () => {
+    // Visible feedback: disable while loading, then toast the result. The
+    // empty-workspace end state looks identical to before the click, so
+    // without the toast the button felt dead.
+    if (btnRefOrders.disabled) return;
+    btnRefOrders.disabled = true;
+    try {
+      const n = await loadOrdersPage();
+      if (n == null) toast('Could not refresh orders — see the list for details.', 'err');
+      else if (n === 0) toast('Orders refreshed — no orders yet');
+      else toast(`Orders refreshed — ${n} order${n === 1 ? '' : 's'}`);
+    } catch (e) { toast('Refresh failed: ' + (e && e.message ? e.message : 'unknown error'), 'err'); }
+    finally { btnRefOrders.disabled = false; }
+  };
   const ordSearch = $('orders-page-search');
   if (ordSearch) {
     ordSearch.addEventListener('input', e => {
@@ -4493,10 +4523,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeFilterPop(); collapseSearch(); } });
   // expanding search
   const _se = $('search-expand');
-  $('btn-search').onclick = (e) => { e.stopPropagation(); _se.classList.add('open'); $('btn-search-close').classList.remove('hidden'); setTimeout(() => $('conv-search').focus(), 60); };
+  $('btn-search').onclick = (e) => { e.stopPropagation(); _se.classList.add('open'); _se.closest('.inbox-toolbar')?.classList.add('search-open'); $('btn-search-close').classList.remove('hidden'); setTimeout(() => $('conv-search').focus(), 60); };
   window.collapseSearch = () => {
     if (!_se.classList.contains('open')) return;
-    _se.classList.remove('open'); $('btn-search-close').classList.add('hidden');
+    _se.classList.remove('open'); _se.closest('.inbox-toolbar')?.classList.remove('search-open'); $('btn-search-close').classList.add('hidden');
     if (!$('conv-search').value) { state.convQuery = ''; renderConvList(); }
   };
   $('btn-search-close').onclick = (e) => { e.stopPropagation(); $('conv-search').value = ''; collapseSearch(); };
@@ -4802,7 +4832,7 @@ const GUIDES = [
     steps: [
       { t: 'Open the Inbox tab', d: 'Newest conversations are on top. The colored dot shows the channel — green WhatsApp, blue Telegram, purple website chat.', img: '/img/guide-inbox.png?v=20261006c' },
       { t: 'Tap a conversation', d: 'You see the full chat history plus the customer\'s profile on the side. Type in the box at the bottom and press send — just like any chat app.' },
-      { t: 'Use the funnel to filter', d: 'Tap the funnel icon at the top to show only WhatsApp, only Telegram, or only website chats. Tap the magnifier to search any conversation.' },
+      { t: 'Filter by channel', d: 'Tap the "Filter by channel" button at the top to show only WhatsApp, only Telegram, or only website chats. Tap the magnifier to search any conversation.' },
       { t: 'Hand icon = needs you', d: 'When a chat needs a human, tap the hand icon at the top. The AI will stay quiet on those chats until you turn it off.' },
     ]
   },
@@ -4819,7 +4849,7 @@ const GUIDES = [
     id: 'widget', icon: 'sun', title: 'Chat on your website',
     sub: 'Let visitors talk to your AI',
     steps: [
-      { t: 'Open Chat Widget Style', d: 'Go to More → Chat Widget Style. Pick colors and write your greeting message.', img: '/img/guide-widget.png?v=20261006c', go: ['Open widget style', () => gotoSettings('appearance')] },
+      { t: 'Open Chat Widget Style', d: 'Open Chat Widget Style in the sidebar (under WORKSPACE). Pick colors and write your greeting message.', img: '/img/guide-widget.png?v=20261006c', go: ['Open widget style', () => gotoSettings('appearance')] },
       { t: 'Copy the code', d: 'Go to Connect Channels → Webchat → Copy embed code. Paste it on your website before </body>. Done — visitors can now chat with your AI.' },
     ]
   },

@@ -184,8 +184,12 @@ export class LicensingController {
       };
     }
 
+    // LEFT JOIN plans so the client sees the real plan name (NULL when the
+    // license was auto-provisioned without a plan — never the raw kind).
     const licRes = await this.pool.query(
-      "SELECT * FROM licenses WHERE client_id = $1 AND status = 'active' ORDER BY id DESC LIMIT 1",
+      `SELECT l.*, p.name AS plan_name FROM licenses l
+       LEFT JOIN plans p ON p.id = l.plan_id
+       WHERE l.client_id = $1 AND l.status = 'active' ORDER BY l.id DESC LIMIT 1`,
       [targetTenantId]
     );
 
@@ -218,7 +222,7 @@ export class LicensingController {
             features: defaultFeatures,
             creditsTotal: l.credits_total,
             creditsUsed: l.credits_used || 0,
-            license: l,
+            license: { ...l, plan_name: null },
           };
         }
       } catch (err) {
@@ -253,6 +257,10 @@ export class LicensingController {
         code: lic.code,
         status: lic.status,
         kind: lic.kind,
+        plan_id: lic.plan_id ?? null,
+        plan_name: lic.plan_name || null,
+        starts_at: lic.starts_at,
+        ends_at: lic.ends_at,
         credits_total: lic.credits_total,
         credits_used: lic.credits_used,
         features,
