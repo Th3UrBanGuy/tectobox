@@ -156,39 +156,51 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 	sb.WriteString("\nCustomer (Current Message): " + cleanMsg + "\nAssistant:")
 	fullPrompt := sb.String()
 
-	// Tier 1: Gemini Web2API with per-workspace isolated session pool
+	// Tier 1: Gemini Web2API with per-workspace isolated session pool.
+	// Skip when the workspace has no configured session (no cookies):
+	// the direct gemini.google.com call can never authenticate and
+	// would burn the full 2.5s timeout on every request. No code path
+	// populates session cookies today, so this is skipped in practice
+	// until a session is provisioned.
 	model := modelPreference
 	if model == "" {
 		model = "gemini-3.6-flash"
 	}
-	t1Ctx, t1Cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
-	if reply, err := e.geminiClient.GenerateForWorkspace(t1Ctx, pctx.ClientID, fullPrompt, model); err == nil && len(reply) > 0 {
-		t1Cancel()
-		e.setCache(cKey, reply, 5*time.Minute)
-		return reply, lang, "gemini-web2api:" + model, false
-	}
-	t1Cancel()
-
-	// Tier 2: Cloudflare Workers AI Playground models (full multi-turn message history)
-	cfMessages := []cloudflare.Message{
-		{Role: "system", Content: sysPrompt},
-	}
-	for _, h := range history {
-		r := "user"
-		if h.Role == "assistant" || h.Role == "model" {
-			r = "assistant"
+	if gemini.GetSessionPool().HasSession(pctx.ClientID) {
+		t1Ctx, t1Cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+		if reply, err := e.geminiClient.GenerateForWorkspace(t1Ctx, pctx.ClientID, fullPrompt, model); err == nil && len(reply) > 0 {
+			t1Cancel()
+			e.setCache(cKey, reply, 5*time.Minute)
+			return reply, lang, "gemini-web2api:" + model, false
 		}
-		cfMessages = append(cfMessages, cloudflare.Message{Role: r, Content: h.Content})
+		t1Cancel()
 	}
-	cfMessages = append(cfMessages, cloudflare.Message{Role: "user", Content: cleanMsg})
 
-	t2Ctx, t2Cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
-	if reply, err := e.cfClient.Generate(t2Ctx, cfMessages); err == nil && len(reply) > 0 {
+	// Tier 2: Cloudflare Workers AI Playground models (full multi-turn message history).
+	// Skip when Cloudflare credentials are unset: Generate would fail
+	// immediately, so skip the call (and the message build) outright
+	// instead of entering the tier at all.
+	if e.cfClient.Configured() {
+		cfMessages := []cloudflare.Message{
+			{Role: "system", Content: sysPrompt},
+		}
+		for _, h := range history {
+			r := "user"
+			if h.Role == "assistant" || h.Role == "model" {
+				r = "assistant"
+			}
+			cfMessages = append(cfMessages, cloudflare.Message{Role: r, Content: h.Content})
+		}
+		cfMessages = append(cfMessages, cloudflare.Message{Role: "user", Content: cleanMsg})
+
+		t2Ctx, t2Cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+		if reply, err := e.cfClient.Generate(t2Ctx, cfMessages); err == nil && len(reply) > 0 {
+			t2Cancel()
+			e.setCache(cKey, reply, 5*time.Minute)
+			return reply, lang, "cloudflare-pool", false
+		}
 		t2Cancel()
-		e.setCache(cKey, reply, 5*time.Minute)
-		return reply, lang, "cloudflare-pool", false
 	}
-	t2Cancel()
 
 	// Tier 3: Direct APIs (OpenRouter / OpenAI / Gemini API if configured)
 	t3Ctx, t3Cancel := context.WithTimeout(ctx, 2000*time.Millisecond)

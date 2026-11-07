@@ -32,6 +32,12 @@ func NewClient() *Client {
 	}
 }
 
+// Configured reports whether Cloudflare credentials are set. When false,
+// Generate fails immediately; callers use this to skip Tier 2 outright.
+func (c *Client) Configured() bool {
+	return c.accountID != "" && c.apiToken != ""
+}
+
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`

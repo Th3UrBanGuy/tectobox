@@ -111,6 +111,22 @@ func (p *SessionPool) GetOrCreateSession(workspaceID string) *WorkspaceSession {
 	return newSess
 }
 
+// HasSession reports whether the workspace has a configured session: a
+// session entry whose Cookies are set. No code path populates session
+// cookies today, so this is false in practice until a session is
+// provisioned; callers use it to skip Tier 1 instead of burning its
+// full timeout against gemini.google.com with an unauthenticatable
+// empty-cookie session.
+func (p *SessionPool) HasSession(workspaceID string) bool {
+	if workspaceID == "" {
+		workspaceID = "default"
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	sess, exists := p.sessions[workspaceID]
+	return exists && sess.Cookies != ""
+}
+
 // GenerateForWorkspace sends the prompt via the tenant's isolated session client
 func (c *Client) GenerateForWorkspace(ctx context.Context, workspaceID string, prompt string, modelName string) (string, error) {
 	sess := GetSessionPool().GetOrCreateSession(workspaceID)

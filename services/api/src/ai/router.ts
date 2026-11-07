@@ -175,7 +175,11 @@ export async function queryGoAIEngine(params: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
-      signal: AbortSignal.timeout(5500),
+      // 30s: measured Gemini replies take ~5-16s end-to-end (web2api
+      // ~5s+ for the full system prompt + 600 tokens, plus tier
+      // fallthrough). The old 5.5s abort was calibrated for the dead
+      // canned responder and cut real replies off in the widget.
+      signal: AbortSignal.timeout(30000),
     });
     if (res.ok) {
       const data = await res.json() as any;
