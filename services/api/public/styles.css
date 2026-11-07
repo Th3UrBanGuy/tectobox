@@ -1843,6 +1843,11 @@ html{ direction:ltr; }
 .search-expand.open .input:focus{box-shadow:none; border:none;}
 .search-expand.open #btn-search{display:none;}
 .search-expand.open #btn-search-close{width:30px; height:30px; border:none; background:transparent; box-shadow:none; backdrop-filter:none;}
+/* search open: hide the "Chats" title and let the input flex-fill the row,
+   so the expanding search never clips/overlaps the heading */
+.inbox-toolbar.search-open .list-title{display:none;}
+.inbox-toolbar.search-open .search-expand{flex:1; min-width:0;}
+.inbox-toolbar.search-open .search-expand.open .input{flex:1; width:auto; min-width:0;}
 /* human toggle — premium icon state */
 #btn-human.on{
   background:var(--accent-grad); color:var(--on-accent); border-color:transparent;
