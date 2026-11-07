@@ -115,15 +115,19 @@ export class ConnectorsController {
 
     return {
       whatsapp: {
+        method: 'QR code scan (Baileys Linked devices)',
         accounts: waAccounts.length ? waAccounts : [{ slot: 'default', status: 'connected', label: 'Primary WA' }],
       },
       telegram: {
+        method: 'QR code scan (Linked devices)',
         accounts: tgAccounts.length ? tgAccounts : [{ slot: 'default', status: 'connected', label: 'Primary TG' }],
       },
       messenger: {
+        method: 'Facebook Page OAuth',
         pages: metaPages.rows.filter((p) => p.channel === 'messenger'),
       },
       instagram: {
+        method: 'Facebook Page OAuth (linked business account)',
         pages: metaPages.rows.filter((p) => p.channel === 'instagram'),
       },
       webchat: {

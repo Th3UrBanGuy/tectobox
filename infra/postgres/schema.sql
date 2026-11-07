@@ -24,6 +24,7 @@ CREATE TABLE clients (
     ai_paused BOOLEAN NOT NULL DEFAULT false,
     suspended BOOLEAN NOT NULL DEFAULT false,
     delete_scheduled_at TIMESTAMPTZ,
+    courier_config_json TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
