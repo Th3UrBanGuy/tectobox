@@ -2957,10 +2957,32 @@ function wireAppearance() {
   paint();
 }
 async function loadConnectors() {
-  state.connectors = await api(`/api/clients/${state.clientId}/connectors`);
-  try { state.webchat = await api('/api/webchat/config'); } catch { state.webchat = {}; }
+  // Show a loading state immediately: the page shell (heading + empty
+  // "Webhook URLs" card) used to sit blank until all three calls below
+  // resolved, which reads as a ~5s hang on a cold first open.
+  $('chan-empty').innerHTML = '';
+  $('chan-grid').innerHTML = Array.from({ length: 3 }, () =>
+    `<div class="chan-card"><div class="sk" style="height:22px; width:48%; margin-bottom:14px;"></div><div class="sk" style="height:12px; width:92%; margin-bottom:8px;"></div><div class="sk" style="height:12px; width:68%;"></div></div>`).join('');
+  $('webhook-urls').innerHTML = '<div class="small muted" style="padding:6px 0;">Loading webhook URLs…</div>';
+  // The three calls are independent — fire them in parallel instead of
+  // awaiting each in turn (sequential ~223ms vs parallel ~103ms over the
+  // public path; the real win is the skeleton above, not the ~120ms).
   let urls = {};
-  try { urls = await api('/api/webhook-urls'); } catch {}
+  try {
+    const [connectors, webchat, fetchedUrls] = await Promise.all([
+      api(`/api/clients/${state.clientId}/connectors`),
+      api('/api/webchat/config').catch(() => ({})),
+      api('/api/webhook-urls').catch(() => ({})),
+    ]);
+    state.connectors = connectors;
+    state.webchat = webchat;
+    urls = fetchedUrls;
+  } catch (e) {
+    $('chan-grid').innerHTML = `<div class="warm-empty"><b>Couldn't load channels</b><p>The connection hiccuped. Your channels are safe — let's try again.</p><button class="btn-primary" id="btn-chan-retry" style="margin-top:6px;">Retry</button></div>`;
+    $('webhook-urls').innerHTML = '';
+    $('btn-chan-retry').onclick = () => loadConnectors();
+    return;
+  }
   $('webhook-urls').innerHTML = `
     ${META_CONNECTORS_VISIBLE ? `<div class="code-box"><span class="cl">Meta (Messenger + Instagram)</span>${esc(urls.meta || '—')}</div>` : ''}
     <div class="code-box"><span class="cl">Telegram bot</span>${esc(urls.telegram || '—')}</div>`;

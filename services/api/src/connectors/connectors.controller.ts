@@ -35,6 +35,38 @@ function escHtml(s: any): string {
   );
 }
 
+/**
+ * Public base URL for inbound webhook URLs shown in the UI.
+ * Priority: BASE_URL env -> PUBLIC_URL env -> DOMAIN env (the public
+ * hostname Caddy serves, e.g. box.tect0nic.com) -> the incoming request's
+ * Host + X-Forwarded-Proto (Caddy forwards both) -> localhost fallback
+ * for local dev. No production host is hardcoded here.
+ */
+function resolvePublicBaseUrl(req: Request): string {
+  const fromEnv = normalizeBaseUrl(process.env.BASE_URL || process.env.PUBLIC_URL || '');
+  if (fromEnv) return fromEnv;
+  const domain = normalizeBaseUrl(process.env.DOMAIN || '');
+  if (domain) return domain;
+  const host = req.get?.('host');
+  if (host) {
+    const forwarded = String(req.headers?.['x-forwarded-proto'] || '')
+      .split(',')[0]
+      .trim();
+    const proto = forwarded || (req.secure ? 'https' : 'http');
+    return `${proto}://${host}`;
+  }
+  return 'http://localhost:3000';
+}
+
+function normalizeBaseUrl(raw: string): string {
+  // Blank values (incl. a bare '/' from a build tool's default base) mean
+  // "not configured" — never turn them into a bare 'https://'.
+  let url = String(raw).trim().replace(/\/+$/, '');
+  if (!url) return '';
+  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+  return url;
+}
+
 @Controller('api')
 export class ConnectorsController {
   constructor(
@@ -419,8 +451,8 @@ export class ConnectorsController {
   }
 
   @Get('webhook-urls')
-  getWebhookUrls() {
-    const host = process.env.BASE_URL || 'http://localhost:3000';
+  getWebhookUrls(@Req() req: Request) {
+    const host = resolvePublicBaseUrl(req);
     return {
       meta: `${host}/webhooks/meta`,
       telegram: `${host}/webhooks/telegram`,
