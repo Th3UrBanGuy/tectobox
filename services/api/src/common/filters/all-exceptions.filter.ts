@@ -54,6 +54,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       userAgent: request.headers['user-agent'],
       ip: (request.headers['x-forwarded-for'] as string) || request.socket?.remoteAddress,
       stackSnippet,
+      source: 'backend',
     });
 
     const errorResponse = {

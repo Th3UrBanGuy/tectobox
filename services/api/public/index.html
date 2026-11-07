@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Tectobox">
-<link rel="stylesheet" href="/styles.css?v=20261107_v8_mobile_auth_fix">
+<link rel="stylesheet" href="/styles.css?v=20261107_v9_watchdog_inbox_shield">
 <script src="/theme-init.js?v=20261107b"></script>
 </head>
 <body>
@@ -569,6 +569,7 @@
         <button data-at="config">Platform config</button>
         <button data-at="notify">Notifications</button>
         <button data-at="audit">Audit log</button>
+        <button data-at="watchdog">⚡ Watchdog &amp; Health</button>
       </div>
       <div id="atab-resources" class="tbl-card"><table class="tbl">
         <thead><tr><th>Channel</th><th>Account</th><th>Workspace</th><th>Status</th><th>Last seen</th></tr></thead>
@@ -684,6 +685,11 @@
         </div>
       </div>
       <div id="atab-audit" class="hidden"><div class="tbl-card" id="audit-list"></div></div>
+      <div id="atab-watchdog" class="hidden">
+        <div class="watchdog-hud" id="watchdog-hud">
+          <div style="text-align:center; padding:40px;" class="muted">Loading live Watchdog telemetry…</div>
+        </div>
+      </div>
     </div>
   </div>
   </main>
@@ -1205,7 +1211,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=20261107_v8_mobile_auth_fix"></script>
+<script src="/app.js?v=20261107_v9_watchdog_inbox_shield"></script>
     <div class="gs-overlay hidden" id="gs-overlay">
       <div class="gs-card" id="get-started" role="dialog" aria-label="Get started"></div>
     </div>

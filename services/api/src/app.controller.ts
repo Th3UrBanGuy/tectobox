@@ -1,12 +1,15 @@
-import { Controller, Get, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, UseGuards, Query } from '@nestjs/common';
+import type { Request } from 'express';
 import { AppService } from './app.service.js';
 import { TenantGuard } from './tenant/tenant.guard.js';
 import { CurrentTenant } from './tenant/current-tenant.decorator.js';
 import { ErrorTrackingService } from './common/errors/error-tracking.service.js';
+import { WatchdogService } from './common/watchdog/watchdog.service.js';
 
 @Controller()
 export class AppController {
   private readonly tracker = ErrorTrackingService.getInstance();
+  private readonly watchdog = WatchdogService.getInstance();
 
   constructor(private readonly appService: AppService) {}
 
@@ -17,12 +20,18 @@ export class AppController {
 
   @Get(['healthz', 'api/healthz'])
   getHealth() {
+    const watchdogMetrics = this.watchdog.getMetrics();
     return {
-      status: 'healthy',
+      status: watchdogMetrics.status === 'CRITICAL' ? 'degraded' : 'healthy',
+      watchdogStatus: watchdogMetrics.status,
       timestamp: new Date().toISOString(),
       service: 'tectobox-core-api',
       uptime: process.uptime(),
       memory: process.memoryUsage(),
+      activeRequests: watchdogMetrics.requests.active,
+      totalRequests: watchdogMetrics.requests.total,
+      rpm: watchdogMetrics.requests.rates.rpm,
+      avgLatencyMs: watchdogMetrics.performance.avgLatencyMs,
     };
   }
 
@@ -70,5 +79,40 @@ export class AppController {
       uptime: process.uptime(),
       errors: this.tracker.getRecentErrors(parsedLimit, tenantId),
     };
+  }
+
+  // Watchdog live metrics & traffic stats endpoint
+  @Get('api/diagnostics/watchdog')
+  @UseGuards(TenantGuard)
+  getWatchdogMetrics() {
+    return {
+      timestamp: new Date().toISOString(),
+      ...this.watchdog.getMetrics(),
+    };
+  }
+
+  // Client telemetry receiver: browser errors sent via beacon or fetch
+  @Post('api/diagnostics/client-telemetry')
+  receiveClientTelemetry(
+    @Body() body: any,
+    @Req() req: Request,
+  ) {
+    const tenantId = (req as any).user?.clientId || (req as any).tenantId || body?.tenantId || null;
+    const ip = (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress || '127.0.0.1';
+    const userAgent = req.headers['user-agent'] || body?.userAgent;
+
+    const record = this.watchdog.recordClientTelemetry({
+      error: body?.error || 'ClientError',
+      message: body?.message || 'Unknown browser error',
+      url: body?.url,
+      line: body?.line,
+      col: body?.col,
+      stack: body?.stack,
+      userAgent,
+      tenantId,
+      ip,
+    });
+
+    return { received: true, id: record.id };
   }
 }

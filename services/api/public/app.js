@@ -1,10 +1,45 @@
 // Tectobox — AI-powered unified inbox frontend (vanilla JS + SSE).
 // Global Client-Side Error & Diagnostics Tracker
+let _lastBeaconTime = 0;
+function reportClientError(errData) {
+  const now = Date.now();
+  if (now - _lastBeaconTime < 2000) return; // 2s rate limit
+  _lastBeaconTime = now;
+  try {
+    const payload = JSON.stringify({
+      message: errData.message || 'Client runtime error',
+      stack: errData.stack || '',
+      url: window.location.href,
+      userAgent: navigator.userAgent,
+    });
+    if (navigator.sendBeacon) {
+      const blob = new Blob([payload], { type: 'application/json' });
+      navigator.sendBeacon('/api/diagnostics/client-telemetry', blob);
+    } else {
+      fetch('/api/diagnostics/client-telemetry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        keepalive: true,
+      }).catch(() => {});
+    }
+  } catch {}
+}
+
 window.addEventListener('error', (event) => {
   console.warn('[Tectobox Client Error]', event.message, event.filename, event.lineno);
+  reportClientError({
+    message: `${event.message} at ${event.filename || 'inline'}:${event.lineno || 0}:${event.colno || 0}`,
+    stack: event.error && event.error.stack ? event.error.stack : `${event.filename}:${event.lineno}`,
+  });
 });
 window.addEventListener('unhandledrejection', (event) => {
   console.warn('[Tectobox Unhandled Rejection]', event.reason);
+  const reason = event.reason;
+  reportClientError({
+    message: reason && reason.message ? reason.message : String(reason || 'Unhandled promise rejection'),
+    stack: reason && reason.stack ? reason.stack : '',
+  });
 });
 
 // Auth-first: client users are auto-scoped server-side; admin gets the Platform panel.
@@ -1502,12 +1537,15 @@ async function renderInboxEmpty() {
     </div>`;
     $('btn-goto-connect').onclick = () => { showView('settings'); switchSettingsTab('channels'); };
   } else {
-    panes.classList.remove('hidden');
+    if (!isInboxLocked()) {
+      panes.classList.remove('hidden');
+    }
     empty.innerHTML = '';
   }
 }
 
 async function selectConversation(id) {
+  if (isInboxLocked()) return;
   state.activeId = id;
   state.orderLines = {};
   renderConvList();
@@ -3683,10 +3721,200 @@ function switchAdminTab(tab) {
   $('atab-config').classList.toggle('hidden', tab !== 'config');
   $('atab-notify').classList.toggle('hidden', tab !== 'notify');
   $('atab-audit').classList.toggle('hidden', tab !== 'audit');
+  $('atab-watchdog').classList.toggle('hidden', tab !== 'watchdog');
   if (tab === 'config') loadAdminConfig();
   if (tab === 'notify') loadNotifyTab();
   if (tab === 'audit') loadAdminAudit();
   if (tab === 'licensing') loadAdminLicensing();
+  if (tab === 'watchdog') loadAdminWatchdog();
+}
+
+async function loadAdminWatchdog() {
+  const hud = $('watchdog-hud');
+  if (!hud) return;
+  try {
+    hud.innerHTML = '<div style="text-align:center; padding:40px;" class="muted">Fetching real-time Watchdog telemetry…</div>';
+    const [metrics, errorsRes] = await Promise.all([
+      api('/api/diagnostics/watchdog'),
+      api('/api/diagnostics/errors').catch(() => ({ errors: [] })),
+    ]);
+
+    const statusCls = metrics.status === 'HEALTHY' ? 'status-pill-healthy' : metrics.status === 'DEGRADED' ? 'status-pill-degraded' : 'status-pill-critical';
+    const statusText = metrics.status || 'UNKNOWN';
+
+    const recentErrors = (errorsRes && errorsRes.errors) ? errorsRes.errors : [];
+    const slowRequests = metrics.slowRequests || [];
+    const endpoints = metrics.endpoints || [];
+
+    hud.innerHTML = `
+      <div class="watchdog-header" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h2 style="font-size:20px; font-weight:800; color:var(--ink); margin:0 0 4px; display:flex; align-items:center; gap:10px;">
+            <span>⚡ Watchdog Telemetry &amp; System Health</span>
+            <span class="watchdog-status-badge ${statusCls}">${esc(statusText)}</span>
+          </h2>
+          <p class="muted small" style="margin:0;">Real-time API throughput, response latencies, anomalies, and live sanity error buffer.</p>
+        </div>
+        <button class="btn-sm btn-ghost" id="btn-refresh-watchdog" style="display:flex; align-items:center; gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          <span>Refresh Live</span>
+        </button>
+      </div>
+
+      <div class="watchdog-stats-grid">
+        <div class="watchdog-stat-card">
+          <div class="stat-card-label">Active Requests</div>
+          <div class="stat-card-val">${metrics.activeRequests ?? 0}</div>
+          <div class="stat-card-sub">In-flight HTTP streams</div>
+        </div>
+        <div class="watchdog-stat-card">
+          <div class="stat-card-label">Throughput</div>
+          <div class="stat-card-val">${metrics.requestsPerMinute ?? 0} <span style="font-size:13px; font-weight:500;">RPM</span></div>
+          <div class="stat-card-sub">Rolling 60-second window</div>
+        </div>
+        <div class="watchdog-stat-card">
+          <div class="stat-card-label">Total Requests</div>
+          <div class="stat-card-val">${metrics.totalRequests ?? 0}</div>
+          <div class="stat-card-sub">Since process startup</div>
+        </div>
+        <div class="watchdog-stat-card">
+          <div class="stat-card-label">Avg Latency</div>
+          <div class="stat-card-val">${metrics.avgLatencyMs ?? 0}<span style="font-size:13px; font-weight:500;">ms</span></div>
+          <div class="stat-card-sub">p95: ${metrics.p95LatencyMs ?? 0}ms &bull; max: ${metrics.maxLatencyMs ?? 0}ms</div>
+        </div>
+        <div class="watchdog-stat-card">
+          <div class="stat-card-label">Memory RSS</div>
+          <div class="stat-card-val">${metrics.memoryRssMb ?? 0}<span style="font-size:13px; font-weight:500;">MB</span></div>
+          <div class="stat-card-sub">Heap: ${metrics.memoryHeapMb ?? 0}MB</div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:12px; margin-bottom:24px;">
+        <div class="stat-mini-badge" style="background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px;">
+          <div class="muted small" style="font-size:11px; font-weight:600; text-transform:uppercase;">2xx Success</div>
+          <div style="font-size:18px; font-weight:800; color:#10b981;">${metrics.statusCodes?.['2xx'] ?? 0}</div>
+        </div>
+        <div class="stat-mini-badge" style="background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px;">
+          <div class="muted small" style="font-size:11px; font-weight:600; text-transform:uppercase;">3xx Redirect</div>
+          <div style="font-size:18px; font-weight:800; color:#6366f1;">${metrics.statusCodes?.['3xx'] ?? 0}</div>
+        </div>
+        <div class="stat-mini-badge" style="background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px;">
+          <div class="muted small" style="font-size:11px; font-weight:600; text-transform:uppercase;">4xx Client Error</div>
+          <div style="font-size:18px; font-weight:800; color:#f59e0b;">${metrics.statusCodes?.['4xx'] ?? 0}</div>
+        </div>
+        <div class="stat-mini-badge" style="background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px;">
+          <div class="muted small" style="font-size:11px; font-weight:600; text-transform:uppercase;">5xx Server Error</div>
+          <div style="font-size:18px; font-weight:800; color:#ef4444;">${metrics.statusCodes?.['5xx'] ?? 0}</div>
+        </div>
+      </div>
+
+      <div class="watchdog-section mb24">
+        <h3 style="font-size:15px; font-weight:700; margin:0 0 12px; color:var(--ink);">Top Endpoint Activity</h3>
+        <div class="tbl-card" style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Method &amp; Path</th>
+                <th>Hits</th>
+                <th>Avg Duration</th>
+                <th>Errors</th>
+                <th>Last Accessed</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${endpoints.length === 0 ? '<tr><td colspan="5" class="muted text-center" style="padding:20px;">No endpoint traffic recorded yet.</td></tr>' :
+                endpoints.slice(0, 15).map(ep => `
+                  <tr>
+                    <td><code>${esc(ep.endpoint)}</code></td>
+                    <td><strong>${ep.hits}</strong></td>
+                    <td>${ep.avgDurationMs}ms</td>
+                    <td>${ep.errors > 0 ? `<span class="badge badge-danger">${ep.errors}</span>` : '<span class="badge badge-success">0</span>'}</td>
+                    <td class="muted small">${new Date(ep.lastAccess).toLocaleTimeString()}</td>
+                  </tr>
+                `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="watchdog-section mb24">
+        <h3 style="font-size:15px; font-weight:700; margin:0 0 12px; color:var(--ink);">Slow Requests &amp; Latency Anomalies (&ge; 1000ms)</h3>
+        <div class="tbl-card" style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Route</th>
+                <th>Status</th>
+                <th>Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${slowRequests.length === 0 ? '<tr><td colspan="4" class="muted text-center" style="padding:20px;">No slow requests detected — all APIs responding fast.</td></tr>' :
+                slowRequests.slice().reverse().slice(0, 10).map(sq => `
+                  <tr>
+                    <td class="muted small">${new Date(sq.timestamp).toLocaleTimeString()}</td>
+                    <td><code>${esc(sq.method)} ${esc(sq.path)}</code></td>
+                    <td><span class="badge ${sq.statusCode >= 500 ? 'badge-danger' : 'badge-neutral'}">${sq.statusCode}</span></td>
+                    <td><strong style="color:#f59e0b;">${sq.durationMs}ms</strong></td>
+                  </tr>
+                `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="watchdog-section">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="font-size:15px; font-weight:700; margin:0; color:var(--ink);">Error &amp; Sanity Buffer (${recentErrors.length})</h3>
+          <button class="btn-xs btn-outline" id="btn-clear-err-buffer">Clear Buffer</button>
+        </div>
+        <div class="tbl-card" style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Source</th>
+                <th>Type</th>
+                <th>Message</th>
+                <th>Path</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${recentErrors.length === 0 ? '<tr><td colspan="5" class="muted text-center" style="padding:20px;">Buffer clean — zero active runtime exceptions recorded.</td></tr>' :
+                recentErrors.slice().reverse().slice(0, 15).map(er => `
+                  <tr>
+                    <td class="muted small">${new Date(er.timestamp).toLocaleTimeString()}</td>
+                    <td><span class="badge ${er.source === 'frontend' ? 'badge-amber' : 'badge-blue'}">${esc(er.source || 'backend')}</span></td>
+                    <td><code>${esc(er.type || 'Error')}</code></td>
+                    <td style="max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(er.message)}">${esc(er.message)}</td>
+                    <td class="muted small"><code>${esc(er.path || '-')}</code></td>
+                  </tr>
+                `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    const rBtn = $('btn-refresh-watchdog');
+    if (rBtn) rBtn.onclick = () => loadAdminWatchdog();
+
+    const cBtn = $('btn-clear-err-buffer');
+    if (cBtn) {
+      cBtn.onclick = async () => {
+        try {
+          await api('/api/diagnostics/errors', { method: 'DELETE' });
+          toast('Error buffer cleared');
+          loadAdminWatchdog();
+        } catch (e) {
+          toast('Failed: ' + e.message, 'err');
+        }
+      };
+    }
+  } catch (err) {
+    hud.innerHTML = `<div class="notice warn">Failed to load Watchdog telemetry: ${esc(err.message)}</div>`;
+  }
 }
 
 // ---------------- admin: plans & licenses (simple) ----------------

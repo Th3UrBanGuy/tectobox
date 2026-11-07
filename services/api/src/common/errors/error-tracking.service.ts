@@ -12,6 +12,7 @@ export interface TrackedErrorRecord {
   userAgent?: string;
   ip?: string;
   stackSnippet?: string;
+  source?: 'backend' | 'frontend' | 'watchdog';
 }
 
 @Injectable()

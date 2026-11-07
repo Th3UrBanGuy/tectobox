@@ -7,6 +7,7 @@ import fs from 'fs';
 import { AppModule } from './app.module.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { StructuredLogger } from './common/logger/logger.service.js';
+import { watchdogMiddleware } from './common/watchdog/watchdog.middleware.js';
 
 async function bootstrap() {
   const logger = new StructuredLogger();
@@ -22,6 +23,7 @@ async function bootstrap() {
   });
 
   const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.use(watchdogMiddleware);
   const candidatePublicDirs = [
     path.join(process.cwd(), 'services/api/public'),
     path.join(process.cwd(), 'public'),
