@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 
 test.describe('8. Button-Level Exhaustive Sync & Multi-Mechanism Stress Suite', () => {
   test.setTimeout(45000);
@@ -6,7 +7,7 @@ test.describe('8. Button-Level Exhaustive Sync & Multi-Mechanism Stress Suite', 
 
   async function ensureLoggedIn(page: Page, role: 'operator' | 'admin' = 'operator') {
     const username = role === 'admin' ? 'admin' : 'operator';
-    const password = role === 'admin' ? 'admin123' : 'operator123';
+    const password = role === 'admin' ? e2ePassword('admin') : e2ePassword('operator');
 
     await page.goto('/app');
     const isLoginVisible = await page.locator('#login-view').isVisible();

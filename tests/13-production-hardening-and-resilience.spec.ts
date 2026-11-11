@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 
 test.describe('13. Universal Production Hardening & Resilience Verification Suite', () => {
   test.setTimeout(60000);
@@ -27,7 +28,7 @@ test.describe('13. Universal Production Hardening & Resilience Verification Suit
   test('SEC-02: Tenant Isolation — Operator role is strictly forbidden from Admin APIs', async ({ request }) => {
     // 1. Sign in as operator
     const loginRes = await request.post('/api/auth/login', {
-      data: { username: 'operator', password: 'operator123' },
+      data: { username: 'operator', password: e2ePassword('operator') },
     });
     expect(loginRes.status()).toBe(200);
     const loginBody = await loginRes.json();
@@ -47,7 +48,7 @@ test.describe('13. Universal Production Hardening & Resilience Verification Suit
   test('SEC-03: SQL Injection & XSS payload resistance in search & parameters', async ({ request }) => {
     // Sign in as operator
     const loginRes = await request.post('/api/auth/login', {
-      data: { username: 'operator', password: 'operator123' },
+      data: { username: 'operator', password: e2ePassword('operator') },
     });
     const { token } = await loginRes.json();
 
@@ -125,13 +126,13 @@ test.describe('13. Universal Production Hardening & Resilience Verification Suit
   test('PERF-01: Concurrent tenant request handling without cross-contamination', async ({ request }) => {
     // Login as operator
     const opRes = await request.post('/api/auth/login', {
-      data: { username: 'operator', password: 'operator123' },
+      data: { username: 'operator', password: e2ePassword('operator') },
     });
     const opToken = (await opRes.json()).token;
 
     // Login as admin
     const adminRes = await request.post('/api/auth/login', {
-      data: { username: 'admin', password: 'admin123' },
+      data: { username: 'admin', password: e2ePassword('admin') },
     });
     const adminToken = (await adminRes.json()).token;
 

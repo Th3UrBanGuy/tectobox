@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 
 test.describe('12. Dynamic Workspace Licensing & Granular Feature Matrix Verification', () => {
   test.setTimeout(180000); // 3 minutes for comprehensive combinatorial cycles
@@ -12,7 +13,7 @@ test.describe('12. Dynamic Workspace Licensing & Granular Feature Matrix Verific
   test.beforeAll(async ({ request }) => {
     // 1. Sign in as admin to get session/token
     const loginRes = await request.post('/api/auth/login', {
-      data: { username: 'admin', password: 'admin123' },
+      data: { username: 'admin', password: e2ePassword('admin') },
     });
     expect(loginRes.ok()).toBeTruthy();
     const loginData = await loginRes.json();
@@ -76,7 +77,7 @@ test.describe('12. Dynamic Workspace Licensing & Granular Feature Matrix Verific
     }
 
     const u = role === 'admin' ? 'admin' : USERNAME;
-    const p = role === 'admin' ? 'admin123' : PASSWORD;
+    const p = role === 'admin' ? e2ePassword('admin') : PASSWORD;
     await page.fill('#login-username', u);
     await page.fill('#login-password', p);
     await page.click('#login-btn', { force: true });
@@ -90,7 +91,7 @@ test.describe('12. Dynamic Workspace Licensing & Granular Feature Matrix Verific
 
   async function adminAssignLicense(request: any, features: string[]) {
     const loginRes = await request.post('/api/auth/login', {
-      data: { username: 'admin', password: 'admin123' },
+      data: { username: 'admin', password: e2ePassword('admin') },
     });
     const { token } = await loginRes.json();
 
@@ -113,7 +114,7 @@ test.describe('12. Dynamic Workspace Licensing & Granular Feature Matrix Verific
   async function adminCancelLicense(request: any) {
     if (!activeLicenseId) return;
     const loginRes = await request.post('/api/auth/login', {
-      data: { username: 'admin', password: 'admin123' },
+      data: { username: 'admin', password: e2ePassword('admin') },
     });
     const { token } = await loginRes.json();
 

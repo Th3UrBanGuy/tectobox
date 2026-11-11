@@ -1,11 +1,15 @@
 async function testPayments() {
+
+// C1: login credentials come from the environment — no password literal in source.
+const OPERATOR_PASSWORD = process.env.E2E_OPERATOR_PASSWORD;
+if (!OPERATOR_PASSWORD) throw new Error('[e2e] E2E_OPERATOR_PASSWORD must be set in the environment.');
   const host = 'http://160.25.5.64';
 
   console.log('--- 1. Login as Operator ---');
   const lRes = await fetch(`${host}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'operator', password: 'operator123' })
+    body: JSON.stringify({ username: 'operator', password: OPERATOR_PASSWORD })
   });
   console.log('Login status:', lRes.status);
   const cookie = lRes.headers.get('set-cookie');

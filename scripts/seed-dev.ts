@@ -25,9 +25,16 @@ async function seed() {
   `);
   console.log('[seed] Client seeded (id: 1)');
 
-  // 2. Insert Users (admin / admin123 and operator / operator123)
-  const adminHash = await hashPassword('admin123');
-  const opHash = await hashPassword('operator123');
+  // 2. Insert Users (admin / operator) — passwords come from the
+  // environment only (C1). No default: the script stops with a clear error
+  // instead of seeding a well-known password.
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+  const operatorPassword = process.env.SEED_OPERATOR_PASSWORD;
+  if (!adminPassword || !operatorPassword) {
+    throw new Error('[seed] SEED_ADMIN_PASSWORD and SEED_OPERATOR_PASSWORD must both be set in the environment (no default passwords are seeded).');
+  }
+  const adminHash = await hashPassword(adminPassword);
+  const opHash = await hashPassword(operatorPassword);
 
   await client.query(`
     INSERT INTO users (id, username, password_hash, role, client_id, active, created_at)
@@ -37,7 +44,7 @@ async function seed() {
     ON CONFLICT (username) DO UPDATE 
     SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role, client_id = EXCLUDED.client_id, active = true
   `, [adminHash, opHash]);
-  console.log('[seed] Users seeded (admin:admin123, operator:operator123)');
+  console.log('[seed] Users seeded (admin, operator)');
 
   // 3. Products
   const products = [

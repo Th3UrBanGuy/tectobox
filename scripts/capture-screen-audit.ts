@@ -1,5 +1,10 @@
 import { chromium } from 'playwright';
 
+const OPERATOR_PASSWORD = process.env.E2E_OPERATOR_PASSWORD;
+if (!OPERATOR_PASSWORD) throw new Error('[e2e] E2E_OPERATOR_PASSWORD must be set in the environment.');
+const XYZ_PASSWORD = process.env.E2E_XYZ_PASSWORD;
+if (!XYZ_PASSWORD) throw new Error('[e2e] E2E_XYZ_PASSWORD must be set in the environment.');
+
 async function captureAll() {
   const browser = await chromium.launch({ headless: true });
   const artifactDir = 'C:/Users/Diamond Technology/.gemini/antigravity/brain/7c4b2ecc-173c-4b91-9904-9e4ad41ca616';
@@ -28,7 +33,7 @@ async function captureAll() {
   console.log('Testing operator login and profile modal...');
   await dPage.evaluate(() => localStorage.setItem('tectonic-onboard-hide', '1'));
   await dPage.fill('#login-username', 'operator');
-  await dPage.fill('#login-password', 'operator123');
+  await dPage.fill('#login-password', OPERATOR_PASSWORD);
   await dPage.click('#login-btn');
   await dPage.waitForSelector('#cview-inbox:not(.hidden)', { timeout: 15000 });
   
@@ -40,11 +45,11 @@ async function captureAll() {
   await dPage.click('#btn-close-profile');
   
   // Test xyz account login
-  console.log('Testing xyz login with xyz123...');
+  console.log('Testing xyz login...');
   await dPage.click('#btn-signout');
   await dPage.waitForSelector('#login-view:not(.hidden)', { timeout: 5000 });
   await dPage.fill('#login-username', 'xyz');
-  await dPage.fill('#login-password', 'xyz123');
+  await dPage.fill('#login-password', XYZ_PASSWORD);
   await dPage.click('#login-btn');
   await dPage.waitForSelector('#cview-inbox:not(.hidden)', { timeout: 15000 });
   console.log('xyz logged in successfully with active inbox!');

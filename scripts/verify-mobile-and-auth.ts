@@ -1,5 +1,9 @@
 import { chromium } from 'playwright';
 
+// C1: login credentials come from the environment — no password literal in source.
+const OPERATOR_PASSWORD = process.env.E2E_OPERATOR_PASSWORD;
+if (!OPERATOR_PASSWORD) throw new Error('[e2e] E2E_OPERATOR_PASSWORD must be set in the environment.');
+
 async function run() {
   const browser = await chromium.launch({ headless: true });
   
@@ -21,7 +25,7 @@ async function run() {
   // Fill username with capitalized first letter as mobile keyboards do
   console.log('Testing case-insensitive mobile login with "Operator" ...');
   await page.fill('#login-username', 'Operator');
-  await page.fill('#login-password', 'operator123');
+  await page.fill('#login-password', OPERATOR_PASSWORD);
   await page.click('#login-btn');
   
   await page.waitForSelector('#cview-inbox:not(.hidden)', { timeout: 15000 });
@@ -64,7 +68,7 @@ async function run() {
   // Test 2: Test Mobile top signout button directly
   console.log('Testing 1-tap mobile top signout button...');
   await page.fill('#login-username', 'Operator');
-  await page.fill('#login-password', 'operator123');
+  await page.fill('#login-password', OPERATOR_PASSWORD);
   await page.click('#login-btn');
   await page.waitForSelector('#cview-inbox:not(.hidden)', { timeout: 15000 });
   
@@ -83,7 +87,7 @@ async function run() {
   const desktopPage = await desktopContext.newPage();
   await desktopPage.goto('http://160.25.5.64/index.html', { waitUntil: 'networkidle' });
   await desktopPage.fill('#login-username', 'operator');
-  await desktopPage.fill('#login-password', 'operator123');
+  await desktopPage.fill('#login-password', OPERATOR_PASSWORD);
   await desktopPage.click('#login-btn');
   await desktopPage.waitForSelector('#cview-inbox:not(.hidden)', { timeout: 15000 });
   

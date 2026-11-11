@@ -1,6 +1,18 @@
+import crypto from 'node:crypto';
+
+// Live smoke test against the VPS gateway.
+// C1/C5: all credentials come from the environment — no password literal in
+// source. Required: VERIFY_ADMIN_PASSWORD, VERIFY_OPERATOR_PASSWORD.
+// VPS_HOST may override the default host (the IP itself is not a secret).
+const ADMIN_PASSWORD = process.env.VERIFY_ADMIN_PASSWORD;
+const OPERATOR_PASSWORD = process.env.VERIFY_OPERATOR_PASSWORD;
+if (!ADMIN_PASSWORD || !OPERATOR_PASSWORD) {
+  throw new Error('[verify] VERIFY_ADMIN_PASSWORD and VERIFY_OPERATOR_PASSWORD must both be set in the environment.');
+}
+
 async function verify() {
-  const host = 'http://160.25.5.64';
-  
+  const host = `http://${process.env.VPS_HOST || '160.25.5.64'}`;
+
   // 1. Healthz
   const hRes = await fetch(`${host}/healthz`);
   const hData = await hRes.json();
@@ -20,11 +32,11 @@ async function verify() {
   const lRes = await fetch(`${host}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    body: JSON.stringify({ username: 'admin', password: ADMIN_PASSWORD })
   });
   console.log('4. Admin login status:', lRes.status);
   const cookie = lRes.headers.get('set-cookie');
-  
+
   if (cookie) {
     const pRes = await fetch(`${host}/api/auth/profile`, {
       headers: { cookie }
@@ -43,7 +55,7 @@ async function verify() {
   const opLogin = await fetch(`${host}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'operator', password: 'operator123' })
+    body: JSON.stringify({ username: 'operator', password: OPERATOR_PASSWORD })
   });
   console.log('7. Operator login status:', opLogin.status);
   const opCookie = opLogin.headers.get('set-cookie');
@@ -58,7 +70,7 @@ async function verify() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', cookie: opCookie },
       body: JSON.stringify({
-        current_password: 'operator123',
+        current_password: OPERATOR_PASSWORD,
         new_username: 'hacker_operator'
       })
     });
@@ -66,12 +78,14 @@ async function verify() {
     console.log('   Response error message:', (await tryChangeUser.json()).error);
 
     // Try to change password as operator -> Must succeed (200 OK)!
+    // The temporary password is random per run, never a literal.
+    const tempPassword = `Tmp-${crypto.randomBytes(12).toString('hex')}`;
     const tryChangePass = await fetch(`${host}/api/auth/profile/credentials`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', cookie: opCookie },
       body: JSON.stringify({
-        current_password: 'operator123',
-        new_password: 'operatorNewPass123'
+        current_password: OPERATOR_PASSWORD,
+        new_password: tempPassword
       })
     });
     console.log('10. Operator password change status (expect 200):', tryChangePass.status);
@@ -81,7 +95,7 @@ async function verify() {
     const testNewLogin = await fetch(`${host}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'operator', password: 'operatorNewPass123' })
+      body: JSON.stringify({ username: 'operator', password: tempPassword })
     });
     console.log('11. Login with new password status (expect 200):', testNewLogin.status);
     const newCookie = testNewLogin.headers.get('set-cookie');
@@ -92,11 +106,11 @@ async function verify() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', cookie: newCookie },
         body: JSON.stringify({
-          current_password: 'operatorNewPass123',
-          new_password: 'operator123'
+          current_password: tempPassword,
+          new_password: OPERATOR_PASSWORD
         })
       });
-      console.log('12. Reverted operator password back to operator123');
+      console.log('12. Reverted operator password back to the env-provided value');
     }
   }
 }

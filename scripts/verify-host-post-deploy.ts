@@ -1,4 +1,5 @@
 import { Client } from 'ssh2';
+import { getVpsSshConfig } from './vps-ssh.ts';
 
 const conn = new Client();
 
@@ -37,8 +38,13 @@ conn.on('ready', async () => {
     console.log(await run('docker logs --tail 30 tectobox-prod-workers'));
 
     console.log('--- 5. TEST OPERATOR LOGIN & STATUS ENDPOINT ---');
+    // C1: the operator password comes from the environment — never a literal.
+    const operatorPassword = process.env.VERIFY_OPERATOR_PASSWORD;
+    if (!operatorPassword) {
+      throw new Error('[verify] VERIFY_OPERATOR_PASSWORD must be set in the environment to test the operator login.');
+    }
     console.log(await run(`
-      COOKIE=$(curl -s -c - -X POST http://127.0.0.1:80/api/auth/login -H "Content-Type: application/json" -d '{"username":"operator","password":"operator123"}' | grep tb_session | awk '{print $NF}')
+      COOKIE=$(curl -s -c - -X POST http://127.0.0.1:80/api/auth/login -H "Content-Type: application/json" -d '{"username":"operator","password":"${operatorPassword}"}' | grep tb_session | awk '{print $NF}')
       echo "tb_session cookie: $COOKIE"
       echo "Status response for operator:"
       curl -s -H "Cookie: tb_session=$COOKIE" http://127.0.0.1:80/api/status
@@ -51,4 +57,4 @@ conn.on('ready', async () => {
   } finally {
     conn.end();
   }
-}).connect({ host: '160.25.5.64', port: 22, username: 'root', password: 'Tect0nic123' });
+}).connect(getVpsSshConfig());

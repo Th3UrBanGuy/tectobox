@@ -1,12 +1,11 @@
 import { Client } from 'ssh2';
 import fs from 'fs';
 import path from 'path';
+import { getVpsSshConfig } from './vps-ssh.ts';
 
+// C5: SSH key auth only (see vps-ssh.ts) — no password field anywhere.
 const config = {
-  host: process.env.VPS_HOST || '160.25.5.64',
-  port: Number(process.env.VPS_PORT) || 22,
-  username: process.env.VPS_USERNAME || 'root',
-  password: process.env.VPS_PASSWORD || 'Tect0nic123',
+  ...getVpsSshConfig(),
   domain: process.env.DOMAIN || 'box.tect0nic.com',
 };
 
@@ -150,6 +149,6 @@ EOF
     host: config.host,
     port: config.port,
     username: config.username,
-    password: config.password,
+    privateKey: config.privateKey,
     readyTimeout: 30000,
   });

@@ -52,11 +52,9 @@ export class AuthController {
     }
 
     const { username, password, totp } = parsed.data;
-    const jwtSecret =
-      process.env.JWT_SECRET ||
-      (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test'
-        ? 'tectobox_jwt_dev_secret_key_2026'
-        : undefined);
+    // C4: JWT secret comes from the environment only — no fallback. If it is
+    // missing the login fails closed instead of signing with a known value.
+    const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) {
       throw new Error('JWT_SECRET is required but not configured');
     }
@@ -76,19 +74,10 @@ export class AuthController {
       throw new UnauthorizedException('Account has been deactivated. Please contact administrator.');
     }
 
-    let passwordValid = await verifyPassword(password, dbUser.password_hash);
-
-    // Fallback checks for operator, admin and demo accounts
-    if (!passwordValid) {
-      const uLower = dbUser.username.toLowerCase();
-      if (uLower === 'operator' && (password === 'operator123' || password === 'Operator123!' || password === 'Operator123' || password === 'operator' || password === 'Tect0nic123')) {
-        passwordValid = true;
-      } else if (uLower === 'admin' && (password === 'admin123' || password === 'Admin123!' || password === 'Admin123' || password === 'admin' || password === 'Tect0nic123')) {
-        passwordValid = true;
-      } else if (uLower === 'xyz' && (password === 'xyz123' || password === 'Operator123!' || password === 'xyz' || password === 'operator123')) {
-        passwordValid = true;
-      }
-    }
+    // C1: password is verified ONLY against the stored scrypt hash. The
+    // old literal fallback checks for operator/admin/xyz were removed —
+    // anyone reading the public repo could log in with them.
+    const passwordValid = await verifyPassword(password, dbUser.password_hash);
 
     if (!passwordValid) {
       throw new UnauthorizedException('ইউজারনেম অথবা পাসওয়ার্ড সঠিক নয়। দয়া করে পুনরায় চেক করুন। (Invalid username or password)');
@@ -269,18 +258,8 @@ export class AuthController {
     if (userRes.rows.length === 0) throw new UnauthorizedException('User not found');
     const dbUser = userRes.rows[0];
 
-    // 1. Verify current password
-    let isCurrentValid = await verifyPassword(current_password, dbUser.password_hash);
-    if (!isCurrentValid) {
-      const uLower = dbUser.username.toLowerCase();
-      if (uLower === 'operator' && (current_password === 'operator123' || current_password === 'Operator123!' || current_password === 'Operator123' || current_password === 'operator')) {
-        isCurrentValid = true;
-      } else if (uLower === 'admin' && (current_password === 'admin123' || current_password === 'Admin123!' || current_password === 'Admin123' || current_password === 'admin')) {
-        isCurrentValid = true;
-      } else if (uLower === 'xyz' && (current_password === 'xyz123' || current_password === 'Operator123!' || current_password === 'xyz' || current_password === 'operator123')) {
-        isCurrentValid = true;
-      }
-    }
+    // 1. Verify current password (hash only — see C1 note in login()).
+    const isCurrentValid = await verifyPassword(current_password, dbUser.password_hash);
     if (!isCurrentValid) {
       throw new BadRequestException('বর্তমান পাসওয়ার্ডটি সঠিক নয়। অনুগ্রহ করে সঠিক পাসওয়ার্ড দিন। (Current password incorrect)');
     }
@@ -328,8 +307,11 @@ export class AuthController {
       [updatedUsername, updatedHash, userId]
     );
 
-    // Issue refreshed token
-    const jwtSecret = process.env.JWT_SECRET || 'tectobox_jwt_dev_secret_key_2026';
+    // Issue refreshed token (C4: env-only JWT secret, fail closed).
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      throw new Error('JWT_SECRET is required but not configured');
+    }
     const newToken = jwt.sign(
       {
         sub: dbUser.id,

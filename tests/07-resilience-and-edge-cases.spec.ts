@@ -1,4 +1,5 @@
 import { test, expect, APIRequestContext } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 
 test.describe('7. Resilience, Edge Cases & 100+ Scenarios Stress Suite', () => {
   test.setTimeout(30000);
@@ -7,7 +8,7 @@ test.describe('7. Resilience, Edge Cases & 100+ Scenarios Stress Suite', () => {
 
   async function getAuthHeaders(request: APIRequestContext) {
     const loginRes = await request.post(`${API_BASE}/api/auth/login`, {
-      data: { username: 'admin', password: 'admin123' },
+      data: { username: 'admin', password: e2ePassword('admin') },
     });
     expect(loginRes.status()).toBe(200);
     const headers = loginRes.headers();

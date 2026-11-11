@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 
 test.describe('2. Platform Admin Panel & Interfaces', () => {
   test.beforeEach(async ({ page }) => {
@@ -9,7 +10,7 @@ test.describe('2. Platform Admin Panel & Interfaces', () => {
     const isLoginVisible = await page.locator('#login-view').isVisible();
     if (isLoginVisible) {
       await page.fill('#login-username', 'admin');
-      await page.fill('#login-password', 'admin123');
+      await page.fill('#login-password', e2ePassword('admin'));
       await page.click('#login-btn');
       await expect(page.locator('#app-view')).toBeVisible();
     }

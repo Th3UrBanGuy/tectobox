@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 
 test.describe('5. Isolated Workspace Screens, Webchat Widget & Courier Logistics', () => {
   test.beforeEach(async ({ page }) => {
@@ -9,7 +10,7 @@ test.describe('5. Isolated Workspace Screens, Webchat Widget & Courier Logistics
     const isLoginVisible = await page.locator('#login-view').isVisible();
     if (isLoginVisible) {
       await page.fill('#login-username', 'operator');
-      await page.fill('#login-password', 'operator123');
+      await page.fill('#login-password', e2ePassword('operator'));
       await page.click('#login-btn');
       await expect(page.locator('#app-view')).toBeVisible();
     }

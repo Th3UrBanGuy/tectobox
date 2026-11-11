@@ -1,4 +1,5 @@
 import { Client } from 'ssh2';
+import { getVpsSshConfig } from './vps-ssh.ts';
 
 const conn = new Client();
 conn.on('ready', () => {
@@ -8,4 +9,4 @@ conn.on('ready', () => {
     stream.stderr.on('data', (d: Buffer) => process.stderr.write(d.toString()));
     stream.on('close', () => conn.end());
   });
-}).connect({ host: '160.25.5.64', username: 'root', password: 'Tect0nic123' });
+}).connect(getVpsSshConfig());

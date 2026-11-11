@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 
 test.describe('15. Live Payments Hub & AI Payment Claim Detection', () => {
 
@@ -11,7 +12,7 @@ test.describe('15. Live Payments Hub & AI Payment Claim Detection', () => {
 
     // Login as operator
     await page.fill('#login-username', 'operator');
-    await page.fill('#login-password', 'operator123');
+    await page.fill('#login-password', e2ePassword('operator'));
     await page.click('#login-btn');
 
     // App view should be visible

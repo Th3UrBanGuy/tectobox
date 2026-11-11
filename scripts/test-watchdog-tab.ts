@@ -1,17 +1,24 @@
 import { chromium } from 'playwright';
 
+// C1: the admin password comes from the environment — never a literal.
+// Required: E2E_ADMIN_PASSWORD. VPS_HOST may override the default host.
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD;
+if (!ADMIN_PASSWORD) {
+  throw new Error('[test-watchdog-tab] E2E_ADMIN_PASSWORD must be set in the environment.');
+}
+
 async function run() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.on('console', msg => console.log('PAGE LOG:', msg.text()));
   page.on('pageerror', err => console.log('PAGE ERROR:', err.message));
-  await page.goto('http://160.25.5.64/index.html');
+  await page.goto(`http://${process.env.VPS_HOST || '160.25.5.64'}/index.html`);
   await page.fill('#login-username', 'admin');
-  await page.fill('#login-password', 'admin123');
+  await page.fill('#login-password', ADMIN_PASSWORD);
   await page.click('#login-btn');
   await page.waitForSelector('#view-admin:not(.hidden)', { timeout: 10000 });
   console.log('Logged into Admin!');
-  
+
   const btn = await page.$('button[data-at="watchdog"]');
   console.log('Is watchdog button found?', !!btn);
   if (btn) {

@@ -1,4 +1,5 @@
 import { Client } from 'ssh2';
+import { getVpsSshConfig } from './vps-ssh.ts';
 
 const conn = new Client();
 
@@ -65,4 +66,4 @@ conn.on('ready', async () => {
   } finally {
     conn.end();
   }
-}).connect({ host: '160.25.5.64', port: 22, username: 'root', password: 'Tect0nic123' });
+}).connect(getVpsSshConfig());

@@ -23,7 +23,10 @@ export function loadAppConfig(): AppConfigType {
   return AppConfigSchema.parse({
     port: env.PORT ? Number(env.PORT) : 3120,
     nodeEnv: (env.NODE_ENV as any) || 'development',
-    jwtSecret: env.JWT_SECRET || 'tectobox_jwt_dev_secret_key_2026',
+    // C4: JWT secret comes from the environment only. The Zod schema
+    // requires a string of min length 16, so a missing/empty JWT_SECRET
+    // fails fast at startup instead of silently using a known fallback.
+    jwtSecret: env.JWT_SECRET,
     databaseUrl: env.DATABASE_URL || 'postgres://tectobox:tectobox_dev@localhost:5432/tectobox',
     redisUrl: env.REDIS_URL || 'redis://localhost:6379',
     rabbitmqUrl: env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/',

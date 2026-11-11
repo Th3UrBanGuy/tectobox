@@ -9,5 +9,9 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.spec.ts'],
+    // Test-only JWT secret (see vitest.setup.ts). Production code has no
+    // fallback; without this, modules that load app config at import time
+    // would throw in tests.
+    setupFiles: ['./vitest.setup.ts'],
   },
 });

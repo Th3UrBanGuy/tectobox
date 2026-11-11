@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 
 test.describe('6. Comprehensive Button Crawler & Interaction Test Suite', () => {
   test.beforeEach(async ({ page }) => {
@@ -11,7 +12,7 @@ test.describe('6. Comprehensive Button Crawler & Interaction Test Suite', () => 
     // 1. Sign in as Admin
     await page.goto('/app');
     await page.fill('#login-username', 'admin');
-    await page.fill('#login-password', 'admin123');
+    await page.fill('#login-password', e2ePassword('admin'));
     await page.click('#login-btn');
     await expect(page.locator('#view-admin')).toBeVisible({ timeout: 5000 });
 
@@ -46,7 +47,7 @@ test.describe('6. Comprehensive Button Crawler & Interaction Test Suite', () => 
     // Check TOTP Setup button
     const totpSetupBtn = page.locator('#btn-totp-setup');
     if (await totpSetupBtn.isVisible()) {
-      await page.fill('#totp-setup-pw', 'admin123');
+      await page.fill('#totp-setup-pw', e2ePassword('admin'));
       await totpSetupBtn.click();
       await page.waitForTimeout(400);
       await expect(page.locator('#totp-setup-area')).toBeVisible();
@@ -115,7 +116,7 @@ test.describe('6. Comprehensive Button Crawler & Interaction Test Suite', () => 
     // Sign in as operator
     await page.goto('/app');
     await page.fill('#login-username', 'operator');
-    await page.fill('#login-password', 'operator123');
+    await page.fill('#login-password', e2ePassword('operator'));
     await page.click('#login-btn');
     await expect(page.locator('#app-view')).toBeVisible({ timeout: 5000 });
 

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 
 test.describe('3. Workspace Features, Interfaces & Buttons', () => {
   test.beforeEach(async ({ page }) => {
@@ -10,7 +11,7 @@ test.describe('3. Workspace Features, Interfaces & Buttons', () => {
     if (isLoginVisible) {
       // Login as operator to directly enter Workspace Client View
       await page.fill('#login-username', 'operator');
-      await page.fill('#login-password', 'operator123');
+      await page.fill('#login-password', e2ePassword('operator'));
       await page.click('#login-btn');
       await expect(page.locator('#app-view')).toBeVisible();
     }

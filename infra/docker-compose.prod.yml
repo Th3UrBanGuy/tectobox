@@ -127,7 +127,7 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-tectobox}:${RABBITMQ_PASS:-tectobox_rabbit_secret}@rabbitmq:5672/
       GO_AI_URL: http://ai:8081/api/ai/chat
       GEMINI_WEB2API_URL: http://ai:8081/v1
-      JWT_SECRET: ${JWT_SECRET:-tectobox_default_jwt_secret_change_me}
+      JWT_SECRET: ${JWT_SECRET}
       NODE_ENV: production
       # Public base URL for inbound webhook URLs (Connect Channels page).
       BASE_URL: https://${DOMAIN:-box.tect0nic.com}

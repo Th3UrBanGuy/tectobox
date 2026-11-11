@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 import * as path from 'path';
 
 test('Capture visual proof of redesigned collapsible sidebar, no capsule logo, and icons-only mode', async ({ page }) => {
@@ -13,7 +14,7 @@ test('Capture visual proof of redesigned collapsible sidebar, no capsule logo, a
   const isLoginVisible = await page.locator('#login-view').isVisible();
   if (isLoginVisible) {
     await page.fill('#login-username', 'admin');
-    await page.fill('#login-password', 'admin123');
+    await page.fill('#login-password', e2ePassword('admin'));
     await page.click('#login-btn');
   }
   await expect(page.locator('#app-sidebar')).toBeVisible({ timeout: 12000 });

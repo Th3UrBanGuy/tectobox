@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 import * as path from 'path';
 
 test.describe('16. Admin Workspaces, Direct Licensing, Payments Hub & Pure Monochrome UI', () => {
@@ -23,7 +24,7 @@ test.describe('16. Admin Workspaces, Direct Licensing, Payments Hub & Pure Monoc
 
     // 3. Login as Admin
     await page.fill('#login-username', 'admin');
-    await page.fill('#login-password', 'admin123');
+    await page.fill('#login-password', e2ePassword('admin'));
     await page.click('#login-btn');
     await expect(page.locator('#app-view')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('#view-admin')).toBeVisible({ timeout: 10000 });

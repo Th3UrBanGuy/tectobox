@@ -1,6 +1,14 @@
 import pg from 'pg';
 
-const pool = new pg.Pool({ connectionString: 'postgres://postgres:tectonic_secret_2026@160.25.5.64:5432/tectobox' });
+// C5: the database connection string comes from the environment — no
+// credential literal in source. Required: VPS_DATABASE_URL
+// (e.g. postgresql://<user>:<password>@<vps-host>:5432/tectobox).
+const connectionString = process.env.VPS_DATABASE_URL;
+if (!connectionString) {
+  throw new Error('[check-operator] VPS_DATABASE_URL must be set in the environment.');
+}
+
+const pool = new pg.Pool({ connectionString });
 
 async function check() {
   const users = await pool.query("SELECT id, username, role, client_id FROM users WHERE username = 'operator'");

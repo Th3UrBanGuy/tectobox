@@ -38,7 +38,7 @@
     { "source": "tectobox.dlx", "vhost": "/", "destination": "broadcast.jobs.dlq", "destination_type": "queue", "routing_key": "broadcast.jobs.dlq" }
   ],
   "users": [
-    { "name": "tectobox", "password": "tectobox_dev", "tags": ["administrator"] }
+    { "name": "tectobox", "tags": ["administrator"] }
   ],
   "permissions": [
     { "user": "tectobox", "vhost": "/", "configure": ".*", "write": ".*", "read": ".*" }

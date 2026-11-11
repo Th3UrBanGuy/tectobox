@@ -15,6 +15,10 @@
 
 const BASE_URL = process.env.LIVE_URL || 'http://160.25.5.64';
 
+// C1: login credentials come from the environment — no password literal in source.
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD;
+if (!ADMIN_PASSWORD) throw new Error('[e2e] E2E_ADMIN_PASSWORD must be set in the environment.');
+
 interface LoadTier {
   name: string;
   totalRequests: number;
@@ -148,7 +152,7 @@ async function main() {
   const adminLogin = await fetch(`${BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'admin', password: 'admin123' }),
+    body: JSON.stringify({ username: 'admin', password: ADMIN_PASSWORD }),
   });
   const { token } = await adminLogin.json();
 

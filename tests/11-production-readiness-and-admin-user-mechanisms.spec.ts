@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 
 test.describe('11. Production Readiness & Exhaustive Admin/User Mechanism Verification', () => {
   test.setTimeout(60000);
@@ -11,7 +12,7 @@ test.describe('11. Production Readiness & Exhaustive Admin/User Mechanism Verifi
 
   async function ensureLoggedIn(page: Page, role: 'operator' | 'admin' = 'operator') {
     const username = role === 'admin' ? 'admin' : 'operator';
-    const password = role === 'admin' ? 'admin123' : 'operator123';
+    const password = role === 'admin' ? e2ePassword('admin') : e2ePassword('operator');
 
     await page.goto('/app');
     const isLoginVisible = await page.locator('#login-view').isVisible();

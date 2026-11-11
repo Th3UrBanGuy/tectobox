@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { e2ePassword } from './e2e-credentials';
 import * as path from 'path';
 
 const ARTIFACT_DIR = 'C:/Users/Diamond Technology/.gemini/antigravity/brain/7c4b2ecc-173c-4b91-9904-9e4ad41ca616';
@@ -14,7 +15,7 @@ test.describe('Professional Docked Sidebar, Clean User Card, and Gated Inbox', (
 
     // Login as operator
     await page.fill('#login-username', 'operator');
-    await page.fill('#login-password', 'Operator123!');
+    await page.fill('#login-password', e2ePassword('operator'));
     await page.click('#login-btn');
 
     // Wait for app view
@@ -80,7 +81,7 @@ test.describe('Professional Docked Sidebar, Clean User Card, and Gated Inbox', (
 
     // Login
     await page.fill('#login-username', 'operator');
-    await page.fill('#login-password', 'Operator123!');
+    await page.fill('#login-password', e2ePassword('operator'));
     await page.click('#login-btn');
 
     await expect(page.locator('#app-view')).toBeVisible({ timeout: 15000 });
@@ -142,7 +143,7 @@ test.describe('Professional Docked Sidebar, Clean User Card, and Gated Inbox', (
 
     // Login as unlicensed client 'xyz' (workspace has no license)
     await page.fill('#login-username', 'xyz');
-    await page.fill('#login-password', 'Operator123!');
+    await page.fill('#login-password', e2ePassword('operator'));
     await page.click('#login-btn');
 
     await expect(page.locator('#app-view')).toBeVisible({ timeout: 15000 });

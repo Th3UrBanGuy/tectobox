@@ -1,11 +1,8 @@
 import { Client } from 'ssh2';
+import { getVpsSshConfig } from './vps-ssh.ts';
 
-const config = {
-  host: process.env.VPS_HOST || '160.25.5.64',
-  port: Number(process.env.VPS_PORT) || 22,
-  username: process.env.VPS_USERNAME || 'root',
-  password: process.env.VPS_PASSWORD || 'Tect0nic123',
-};
+// C5: SSH key auth only (see vps-ssh.ts) — no password field anywhere.
+const config = getVpsSshConfig();
 
 const conn = new Client();
 

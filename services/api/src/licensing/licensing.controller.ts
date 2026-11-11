@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, Inject, ParseIntPipe, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Req, UseGuards, Inject, ParseIntPipe, NotFoundException } from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
+import { AdminGuard } from '../auth/admin.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import crypto from 'crypto';
@@ -25,13 +26,18 @@ export class LicensingController {
     return SYSTEM_FEATURES;
   }
 
+  // C2: admin-only routes carry a method-level AdminGuard (on top of the
+  // class-level TenantGuard). getFeatures/getClientAccess stay open to
+  // tenants — see getClientAccess for its own tenant scoping.
   @Get('admin/plans')
+  @UseGuards(AdminGuard)
   async listPlans() {
     const result = await this.pool.query('SELECT * FROM plans ORDER BY id ASC');
     return result.rows;
   }
 
   @Post('admin/plans')
+  @UseGuards(AdminGuard)
   async createPlan(@Body() body: any) {
     const result = await this.pool.query(
       `INSERT INTO plans (name, kind, billing_period, features_json, credits_included, price_bdt, active, created_at)
@@ -50,6 +56,7 @@ export class LicensingController {
   }
 
   @Patch('admin/plans/:id')
+  @UseGuards(AdminGuard)
   async updatePlan(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
     const check = await this.pool.query('SELECT * FROM plans WHERE id = $1', [id]);
     if (check.rows.length === 0) throw new NotFoundException('Plan not found');
@@ -72,12 +79,14 @@ export class LicensingController {
   }
 
   @Delete('admin/plans/:id')
+  @UseGuards(AdminGuard)
   async deletePlan(@Param('id', ParseIntPipe) id: number) {
     await this.pool.query('DELETE FROM plans WHERE id = $1', [id]);
     return { ok: true, success: true };
   }
 
   @Get('admin/licenses')
+  @UseGuards(AdminGuard)
   async listLicenses() {
     const result = await this.pool.query(
       `SELECT l.*, c.name as client_name, p.name as plan_name
@@ -90,6 +99,7 @@ export class LicensingController {
   }
 
   @Post('admin/licenses')
+  @UseGuards(AdminGuard)
   async issueLicense(@Body() body: any) {
     const code = 'LIC-' + crypto.randomBytes(6).toString('hex').toUpperCase();
     const startsAt = new Date();
@@ -137,6 +147,7 @@ export class LicensingController {
   }
 
   @Post('admin/licenses/:id/pause')
+  @UseGuards(AdminGuard)
   async pauseLicense(@Param('id', ParseIntPipe) id: number) {
     const res = await this.pool.query(
       "UPDATE licenses SET status = 'paused' WHERE id = $1 RETURNING *",
@@ -146,6 +157,7 @@ export class LicensingController {
   }
 
   @Post('admin/licenses/:id/resume')
+  @UseGuards(AdminGuard)
   async resumeLicense(@Param('id', ParseIntPipe) id: number) {
     const res = await this.pool.query(
       "UPDATE licenses SET status = 'active' WHERE id = $1 RETURNING *",
@@ -155,6 +167,7 @@ export class LicensingController {
   }
 
   @Post('admin/licenses/:id/cancel')
+  @UseGuards(AdminGuard)
   async cancelLicense(@Param('id', ParseIntPipe) id: number) {
     const res = await this.pool.query(
       "UPDATE licenses SET status = 'cancelled' WHERE id = $1 RETURNING *",
@@ -164,6 +177,7 @@ export class LicensingController {
   }
 
   @Post(['admin/licenses/:id/topup', 'admin/licenses/:id/topup-feature'])
+  @UseGuards(AdminGuard)
   async topupLicense(@Param('id', ParseIntPipe) id: number, @Body() body: { credits: number }) {
     const res = await this.pool.query(
       'UPDATE licenses SET credits_total = credits_total + $1 WHERE id = $2 RETURNING *',
@@ -173,8 +187,11 @@ export class LicensingController {
   }
 
   @Get(['client/access', 'admin/clients/:id/access'])
-  async getClientAccess(@CurrentTenant() tenantId: number, @Param('id') paramId?: string) {
-    const targetTenantId = paramId ? Number(paramId) : tenantId;
+  async getClientAccess(@CurrentTenant() tenantId: number, @Param('id') paramId?: string, @Req() req?: any) {
+    // C2/C3 rule: only an admin may address another workspace via :id.
+    // A non-admin's :id is ignored and their own tenant is used instead.
+    const isAdmin = req?.user?.role === 'admin' || req?.user?.role === 'superadmin';
+    const targetTenantId = isAdmin && paramId ? Number(paramId) : tenantId;
     if (!targetTenantId) {
       return {
         active: true,
