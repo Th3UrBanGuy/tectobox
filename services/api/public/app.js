@@ -1457,13 +1457,18 @@ function renderConvList() {
 
 async function renderInboxEmpty() {
   const empty = $('inbox-empty'), panes = $('inbox-panes');
+  // Hide the list panes synchronously when there is nothing to list, BEFORE
+  // the connectors fetch resolves — otherwise the Chats toolbar and the
+  // "No conversations yet" block flash above/below the banner while the
+  // fetch is in flight (2026-11-13: user saw both stacked, "no head or tail").
+  // The fetch below only ever un-hides them again when a channel IS connected.
+  if (!state.conversations.length) panes.classList.add('hidden');
   let connected = 0;
   try {
     const conns = await api(`/api/clients/${state.clientId}/connectors`);
     connected = Object.values(conns).filter(s => s.status === 'connected').length;
   } catch {}
   if (!state.conversations.length && connected === 0) {
-    panes.classList.add('hidden');
     empty.innerHTML = `<div class="empty-state fade-in">
       <div class="ic"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a15 15 0 0 1 20 0M12 19.5h.01"/></svg></div>
       <h3>No channels connected yet</h3>

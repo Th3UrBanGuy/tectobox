@@ -155,6 +155,12 @@ body::before{
 ::-webkit-scrollbar-thumb:hover{background:var(--accent);}
 ::-webkit-scrollbar-track{background:transparent;}
 .hidden{display:none!important;}
+/* Specificity guard: `.inbox` carries `display:flex !important` inside the
+   ≤768px media query, which beats plain `.hidden` (same specificity, later
+   source order) — so on phones `#inbox-panes.hidden` stayed visible next to
+   the "No channels connected yet" banner (2026-11-13). Same pattern as the
+   existing `.app-layout.hidden` rule below. */
+.inbox.hidden{display:none!important;}
 
 /* ═══ Clean Figma-Crafted Cards ═══ */
 .card{
@@ -595,6 +601,11 @@ table.tbl tr.rowlink:hover td{background:var(--hover);}
 .qty-btn{width:29px; height:29px; border-radius:9px; border:1px solid var(--input-border); background:transparent; cursor:pointer; font-size:15px; color:var(--ink); display:flex; align-items:center; justify-content:center; transition:all .15s;}
 .qty-btn:hover{border-color:var(--accent); color:var(--accent); transform:scale(1.08);}
 .empty-state{padding:60px 32px; text-align:center; max-width:660px; margin:44px auto; border-radius:22px;}
+/* Inbox "no channels" state: one centered state in the middle of the screen —
+   no Chats toolbar above it, no second empty state below it (2026-11-13).
+   :not(:empty) so the bare div takes no space when the list panes are showing. */
+#inbox-empty:not(:empty){display:flex; align-items:center; justify-content:center; min-height:calc(100dvh - 170px);}
+#inbox-empty:not(:empty) .empty-state{margin:0 auto;}
 .empty-state .ic{width:64px; height:64px; border-radius:19px; background:var(--accent); color:var(--on-accent); display:flex; align-items:center; justify-content:center; margin:0 auto 20px;}
 .empty-state h3{font-size:19px; font-weight:600; letter-spacing:-.02em; margin-bottom:10px; color:var(--ink);}
 .empty-state p{color:var(--muted); font-size:13.5px; line-height:1.65; margin-bottom:24px;}
