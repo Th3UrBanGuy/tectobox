@@ -515,6 +515,11 @@ function showView(view) {
     const fallback = firstAvailableView();
     if (fallback !== view) { showView(fallback); return; }
   }
+  // 'settings' is a dead hub (cview-settings is display:none and its tabs
+  // control stabs that live in other pages) — never show it blank; land on
+  // the requested settings tab's real page instead (2026-11-13: the inbox
+  // "Connect a channel" button landed on a blank screen here).
+  if (view === 'settings') { showView(SETTINGS_TAB_VIEW[state.settingsTab] || 'channels'); return; }
   // Any navigation closes the mobile sidebar drawer
   document.body.classList.remove('sidebar-open');
   state.view = view;
@@ -723,7 +728,11 @@ function initCmdk() {
 }
 
 // ---------------- more / settings (native) ----------------
-function gotoSettings(tab) { showView('settings'); switchSettingsTab(tab || 'channels'); }
+// Each settings tab lives in its own page now (channels, kb, webchat,
+// backup, plan, apikeys) — the old cview-settings hub is display:none, so
+// route each tab to its real page instead of the dead hub.
+const SETTINGS_TAB_VIEW = { channels: 'channels', kb: 'kb', appearance: 'webchat', backup: 'backup', plan: 'plan', apikeys: 'apikeys' };
+function gotoSettings(tab) { showView(SETTINGS_TAB_VIEW[tab || 'channels'] || 'channels'); }
 // ---------------- client: Broadcast campaigns ----------------
 async function renderBroadcast() {
   if (!hasFeature('broadcast')) {
@@ -732,6 +741,9 @@ async function renderBroadcast() {
   }
   let list = [];
   try { list = await api('/api/broadcasts'); } catch (e) { $('bcast-list').innerHTML = `<div class="card err">${esc(e.message)}</div>`; return; }
+  // A non-array payload used to crash the view with "list.map is not a
+  // function" (same class as the 2026-11-13 KB crash) — degrade to empty.
+  if (!Array.isArray(list)) list = [];
   const pill = (s) => `<span class="pill ${s === 'sending' ? 'blue' : s === 'done' ? 'green' : s === 'cancelled' ? 'red' : ''}">${esc(s)}</span>`;
   $('bcast-list').innerHTML = list.map(b => {
     const pct = b.total ? Math.round(((b.sent + b.failed) / b.total) * 100) : 0;
@@ -1094,6 +1106,9 @@ async function printThermalShippingLabel(orderId) {
     return;
   }
   const o = orderData.order;
+  // The invoice endpoint can return {} on a backend hiccup — never crash
+  // the whole view on a missing order (2026-11-13 click audit).
+  if (!o) { toast('Failed to load invoice', 'err'); return; }
   const clientName = orderData.clientName || 'TECTOBOX STORE';
   let items = orderData.items || [];
   const dc = Number(o.delivery_charge_bdt) || 0;
@@ -1271,7 +1286,10 @@ function openQuickRepliesModal() {
 }
 
 function renderQuickRepliesModal() {
-  const list = getStoredQuickReplies();
+  let list = getStoredQuickReplies();
+  // A corrupt/legacy localStorage value (non-array) used to crash with
+  // "list.map is not a function" — fall back to the defaults.
+  if (!Array.isArray(list)) list = DEFAULT_QUICK_REPLIES;
   const box = $('qr-templates-list');
   if (!box) return;
   box.innerHTML = list.map((item, idx) => `
@@ -1418,7 +1436,9 @@ async function loadConversations(quiet) {
 }
 
 function renderConvList() {
-  let list = state.conversations;
+  // A non-array payload used to crash the inbox with "list.map is not a
+  // function" (same class as the 2026-11-13 KB crash) — degrade to empty.
+  let list = Array.isArray(state.conversations) ? state.conversations : [];
   if (state.needsHuman) list = list.filter(c => (c.unread_count || 0) > 0);
   const box = $('conv-list');
   if (!list.length) {
@@ -1478,7 +1498,7 @@ async function renderInboxEmpty() {
         Connect a channel
       </button>
     </div>`;
-    $('btn-goto-connect').onclick = () => { showView('settings'); switchSettingsTab('channels'); };
+    $('btn-goto-connect').onclick = () => gotoSettings('channels');
   } else {
     panes.classList.remove('hidden');
     empty.innerHTML = '';
@@ -3182,6 +3202,9 @@ const kbCatOptions = sel => Object.entries(KB_CATS).map(([v, l]) =>
 
 async function loadKnowledge() {
   state.knowledge = await api(`/api/clients/${state.clientId}/knowledge`);
+  // A non-array payload (backend hiccup) used to crash the whole KB view
+  // with "state.knowledge.map is not a function" (2026-11-13 click audit).
+  if (!Array.isArray(state.knowledge)) state.knowledge = [];
   const n = state.knowledge.length;
   $('kb-count').textContent = n ? `· ${n} document${n > 1 ? 's' : ''} live` : '';
   $('kb-list').innerHTML = state.knowledge.map(k => `
