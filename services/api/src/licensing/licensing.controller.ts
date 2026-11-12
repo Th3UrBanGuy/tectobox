@@ -162,7 +162,7 @@ export class LicensingController {
            credits_total, credits_used, status, features_json, validity_days, created_by, created_at)
          VALUES ($1, $2, $3, $4, $5, NULL, NULL, $6, 0, 'pending_activation', $7, $8, $9, NOW())
          RETURNING *`,
-        [code, clientId, planId, kind, billingPeriod, credits, days, featuresJson, createdBy]
+        [code, clientId, planId, kind, billingPeriod, credits, featuresJson, days, createdBy]
       );
       const row = result.rows[0];
       await this.licensing.audit('key_issue', createdBy, clientId, row?.id ?? null, code, `key-only, ${days} days`);
