@@ -571,7 +571,7 @@
       <div class="seg mb16" id="admin-tabs">
         <button data-at="resources" class="active">Connected resources</button>
         <button data-at="users">Workspaces</button>
-        <button data-at="licensing">Plans &amp; licenses</button>
+        <button data-at="licensing">Packages &amp; licenses</button>
         <button data-at="config">Platform config</button>
         <button data-at="notify">Notifications</button>
         <button data-at="audit">Audit log</button>
@@ -606,7 +606,7 @@
               <input id="crt-name" class="input no-icon" placeholder="e.g. Starter Monthly" style="max-width:320px;">
             </div>
             <div class="frow"><label>Directly issue to workspace</label>
-              <select id="crt-workspace" class="input no-icon" style="max-width:320px;"><option value="">Save as plan template only</option></select>
+              <select id="crt-workspace" class="input no-icon" style="max-width:320px;"><option value="">Save as package template only</option></select>
             </div>
             <div class="frow" id="crt-period-row"><label>Billing period</label>
               <div class="chip-row" id="crt-period-chips">
@@ -627,7 +627,7 @@
           </div>
         </div>
         <div class="lic-sec">
-          <div class="lic-sec-t"><h3>Plans &amp; packages</h3><p>Existing plans — assign any of them straight from a workspace card.</p></div>
+          <div class="lic-sec-t"><h3>Packages</h3><p>Existing packages — assign any of them straight from a workspace card.</p></div>
           <div class="plan-grid" id="plans-grid"></div>
         </div>
         <div class="lic-sec">
@@ -637,11 +637,36 @@
             <tbody id="licenses-body"></tbody>
           </table></div>
         </div>
+        <div class="lic-sec">
+          <div class="lic-sec-t"><h3>Generate license key</h3><p>Issue a key for a workspace — hand it to the client after payment. The client activates it from My Plan.</p></div>
+          <div class="card">
+            <div class="frow"><label>Workspace</label>
+              <select id="genkey-ws" class="input no-icon" style="max-width:320px;"><option value="">Pick a workspace…</option></select>
+            </div>
+            <div class="frow"><label>Package</label>
+              <select id="genkey-plan" class="input no-icon" style="max-width:320px;"><option value="">Pick a package…</option></select>
+            </div>
+            <div class="frow"><label>Validity</label>
+              <select id="genkey-days" class="input no-icon" style="max-width:200px;">
+                <option value="30">30 days</option>
+                <option value="90">90 days</option>
+                <option value="365">365 days</option>
+                <option value="custom">Custom…</option>
+              </select>
+            </div>
+            <div class="frow hidden" id="genkey-custom-row"><label>Custom days</label>
+              <input id="genkey-custom-days" class="input no-icon" type="number" min="1" placeholder="e.g. 14" style="max-width:200px;">
+            </div>
+            <button class="btn-primary" id="btn-genkey">Generate key</button>
+            <div id="genkey-msg" class="small muted mt8"></div>
+            <div id="genkey-result"></div>
+          </div>
+        </div>
       </div>
       <div id="assign-modal" class="modal-bg hidden">
         <div class="modal" style="width:540px; max-width:94vw;">
           <h3>Assign license</h3>
-          <p class="msub" id="assign-sub">Pick a plan for this workspace.</p>
+          <p class="msub" id="assign-sub">Pick a package for this workspace.</p>
           <div id="assign-current" style="margin-bottom:12px;"></div>
           <div class="plan-pick" id="assign-plans" style="max-height:52vh; overflow:auto; padding-right:4px;"></div>
           <div class="modal-foot">
@@ -855,6 +880,18 @@
     <div class="frow"><label>Workspace name *</label><input id="um-workspace" class="input no-icon" type="text" placeholder="e.g. Apex Electronics"></div>
     <div class="frow"><label>Business type</label>
       <select id="um-type" class="input no-icon"><option value="physical">Physical goods &amp; Delivery</option><option value="digital">Digital / Software services</option></select></div>
+    <div class="frow"><label>Test license</label>
+      <div class="chip-row" id="um-trial-chips">
+        <button type="button" class="chip" data-min="">No license</button>
+        <button type="button" class="chip" data-min="30">30 min</button>
+        <button type="button" class="chip sel" data-min="60">1 hour</button>
+        <button type="button" class="chip" data-min="1440">1 day</button>
+        <button type="button" class="chip" data-min="custom">Custom…</button>
+      </div>
+    </div>
+    <div class="frow hidden" id="um-trial-custom-row"><label>Custom minutes</label>
+      <input id="um-trial-custom" class="input no-icon" type="number" min="1" placeholder="e.g. 120" style="max-width:200px;">
+    </div>
     <div class="modal-foot">
       <button class="btn-ghost" id="btn-close-user">Cancel</button>
       <button class="btn-primary" id="btn-save-user">Create workspace</button>

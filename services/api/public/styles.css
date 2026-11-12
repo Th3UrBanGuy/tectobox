@@ -3255,29 +3255,6 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
   gap: 8px;
 }
 
-/* ═════════════════════════════════════════════════════════
-   INBOX LOCKED STATE BULLETPROOF PROTECTION
-   ═════════════════════════════════════════════════════════ */
-#cview-inbox.is-locked #inbox-panes,
-#cview-inbox:has(#inbox-locked) #inbox-panes,
-#inbox-panes.hidden {
-  display: none !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-  height: 0 !important;
-  overflow: hidden !important;
-}
-
-#inbox-locked {
-  display: flex !important;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 480px;
-  padding: 40px 20px;
-  box-sizing: border-box;
-}
-
 /* Mobile-only logout button (hidden on desktop) */
 .mobile-only-signout {
   display: none !important;
