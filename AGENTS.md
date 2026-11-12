@@ -34,6 +34,18 @@ are built in `services/`.
 - **Idempotent Processing** — Every queue handler must be safe under redelivery.
 - **No Secrets in Source** — Never commit .env, tokens, keys, or credentials.
 
+## Frontend deploys — service-worker cache busting (2026-11-12 lesson)
+
+- `services/api/public/sw.js` serves any `?v=…` URL **cache-first** and never
+  revalidates it. `index.html` pins `/app.js` and `/styles.css` with a `?v=`
+  string, so **every deploy that changes either file MUST bump its `?v=`
+  string in `index.html`** (and bump `SW_VERSION` in `sw.js` when the cached
+  shell itself changes) — otherwise phones keep running the old JS behind
+  new HTML: new UI visible, but its handlers dead (hit 2026-11-12: the
+  license trial picker rendered but could not be tapped).
+- Verify after deploy: `curl` the live `/app.js` and confirm its MD5 matches
+  the repo file, and confirm the live `index.html` carries the new `?v=`.
+
 ## Development Commands
 
 ```bash
