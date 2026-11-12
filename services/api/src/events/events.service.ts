@@ -4,6 +4,7 @@ import { Redis } from 'ioredis';
 import { DB_POOL } from '../database/database.module.js';
 import { RedisCoordinator } from '@tectonic/coordination';
 import { RabbitMQClient } from '@tectonic/messaging';
+import { LicensingService } from '../licensing/licensing.service.js';
 
 export interface OutboundPayload {
   conversationId: number;
@@ -34,7 +35,10 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   private isProcessingOutbox = false;
   private isConnected = false;
 
-  constructor(@Inject(DB_POOL) private readonly pool: pg.Pool) {}
+  constructor(
+    @Inject(DB_POOL) private readonly pool: pg.Pool,
+    @Inject(LicensingService) private readonly licensing: LicensingService
+  ) {}
 
   async onModuleInit() {
     try {
@@ -293,7 +297,21 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
           );
           const isGlobalAutoReply = !autoReplyRow.rows[0] || autoReplyRow.rows[0].value !== '0';
 
-          if (this.mq && client && !client.ai_paused && !conv.needs_human && isGlobalAutoReply && platform !== 'webchat') {
+          // Licence gate: the workspace must hold the ai_response feature
+          // with credits left (or an unlimited time licence). Without it
+          // the inbound message is already stored above and a human can
+          // still reply manually — the AI simply stays silent.
+          // consumeAiCredit is the atomic reserve-a-credit step: it returns
+          // false when the last credit was taken by a concurrent reply, in
+          // which case nothing is published. Time licences always pass.
+          let licenseOk = false;
+          if (client && !client.ai_paused && !conv.needs_human) {
+            const access = await this.licensing.resolveAccess(clientId);
+            licenseOk =
+              access.aiAllowed && (await this.licensing.consumeAiCredit(clientId));
+          }
+
+          if (this.mq && client && !client.ai_paused && !conv.needs_human && isGlobalAutoReply && platform !== 'webchat' && licenseOk) {
             const prodsRes = await this.pool.query(
               'SELECT name, sku, price_bdt, stock FROM products WHERE client_id = $1 ORDER BY id ASC',
               [clientId]

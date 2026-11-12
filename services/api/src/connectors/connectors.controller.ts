@@ -19,6 +19,7 @@ import type { Request, Response } from 'express';
 import crypto, { randomBytes } from 'crypto';
 import pg from 'pg';
 import { TenantGuard } from '../tenant/tenant.guard.js';
+import { RequireFeature } from '../licensing/feature.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
@@ -478,7 +479,7 @@ export class ConnectorsController {
   }
 
   @Post('clients/:clientId/api-keys')
-  @UseGuards(TenantGuard)
+  @UseGuards(TenantGuard, RequireFeature('api_access'))
   async createApiKey(
     @CurrentTenant() tenantId: number,
     @Param('clientId', ParseIntPipe) clientId: number,

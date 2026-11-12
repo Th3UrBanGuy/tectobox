@@ -374,12 +374,13 @@ CREATE TABLE licenses (
     client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
     kind VARCHAR(50) NOT NULL DEFAULT 'time' CHECK(kind IN ('time','credit','feature')),
     billing_period VARCHAR(50) CHECK(billing_period IN ('monthly','quarterly','yearly')),
-    starts_at TIMESTAMPTZ NOT NULL,
+    starts_at TIMESTAMPTZ,
     ends_at TIMESTAMPTZ,
     credits_total INTEGER NOT NULL DEFAULT 0,
     credits_used INTEGER NOT NULL DEFAULT 0,
     features_json JSONB,
-    status VARCHAR(50) NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','expired','cancelled')),
+    status VARCHAR(50) NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','expired','cancelled','pending_activation')),
+    validity_days NUMERIC(10, 4),
     note TEXT,
     created_by VARCHAR(255),
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -394,6 +395,23 @@ CREATE TABLE license_feature_credits (
     credits_used INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (license_id, feature)
 );
+
+-- License Audit (lifecycle events: issue / activate / pause / resume /
+-- cancel / topup / assign / trial). Best-effort writes; see migration
+-- infra/postgres/migrations/001-license-activation.sql.
+CREATE TABLE license_audit (
+    id SERIAL PRIMARY KEY,
+    actor VARCHAR(255),
+    action VARCHAR(50) NOT NULL,
+    client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+    license_id INTEGER REFERENCES licenses(id) ON DELETE SET NULL,
+    code VARCHAR(255),
+    note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_license_audit_client ON license_audit(client_id);
+CREATE INDEX idx_license_audit_license ON license_audit(license_id);
+CREATE INDEX idx_license_audit_created ON license_audit(created_at);
 
 -- Transactional Inbox / Outbox
 CREATE TABLE outbox_events (

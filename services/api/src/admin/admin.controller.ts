@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Put, Body, Param, Query, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Put, Body, Param, Query, Req, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException } from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { AdminGuard } from '../auth/admin.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
@@ -7,11 +7,15 @@ import crypto from 'crypto';
 import { DB_POOL } from '../database/database.module.js';
 import { hashPassword } from '../auth/password.util.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../auth/totp.util.js';
+import { LicensingService } from '../licensing/licensing.service.js';
 
 @Controller('api')
 @UseGuards(TenantGuard, AdminGuard)
 export class AdminController {
-  constructor(@Inject(DB_POOL) private readonly pool: pg.Pool) {}
+  constructor(
+    @Inject(DB_POOL) private readonly pool: pg.Pool,
+    @Inject(LicensingService) private readonly licensing: LicensingService
+  ) {}
 
   @Get(['admin/overview', 'global-stats'])
   async getOverview() {
@@ -131,7 +135,7 @@ export class AdminController {
   }
 
   @Post('admin/users')
-  async createUser(@Body() body: any) {
+  async createUser(@Body() body: any, @Req() req?: any) {
     if (!body.username || !body.password) {
       throw new BadRequestException('Username and password are required');
     }
@@ -168,18 +172,18 @@ export class AdminController {
       [body.username.trim(), passwordHash, body.role || 'operator', clientId]
     );
 
-    // If workspace has no license, automatically provision an active enterprise license
-    if (clientId) {
-      const existingLicense = await this.pool.query('SELECT id FROM licenses WHERE client_id = $1 LIMIT 1', [clientId]);
-      if (existingLicense.rows.length === 0) {
-        const defaultFeatures = JSON.stringify(['combined_inbox', 'inbox', 'ai_response', 'webchat', 'broadcast', 'lead_intel', 'knowledge', 'api_access']);
-        const licCode = `TB-AUTO-${clientId}-${Date.now().toString(36).toUpperCase()}`;
-        await this.pool.query(
-          `INSERT INTO licenses (client_id, code, kind, starts_at, status, features_json, credits_total, credits_used, created_at)
-           VALUES ($1, $2, 'time', NOW(), 'active', $3::jsonb, 10000, 0, NOW())`,
-          [clientId, licCode, defaultFeatures]
-        );
-      }
+    // Test licence (optional): a short full-feature trial. When no trial
+    // duration is given, NO licence is created — the workspace opens in
+    // mode 'none' (locked) until the admin issues one. There is deliberately
+    // no auto-provisioned free licence anymore.
+    let trialLicense: any = null;
+    const trialMinutes = this.parseTrialMinutes(body);
+    if (trialMinutes != null && clientId) {
+      trialLicense = await this.licensing.issueTrialLicense(
+        clientId,
+        trialMinutes,
+        req?.user?.username ?? null
+      );
     }
 
     const user = result.rows[0];
@@ -188,7 +192,32 @@ export class AdminController {
       success: true,
       ...user,
       client_name: clientName,
+      trial_license: trialLicense
+        ? { id: trialLicense.id, code: trialLicense.code, ends_at: trialLicense.ends_at }
+        : null,
     };
+  }
+
+  /**
+   * Trial duration from the create-user body: trialMinutes | trialHours |
+   * trialDays (first one present wins). Returns null when none is given.
+   * Throws on non-positive / non-numeric values.
+   */
+  private parseTrialMinutes(body: any): number | null {
+    const raw =
+      body.trialMinutes ?? body.trial_minutes ??
+      (body.trialHours != null || body.trial_hours != null
+        ? Number(body.trialHours ?? body.trial_hours) * 60
+        : null) ??
+      (body.trialDays != null || body.trial_days != null
+        ? Number(body.trialDays ?? body.trial_days) * 1440
+        : null);
+    if (raw == null || raw === '') return null;
+    const minutes = Number(raw);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      throw new BadRequestException('Trial duration must be greater than 0');
+    }
+    return minutes;
   }
 
   @Post('admin/users/:id/reset-password')
@@ -361,7 +390,11 @@ export class AdminController {
   }
 
   @Post('admin/clients/:id/assign-license')
-  async assignLicense(@Param('id', ParseIntPipe) id: number, @Body() body: { planId: number | string }) {
+  async assignLicense(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { planId: number | string; days?: number },
+    @Req() req?: any
+  ) {
     const planId = Number(body?.planId);
     const planRes = await this.pool.query('SELECT * FROM plans WHERE id = $1', [planId]);
     if (planRes.rows.length === 0) throw new NotFoundException('Plan not found');
@@ -372,18 +405,29 @@ export class AdminController {
 
     const code = 'LIC-' + crypto.randomBytes(6).toString('hex').toUpperCase();
     const startsAt = new Date();
-    const days = plan.billing_period === 'yearly' ? 365 : plan.billing_period === 'quarterly' ? 90 : 30;
+    // Optional days override (fractional allowed, e.g. 0.0208 = 30 min) so
+    // a package's validity can be shortened for a trial; otherwise the
+    // plan's billing period decides (yearly 365 / quarterly 90 / else 30).
+    let days = plan.billing_period === 'yearly' ? 365 : plan.billing_period === 'quarterly' ? 90 : 30;
+    if (body?.days != null) {
+      days = Number(body.days);
+      if (!Number.isFinite(days) || days <= 0) {
+        throw new BadRequestException('days must be a number greater than 0');
+      }
+    }
     const endsAt = new Date(Date.now() + days * 86400000);
 
     const featuresJson = typeof plan.features_json === 'string' ? plan.features_json : JSON.stringify(plan.features_json || []);
 
     const licRes = await this.pool.query(
-      `INSERT INTO licenses (code, client_id, plan_id, kind, starts_at, ends_at, credits_total, status, features_json, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, NOW())
+      `INSERT INTO licenses (code, client_id, plan_id, kind, starts_at, ends_at, credits_total, status, features_json, validity_days, created_by, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, $9, $10, NOW())
        RETURNING *`,
-      [code, id, plan.id, plan.kind, startsAt, endsAt, plan.credits_included || 0, featuresJson]
+      [code, id, plan.id, plan.kind, startsAt, endsAt, plan.credits_included || 0, featuresJson, days, req?.user?.username ?? null]
     );
-    return licRes.rows[0];
+    const row = licRes.rows[0];
+    await this.licensing.audit('assign', req?.user?.username ?? null, id, row?.id ?? null, code, `plan ${plan.id}, ${days} days`);
+    return row;
   }
 
   @Get('admin/totp/status')

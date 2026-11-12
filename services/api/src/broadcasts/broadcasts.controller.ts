@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Delete, Body, Param, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException } from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
+import { RequireFeature } from '../licensing/feature.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
@@ -33,6 +34,7 @@ export class BroadcastsController {
   }
 
   @Post('broadcasts')
+  @UseGuards(RequireFeature('broadcast'))
   async createBroadcast(
     @CurrentTenant() tenantId: number,
     @Body() body: { name: string; channel?: string; text: string }
@@ -131,6 +133,7 @@ export class BroadcastsController {
   }
 
   @Post('broadcasts/:id/send')
+  @UseGuards(RequireFeature('broadcast'))
   async sendBroadcast(
     @CurrentTenant() tenantId: number,
     @Param('id', ParseIntPipe) id: number

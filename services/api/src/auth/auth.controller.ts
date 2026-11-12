@@ -83,6 +83,18 @@ export class AuthController {
       throw new UnauthorizedException('ইউজারনেম অথবা পাসওয়ার্ড সঠিক নয়। দয়া করে পুনরায় চেক করুন। (Invalid username or password)');
     }
 
+    // Suspended workspace: no login, even with a valid password. Platform
+    // admins have no workspace (client_id NULL) and are never blocked here.
+    if (dbUser.client_id != null) {
+      const wsRes = await this.pool.query(
+        'SELECT suspended FROM clients WHERE id = $1 LIMIT 1',
+        [dbUser.client_id]
+      );
+      if (wsRes.rows[0]?.suspended) {
+        throw new UnauthorizedException('This workspace has been suspended. Please contact the platform admin.');
+      }
+    }
+
     // Check if Two-Factor Authentication (2FA) is enabled for this user
     const totpRes = await this.pool.query(
       'SELECT enabled, secret_enc FROM admin_totp WHERE user_id = $1 LIMIT 1',

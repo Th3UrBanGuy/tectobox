@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Body, Param, Query, Inject, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Inject, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
+import { LicensingService } from '../licensing/licensing.service.js';
 import { getAIResponse, demoResponder, detectCustomerLanguage, languageDirective, buildSystemPrompt, queryGoAIEngine, parsePaymentClaim } from '../ai/router.js';
 import { evaluatePromptSafety } from '../ai/guardrails.js';
 
@@ -9,7 +10,12 @@ import { evaluatePromptSafety } from '../ai/guardrails.js';
 export class WidgetController {
   constructor(
     @Inject(DB_POOL) private readonly pool: pg.Pool,
-    @Optional() private readonly eventsService?: EventsService
+    @Optional() private readonly eventsService?: EventsService,
+    // Optional on purpose: this is a public route — a DI misconfiguration
+    // must never 500 the intake. In production the module always wires it
+    // (WidgetModule imports LicensingModule). When absent, the webchat
+    // check is skipped but AI replies are denied (fail-closed for AI).
+    @Optional() @Inject(LicensingService) private readonly licensing?: LicensingService
   ) {}
 
   @Post(':widgetKey/message')
@@ -23,7 +29,17 @@ export class WidgetController {
     );
     if (clientRes.rows.length === 0) throw new NotFoundException('Widget not found');
     const client = clientRes.rows[0];
-    if (client.suspended) throw new BadRequestException('Workspace is suspended');
+    if (client.suspended) throw new ForbiddenException('This workspace has been suspended. Please contact the platform admin.');
+
+    // Licence gate for the widget itself (the webchat feature): the widget
+    // is public-by-key, so the owner's licence is resolved here, not from
+    // a caller. Without webchat the intake is refused outright.
+    const access = this.licensing
+      ? await this.licensing.resolveAccess(client.id)
+      : null;
+    if (access && !access.features.includes('webchat')) {
+      throw new ForbiddenException('Webchat is not included in this workspace licence.');
+    }
 
     const visitorId = String(body.visitor_id || body.sessionId || body.visitorId || '').slice(0, 128);
     const text = String(body.text || body.message || '').trim().slice(0, 2000);
@@ -123,11 +139,14 @@ export class WidgetController {
         });
       }
     } else {
-      // 6. Generate AI auto-reply if enabled and not paused/needs_human
+      // 6. Generate AI auto-reply if enabled and not paused/needs_human.
+      // The licence gate (aiAllowed) was resolved at the top of this
+      // handler: without the ai_response feature (or with an expired /
+      // exhausted licence) the inbound stays stored and a human replies.
       const autoReplyRow = await this.pool.query("SELECT value FROM settings WHERE key = 'ai.auto_reply' LIMIT 1");
       const isGlobalAutoReply = !autoReplyRow.rows[0] || autoReplyRow.rows[0].value !== '0';
 
-      if (isGlobalAutoReply && !client.ai_paused && !conv.needs_human) {
+      if (isGlobalAutoReply && !client.ai_paused && !conv.needs_human && (access?.aiAllowed ?? false)) {
         // Enforce daily AI budget cap
         const todayStr = new Date().toISOString().slice(0, 10);
         const budRes = await this.pool.query(
@@ -236,48 +255,60 @@ export class WidgetController {
           replyText = demoResponder(client.id, text, prodsRes.rows, history);
           modelUsed = 'budget-fallback:deterministic';
         } else {
-          // Ultra-fast path: Go AI Engine with native language detection & in-memory caching
-          const goResult = await queryGoAIEngine({
-            clientId: client.id,
-            clientName: client.name,
-            businessType: client.business_type,
-            text: text,
-            history: history,
-            products: prodsRes.rows,
-            knowledge: kbRes.rows,
-          });
-
-          if (goResult && goResult.reply) {
-            replyText = goResult.reply;
-            modelUsed = goResult.model;
+          // Licence credit: atomic reserve-a-credit before generating. If
+          // the last credit was taken by a concurrent reply, fall back to
+          // the deterministic responder instead of sending an AI reply
+          // unpaid. (The daily cap above is a separate, coarser limit.)
+          const creditOk = this.licensing
+            ? await this.licensing.consumeAiCredit(client.id)
+            : false;
+          if (!creditOk) {
+            replyText = demoResponder(client.id, text, prodsRes.rows, history);
+            modelUsed = 'budget-fallback:deterministic';
           } else {
-            const lang = detectCustomerLanguage(text);
-            const langDir = languageDirective(lang);
-            const sysPrompt = buildSystemPrompt({
+            // Ultra-fast path: Go AI Engine with native language detection & in-memory caching
+            const goResult = await queryGoAIEngine({
+              clientId: client.id,
               clientName: client.name,
               businessType: client.business_type,
+              text: text,
+              history: history,
               products: prodsRes.rows,
               knowledge: kbRes.rows,
-            }, langDir);
+            });
 
-            const promptMessages: any[] = [
-              { role: 'system', content: sysPrompt },
-              ...history.map(h => ({ role: h.role, content: h.content })),
-              { role: 'user', content: text },
-            ];
+            if (goResult && goResult.reply) {
+              replyText = goResult.reply;
+              modelUsed = goResult.model;
+            } else {
+              const lang = detectCustomerLanguage(text);
+              const langDir = languageDirective(lang);
+              const sysPrompt = buildSystemPrompt({
+                clientName: client.name,
+                businessType: client.business_type,
+                products: prodsRes.rows,
+                knowledge: kbRes.rows,
+              }, langDir);
 
-            replyText = await getAIResponse(promptMessages, `widget:${client.id}`);
+              const promptMessages: any[] = [
+                { role: 'system', content: sysPrompt },
+                ...history.map(h => ({ role: h.role, content: h.content })),
+                { role: 'user', content: text },
+              ];
 
-            if (!replyText || replyText.trim().length === 0) {
-              replyText = demoResponder(client.id, text, prodsRes.rows, history);
+              replyText = await getAIResponse(promptMessages, `widget:${client.id}`);
+
+              if (!replyText || replyText.trim().length === 0) {
+                replyText = demoResponder(client.id, text, prodsRes.rows, history);
+              }
             }
-          }
 
-          // Increment daily used counter
-          await this.pool.query(
-            'UPDATE clients SET widget_ai_used = $1, widget_ai_day = $2 WHERE id = $3',
-            [used + 1, todayStr, client.id]
-          ).catch(() => {});
+            // Increment daily used counter
+            await this.pool.query(
+              'UPDATE clients SET widget_ai_used = $1, widget_ai_day = $2 WHERE id = $3',
+              [used + 1, todayStr, client.id]
+            ).catch(() => {});
+          }
         }
       }
     }

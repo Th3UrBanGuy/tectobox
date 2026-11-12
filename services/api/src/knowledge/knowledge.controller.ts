@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException } from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
+import { RequireFeature } from '../licensing/feature.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
@@ -30,6 +31,7 @@ export class KnowledgeController {
   }
 
   @Post(['clients/:clientId/knowledge', 'knowledge'])
+  @UseGuards(RequireFeature('knowledge'))
   async addKnowledge(
     @CurrentTenant() tenantId: number,
     @Body() body: { title: string; content: string; category?: string; source_url?: string }
@@ -45,6 +47,7 @@ export class KnowledgeController {
   }
 
   @Patch('knowledge/:id')
+  @UseGuards(RequireFeature('knowledge'))
   async updateKnowledge(
     @CurrentTenant() tenantId: number,
     @Param('id', ParseIntPipe) id: number,
@@ -74,6 +77,7 @@ export class KnowledgeController {
   }
 
   @Delete('knowledge/:id')
+  @UseGuards(RequireFeature('knowledge'))
   async deleteKnowledge(
     @CurrentTenant() tenantId: number,
     @Param('id', ParseIntPipe) id: number
@@ -110,6 +114,7 @@ export class KnowledgeController {
   }
 
   @Post('kb/import-website')
+  @UseGuards(RequireFeature('knowledge'))
   async importWebsite(
     @CurrentTenant() tenantId: number,
     @Body() body: { url: string }

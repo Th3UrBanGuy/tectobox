@@ -99,6 +99,8 @@ export class TenantGuard implements CanActivate {
       const overrideVal = headerVal || queryVal;
       const overrideTenantId = overrideVal ? Number(overrideVal) : null;
       request.tenantId = (overrideTenantId && !isNaN(overrideTenantId)) ? overrideTenantId : (user.clientId ?? null);
+      // Admins are never blocked by suspension: they must be able to open
+      // a suspended workspace to unsuspend it.
       return true;
     }
 
@@ -116,6 +118,7 @@ export class TenantGuard implements CanActivate {
           await this.pool.query('UPDATE users SET client_id = $1 WHERE id = $2', [newCid, user.id]);
           user.clientId = newCid;
           request.tenantId = newCid;
+          // Freshly created workspaces are never suspended (column default).
           return true;
         } catch {
           // fall through to exception
@@ -125,7 +128,24 @@ export class TenantGuard implements CanActivate {
     }
 
     request.tenantId = user.clientId;
+    await this.assertTenantNotSuspended(user.clientId);
     return true;
+  }
+
+  /**
+   * Suspended workspaces get 403 on every tenant API. Admins bypass this
+   * (see assignTenant). No pool (unit-constructed guard) means the check
+   * cannot run — it is skipped, matching the guard's Optional pool pattern.
+   */
+  private async assertTenantNotSuspended(tenantId: number): Promise<void> {
+    if (!this.pool) return;
+    const res = await this.pool.query(
+      'SELECT suspended FROM clients WHERE id = $1 LIMIT 1',
+      [tenantId]
+    );
+    if (res.rows[0]?.suspended) {
+      throw new ForbiddenException('This workspace has been suspended. Please contact the platform admin.');
+    }
   }
 }
 
