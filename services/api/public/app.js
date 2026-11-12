@@ -281,12 +281,6 @@ function hasFeature(k) {
   return feats.includes(k);
 }
 
-function isInboxLocked() {
-  if (!state.me || isAdmin(state.me.role)) return false;
-  if (!state.access) return false;
-  return state.access.mode === 'none' || (state.access.mode === 'licensed' && !hasFeature('combined_inbox'));
-}
-
 function applyAccessGating() {
   const a = state.access;
   if (!a || !state.me || isAdmin(state.me.role)) return;
@@ -321,108 +315,24 @@ function applyAccessGating() {
     }
   }
   renderLicenseBanner();
-  updateInboxLock();
 }
 
 function renderLicenseBanner() {
   let el = $('license-banner');
   const a = state.access;
   const admin = !state.me || isAdmin(state.me.role);
-  if (!a || admin || isInboxLocked()) { if (el) el.remove(); return; }
+  if (!a || admin) { if (el) el.remove(); return; }
   const msgs = [];
-  if (a.license && a.license.status === 'expired') msgs.push(['warn', 'Your license has expired — AI and licensed features are paused until renewal.']);
+  if (a.license && a.license.status === 'expired') msgs.push(['warn', 'Your license has expired.']);
   if (a.aiPaused) msgs.push(['warn', 'AI replies are paused by the platform admin. Your inbox keeps working — every message still arrives here.']);
-  else if (a.aiReason === 'credits_exhausted') msgs.push(['warn', `AI credits exhausted (${a.license.credits_used}/${a.license.credits_total} used). The inbox keeps working — ask the admin for a top-up to resume AI replies.`]);
-  else if (a.aiReason === 'feature_not_in_plan' || a.aiReason === 'ai_not_granted') msgs.push(['', 'AI auto-replies are not included in your current plan — reply manually from the inbox.']);
+  else if (a.aiReason === 'credits_exhausted') msgs.push(['warn', 'AI replies are paused — the workspace’s AI credits are used up.']);
+  else if (a.aiReason === 'feature_not_in_plan' || a.aiReason === 'ai_not_granted') msgs.push(['', 'AI auto-replies are not active for this workspace.']);
   if (!msgs.length) { if (el) el.remove(); return; }
   if (!el) { el = document.createElement('div'); el.id = 'license-banner'; $('cview-inbox').prepend(el); }
   el.innerHTML = msgs.map(([cls, t]) =>
     `<div class="notice ${cls}" style="margin-bottom:10px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span>${esc(t)}</span></div>`).join('');
 }
 
-function updateInboxLock() {
-  const locked = isInboxLocked();
-  const cview = $('cview-inbox');
-  const panes = $('inbox-panes');
-  const empty = $('inbox-empty');
-  let note = $('inbox-locked');
-  const licBanner = $('license-banner');
-
-  if (cview) {
-    cview.classList.toggle('is-locked', locked);
-  }
-
-  if (locked) {
-    if (licBanner) licBanner.remove();
-    if (empty) {
-      empty.innerHTML = '';
-      empty.classList.add('hidden');
-    }
-    if (panes) {
-      panes.classList.add('hidden');
-      panes.style.setProperty('display', 'none', 'important');
-      panes.style.setProperty('visibility', 'hidden', 'important');
-      panes.style.setProperty('pointer-events', 'none', 'important');
-    }
-    if (!note) {
-      note = document.createElement('div');
-      note.id = 'inbox-locked';
-      if (cview) cview.prepend(note);
-    }
-    const noLic = !state.access || state.access.mode === 'none';
-    note.innerHTML = `
-      <div class="locked-container-card" style="max-width:560px; margin:60px auto; text-align:center; padding:44px 32px; background:var(--card); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow-md);">
-        <div style="width:64px; height:64px; margin:0 auto 18px; border-radius:18px; background:var(--card2); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--ink);">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="11" width="18" height="11" rx="3" ry="3"/>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            <circle cx="12" cy="16" r="1.5"/>
-          </svg>
-        </div>
-        <h2 style="font-size:20px; font-weight:700; color:var(--ink); margin:0 0 8px; letter-spacing:-0.02em;">
-          ${noLic ? 'No Active License' : 'Combined Inbox Locked'}
-        </h2>
-        <p class="muted small" style="margin:0 0 24px; line-height:1.6; max-width:440px; margin-left:auto; margin-right:auto;">
-          ${noLic
-            ? 'This workspace has no active subscription or license assigned. Customer conversations and inbox features remain locked until an active plan is issued by the platform owner.'
-            : 'The Combined Inbox feature is not included in your workspace active plan. Upgrade your plan or contact the platform owner to unlock omnichannel customer chat.'}
-        </p>
-        <div style="display:flex; gap:10px; justify-content:center;">
-          <button class="btn-primary" id="btn-recheck-lic" style="min-width:140px;">
-            <span>Recheck License</span>
-          </button>
-        </div>
-      </div>`;
-    const rBtn = $('btn-recheck-lic');
-    if (rBtn) {
-      rBtn.onclick = async () => {
-        rBtn.disabled = true;
-        rBtn.textContent = 'Checking…';
-        try {
-          state.access = await api('/api/client/access');
-          applyAccessGating();
-          if (!isInboxLocked()) {
-            loadClientAll();
-          }
-        } catch {
-          location.reload();
-        } finally {
-          rBtn.disabled = false;
-          rBtn.textContent = 'Recheck License';
-        }
-      };
-    }
-  } else {
-    if (panes) {
-      panes.style.removeProperty('display');
-      panes.style.removeProperty('visibility');
-      panes.style.removeProperty('pointer-events');
-      panes.classList.remove('hidden');
-    }
-    if (empty) empty.classList.remove('hidden');
-    if (note) note.remove();
-  }
-}
 const ICONS = {
   inbox: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
   leads: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/></svg>',
@@ -460,7 +370,7 @@ function renderNav() {
   const isAdminUser = state.me && isAdmin(state.me.role);
 
   const mainItems = [
-    { id: 'inbox', label: 'Inbox', icon: 'inbox' },
+    { id: 'inbox', label: 'Inbox', icon: 'inbox', req: 'combined_inbox' },
     { id: 'leads', label: 'Leads', icon: 'leads' },
     { id: 'orders', label: 'Orders', icon: 'cart' },
   ];
@@ -523,21 +433,22 @@ function renderNav() {
     ? [
         { id: 'menu', label: 'Menu', icon: 'menu' },
         { id: 'admin', label: 'Admin', icon: 'grid' },
-        { id: 'inbox', label: 'Inbox', icon: 'inbox' },
+        { id: 'inbox', label: 'Inbox', icon: 'inbox', req: 'combined_inbox' },
         { id: 'leads', label: 'Leads', icon: 'sheets' },
         { id: 'more', label: 'Account', icon: 'crown' },
       ]
     : [
         { id: 'menu', label: 'Menu', icon: 'menu' },
-        { id: 'inbox', label: 'Inbox', icon: 'inbox' },
+        { id: 'inbox', label: 'Inbox', icon: 'inbox', req: 'combined_inbox' },
         { id: 'leads', label: 'Leads', icon: 'sheets' },
         { id: 'orders', label: 'Orders', icon: 'cart' },
         { id: 'products', label: 'Products', icon: 'box' },
         { id: 'more', label: 'Account', icon: 'crown' },
       ];
+  const visibleMobile = mobileItems.filter(i => !i.req || hasFeature(i.req));
   const bt = $('bottom-tabs');
   if (bt) {
-    bt.innerHTML = mobileItems.map(i =>
+    bt.innerHTML = visibleMobile.map(i =>
       `<button class="btab" data-nav="${i.id}">${ICONS[i.icon] || ''}<span>${esc(i.label)}</span></button>`).join('');
     document.querySelectorAll('#bottom-tabs .btab').forEach(b =>
       b.onclick = () => {
@@ -570,7 +481,40 @@ const ALL_VIEWS = [
   'webchat', 'backup', 'plan', 'apikeys', 'broadcast', 'guide', 'more', 'settings'
 ];
 
+const VIEW_REQ = {
+  inbox: 'combined_inbox',
+  kb: 'knowledge',
+  webchat: 'webchat',
+  apikeys: 'api_access',
+  broadcast: 'broadcast',
+};
+const VIEW_ORDER = [
+  'inbox', 'leads', 'orders', 'products', 'channels', 'kb',
+  'webchat', 'backup', 'plan', 'apikeys', 'broadcast', 'guide', 'more',
+];
+// First view the client is allowed to see, in nav order. 'more' (Account)
+// has no req and is always the fallback.
+function firstAvailableView() {
+  for (const v of VIEW_ORDER) {
+    const req = VIEW_REQ[v];
+    if (!req || hasFeature(req)) return v;
+  }
+  return 'more';
+}
+// Re-apply the active highlight after renderNav() rebuilds the nav buttons.
+function markActiveNav() {
+  document.querySelectorAll('#nav-links .nav-link').forEach(b => b.classList.toggle('active', b.dataset.nav === state.view));
+  document.querySelectorAll('#bottom-tabs .btab').forEach(b => b.classList.toggle('active', b.dataset.nav === state.view));
+}
+
 function showView(view) {
+  // Licence defence in depth: a view whose feature the client lacks is never
+  // rendered — redirect to the first available view instead.
+  const req = VIEW_REQ[view];
+  if (req && !hasFeature(req)) {
+    const fallback = firstAvailableView();
+    if (fallback !== view) { showView(fallback); return; }
+  }
   // Any navigation closes the mobile sidebar drawer
   document.body.classList.remove('sidebar-open');
   state.view = view;
@@ -599,11 +543,8 @@ function showView(view) {
 
   if (view === 'payments') { openPaymentsModal(); return; }
   if (view === 'inbox') {
-    updateInboxLock();
-    if (!isInboxLocked()) {
-      loadConversations();
-      if (!state.activeId) renderChatHeader(null);
-    }
+    loadConversations();
+    if (!state.activeId) renderChatHeader(null);
   }
   if (view === 'leads') loadLeads();
   if (view === 'orders') loadOrdersPage();
@@ -786,7 +727,7 @@ function gotoSettings(tab) { showView('settings'); switchSettingsTab(tab || 'cha
 // ---------------- client: Broadcast campaigns ----------------
 async function renderBroadcast() {
   if (!hasFeature('broadcast')) {
-    $('bcast-list').innerHTML = `<div class="card"><p class="muted">Broadcast is not included in your plan.</p></div>`;
+    showView(firstAvailableView());
     return;
   }
   let list = [];
@@ -1418,11 +1359,6 @@ function toggleMobileDetail(open) {
 
 // ---------------- client: inbox ----------------
 async function loadClientAll() {
-  if (isInboxLocked()) {
-    updateInboxLock();
-    await Promise.all([loadStats(), loadProducts(true)]);
-    return;
-  }
   await Promise.all([loadStats(), loadConversations(true), loadProducts(true)]);
   renderCustomerTab(null);
   setComposerEnabled(false);
@@ -1454,10 +1390,6 @@ function closeFilterPop() { var _p = $('filter-pop'); if (_p) _p.classList.add('
 // and a failed fetch shows a warm retry state instead of a dead skeleton.
 let _convGen = 0;
 async function loadConversations(quiet) {
-  if (isInboxLocked()) {
-    updateInboxLock();
-    return;
-  }
   const gen = ++_convGen;
   const q = new URLSearchParams();
   if (state.platformFilter !== 'all') q.set('platform', state.platformFilter);
@@ -1524,20 +1456,12 @@ function renderConvList() {
 }
 
 async function renderInboxEmpty() {
-  if (isInboxLocked()) {
-    updateInboxLock();
-    return;
-  }
   const empty = $('inbox-empty'), panes = $('inbox-panes');
   let connected = 0;
   try {
     const conns = await api(`/api/clients/${state.clientId}/connectors`);
     connected = Object.values(conns).filter(s => s.status === 'connected').length;
   } catch {}
-  if (isInboxLocked()) {
-    updateInboxLock();
-    return;
-  }
   if (!state.conversations.length && connected === 0) {
     panes.classList.add('hidden');
     empty.innerHTML = `<div class="empty-state fade-in">
@@ -1551,15 +1475,12 @@ async function renderInboxEmpty() {
     </div>`;
     $('btn-goto-connect').onclick = () => { showView('settings'); switchSettingsTab('channels'); };
   } else {
-    if (!isInboxLocked()) {
-      panes.classList.remove('hidden');
-    }
+    panes.classList.remove('hidden');
     empty.innerHTML = '';
   }
 }
 
 async function selectConversation(id) {
-  if (isInboxLocked()) return;
   state.activeId = id;
   state.orderLines = {};
   renderConvList();
@@ -2742,12 +2663,12 @@ async function renderPlanTab() {
   if (!a) { card.innerHTML = `<div class="card small err">Could not load plan details.</div>`; return; }
   const lic = a.license;
   const modeLabel = { licensed: 'Licensed plan', legacy: 'Legacy — full access', none: 'No active license', suspended: 'Suspended' }[a.mode] || a.mode;
-  const featRows = CLIENT_FEATURES.map(f => {
-    const on = (a.features || []).includes(f.key);
+  // Only included features are ever listed — unlicensed features are not shown.
+  const featRows = CLIENT_FEATURES.filter(f => (a.features || []).includes(f.key)).map(f => {
     return `<div class="mrow" style="cursor:default;">
-      <span class="mrow-ic" style="color:${on ? 'var(--ok)' : 'var(--muted)'};">${on ? '✓' : '○'}</span>
+      <span class="mrow-ic" style="color:var(--ok);">✓</span>
       <span class="mrow-tx"><b>${esc(f.label)}</b><small>${esc(f.desc)}</small></span>
-      <span class="pill ${on ? 'green' : ''}">${on ? 'Included' : 'Not included'}</span>
+      <span class="pill green">Included</span>
     </div>`;
   }).join('');
   const creditLine = lic && lic.kind === 'credit'
@@ -2755,6 +2676,8 @@ async function renderPlanTab() {
        <div class="meter" style="margin:6px 0 12px;"><div class="meter-fill" style="width:${Math.min(100, Math.round(lic.credits_used / Math.max(1, lic.credits_total) * 100))}%;"></div></div>` : '';
   const featCreditLine = lic && lic.kind === 'feature' && lic.feature_grants
     ? lic.feature_grants.map(g => `<div class="kv"><span>${esc((CLIENT_FEATURES.find(f => f.key === g.feature) || {}).label || g.feature)}</span><b>${g.mode === 'unlimited' ? 'Unlimited' : g.credits_used + ' / ' + g.credits_total + ' used'}</b></div>`).join('') : '';
+  // The backend may signal an issued-but-unactivated key for this workspace.
+  const pending = (a.pendingLicense || a.pending_license || (lic && lic.status === 'pending_activation' ? lic : null));
   card.innerHTML = `
     <div class="ttl" style="font-size:17px; margin-bottom:4px;">My Plan</div>
     <p class="muted small" style="margin-bottom:14px;">What your workspace is licensed for — synced live with the platform.</p>
@@ -2762,18 +2685,51 @@ async function renderPlanTab() {
     ${lic ? `<div class="kv"><span>Plan</span><b>${esc(lic.plan_name || 'Licensed plan')}</b></div>
     <div class="kv"><span>License code</span><code>${esc(lic.code)}</code></div>
     ${lic.kind === 'time' && lic.ends_at ? `<div class="kv"><span>Renews / expires</span><b>${esc(fmtDate(lic.ends_at))}</b></div>` : ''}` : ''}
+    ${a.mode === 'none' ? `<p class="muted small" style="margin:10px 0 0;">No active license on this workspace.</p>` : ''}
     ${a.aiPaused ? `<div class="notice warn" style="margin:10px 0;">AI replies are paused by the platform admin. Your inbox keeps working.</div>` : ''}
     ${creditLine}${featCreditLine}
     <hr style="margin:16px 0; border:none; border-top:1px solid var(--line);">
     <div class="ttl" style="margin-bottom:8px;">Features</div>
-    ${featRows}
-    <p class="muted small" style="margin-top:12px;">Need more? Contact the platform admin to upgrade your license.</p>`;
+    ${featRows || '<p class="muted small">No licensed features on this workspace.</p>'}
+    <hr style="margin:16px 0; border:none; border-top:1px solid var(--line);">
+    <div class="ttl" style="margin-bottom:8px;">Activate license key</div>
+    ${pending ? `<p class="muted small" style="margin-bottom:10px;">A license key was issued for this workspace — enter it below to activate.</p>` : ''}
+    <div style="display:flex; gap:8px; margin-bottom:8px;">
+      <input id="lic-activate-code" class="input no-icon mono" placeholder="LIC-XXXXXXXXXXXX" style="flex:1; min-width:0; text-transform:uppercase;" autocomplete="off">
+      <button class="btn-primary" id="lic-activate-btn">Activate</button>
+    </div>
+    <div id="lic-activate-msg" class="small" style="min-height:18px;"></div>`;
+  const actBtn = $('lic-activate-btn');
+  if (actBtn) actBtn.onclick = async () => {
+    const codeEl = $('lic-activate-code');
+    const msgEl = $('lic-activate-msg');
+    const code = (codeEl.value || '').trim();
+    if (!code) { msgEl.textContent = 'Enter a license key first.'; msgEl.style.color = 'var(--err, #ef4444)'; return; }
+    actBtn.disabled = true;
+    actBtn.textContent = 'Activating…';
+    msgEl.textContent = '';
+    try {
+      const res = await api('/api/client/licenses/activate', { method: 'POST', body: JSON.stringify({ code }) });
+      // The server returns fresh access — re-gate the whole UI without a reload.
+      try { state.access = await api('/api/client/access'); } catch { state.access = res.access || res; }
+      applyAccessGating();
+      renderNav();
+      markActiveNav();
+      await renderPlanTab();
+      toast('License activated.', 'ok');
+    } catch (e) {
+      msgEl.textContent = e.message || 'Activation failed.';
+      msgEl.style.color = 'var(--err, #ef4444)';
+      actBtn.disabled = false;
+      actBtn.textContent = 'Activate';
+    }
+  };
 }
 // ---------------- client: API keys ----------------
 async function renderApiKeysTab() {
   const card = $('apikeys-card');
   if (!hasFeature('api_access')) {
-    card.innerHTML = `<div class="card small muted">API access is not included in your plan.</div>`;
+    showView(firstAvailableView());
     return;
   }
   card.innerHTML = `<div class="card small muted">Loading API keys…</div>`;
@@ -3067,7 +3023,8 @@ async function loadConnectors() {
         : `<button class="btn-primary" data-meta-oauth="1">Connect Facebook Page</button>`)
       : `<button class="add-acct" data-add-acct="${ch}">＋ Add ${esc(m.label)} account</button>`;
     // FB comment automation panel (messenger card, when the Page is connected).
-    const commentPanel = (ch === 'messenger' && s.status === 'connected')
+    // AI surface: hidden entirely without the ai_response feature.
+    const commentPanel = (ch === 'messenger' && s.status === 'connected' && hasFeature('ai_response'))
       ? `<div class="comment-auto" id="comment-auto">
           <div class="ca-head">Comment automation <span class="ca-sub">comment → AI reply → DM → lead</span></div>
           <div class="ca-toggles">
@@ -4001,6 +3958,60 @@ async function loadAdminLicensing() {
   renderCreateSection(features);
   renderPlanCards(plans);
   renderLicensesTable(licenses);
+  wireGenKeyForm(plans, workspaces);
+}
+// --- generate a license key (key-only: the client activates it themselves) ---
+function wireGenKeyForm(plans, workspaces) {
+  const wsSel = $('genkey-ws'), planSel = $('genkey-plan');
+  if (!wsSel || !planSel) return;
+  const curWs = wsSel.value, curPlan = planSel.value;
+  wsSel.innerHTML = '<option value="">Pick a workspace…</option>' +
+    (workspaces || []).map(w => `<option value="${w.client_id || w.id}">${esc(w.client_name || w.username || ('#' + (w.client_id || w.id)))}</option>`).join('');
+  planSel.innerHTML = '<option value="">Pick a package…</option>' +
+    (plans || []).filter(p => p.active).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  if (curWs) wsSel.value = curWs;
+  if (curPlan) planSel.value = curPlan;
+  const daysSel = $('genkey-days'), customRow = $('genkey-custom-row');
+  if (daysSel) daysSel.onchange = () => { if (customRow) customRow.classList.toggle('hidden', daysSel.value !== 'custom'); };
+  const btn = $('btn-genkey');
+  if (!btn) return;
+  btn.onclick = async () => {
+    const msgEl = $('genkey-msg'), resEl = $('genkey-result');
+    const clientId = Number(wsSel.value), planId = Number(planSel.value);
+    let days = Number(daysSel.value);
+    if (daysSel.value === 'custom') days = Number($('genkey-custom-days').value);
+    if (!clientId || !planId || !(days > 0)) { msgEl.textContent = 'Pick a workspace, a package and a validity.'; return; }
+    btn.disabled = true;
+    btn.textContent = 'Generating…';
+    msgEl.textContent = '';
+    resEl.innerHTML = '';
+    try {
+      const res = await api('/api/admin/licenses', { method: 'POST', body: JSON.stringify({ client_id: clientId, plan_id: planId, days, deliver: 'key-only' }) });
+      const code = res.code || (res.license && res.license.code) || '';
+      resEl.innerHTML = `<div class="notice" style="margin-top:10px;"><span>License key — hand it to the client after payment:<br><code id="genkey-code" style="user-select:all;">${esc(code)}</code></span></div>
+        <button class="btn-soft" id="genkey-copy" style="margin-top:8px;">Copy key</button>`;
+      $('genkey-copy').onclick = async () => {
+        try { await navigator.clipboard.writeText(code); toast('Key copied.', 'ok'); }
+        catch {
+          const el = $('genkey-code');
+          if (el) { const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+        }
+      };
+      await loadAdminLicensing();
+    } catch (e) { msgEl.textContent = 'Failed: ' + e.message; }
+    finally { btn.disabled = false; btn.textContent = 'Generate key'; }
+  };
+}
+// Test-license picker value from the create-user modal (minutes, or null).
+function selectedTrialMinutes() {
+  const sel = document.querySelector('#um-trial-chips .chip.sel');
+  if (!sel) return null;
+  if (sel.dataset.min === 'custom') {
+    const n = Number($('um-trial-custom').value);
+    return n > 0 ? n : null;
+  }
+  const n = Number(sel.dataset.min);
+  return n > 0 ? n : null;
 }
 function featureCheckGrid(elId, features, checked) {
   $(elId).innerHTML = (features || []).map(f => {
@@ -4048,7 +4059,7 @@ function renderCreateSection(features) {
         const lic = await api(`/api/admin/clients/${targetWs}/assign-license`, { method: 'POST', body: JSON.stringify({ planId: plan.id }) });
         toast(`License issued: ${lic.code} to workspace!`, 'ok');
       } else {
-        toast(`Plan "${plan.name}" created!`, 'ok');
+        toast(`Package "${plan.name}" created!`, 'ok');
       }
       $('crt-name').value = ''; $('crt-credits').value = ''; $('crt-price').value = '';
       $('crt-msg').textContent = '';
@@ -4065,8 +4076,8 @@ function renderPlanCards(plans) {
       <div class="prow"><span class="pill blue">${esc(KIND_LABEL[p.kind] || p.kind)}</span>
         <span class="pill">${esc(planKindMeta(p))}</span>${p.active ? '' : '<span class="pill red">OFF</span>'}</div>
       <div class="pmeta">${(p.features || []).length} features${p.price_bdt ? ' · ৳' + esc(String(p.price_bdt)) : ''}</div>
-      <button class="btn-soft danger pdel" data-plandel="${p.id}">Delete plan</button>
-    </div>`).join('') || '<div class="card"><p class="muted">No plans yet — create one above.</p></div>';
+      <button class="btn-soft danger pdel" data-plandel="${p.id}">Delete package</button>
+    </div>`).join('') || '<div class="card"><p class="muted">No packages yet — create one above.</p></div>';
   document.querySelectorAll('[data-plandel]').forEach(b => b.onclick = async () => {
     if (!confirm('Delete this plan? Issued licenses keep working.')) return;
     try { await api(`/api/admin/plans/${b.dataset.plandel}`, { method: 'DELETE' }); loadAdminLicensing(); }
@@ -4077,7 +4088,7 @@ function renderPlanCards(plans) {
 async function openAssignModal(clientId, workspaces) {
   const w = workspaces.find(x => x.client_id === clientId);
   const nm = w ? (w.client_name || w.username) : ('#' + clientId);
-  $('assign-sub').textContent = `Pick a plan for "${nm}". It becomes the workspace's license right away.`;
+  $('assign-sub').textContent = `Pick a package for "${nm}". It becomes the workspace's license right away.`;
   const cur = w && w.license
     ? `<div class="ws-lic"><code>${esc(w.license.code)}</code><span class="muted">${esc(w.license.plan_name || '')} · ${esc(w.license.status)}</span></div>`
     : '<div class="ws-lic"><span class="muted">No license yet</span></div>';
@@ -4092,7 +4103,7 @@ async function openAssignModal(clientId, workspaces) {
         <span class="pill">${esc(planKindMeta(p))}</span></div>
       <div class="pmeta">${(p.features || []).length} features${p.price_bdt ? ' · ৳' + esc(String(p.price_bdt)) : ''}</div>
       <button class="btn-primary btn-soft-assign" data-assign="${p.id}" style="width:100%;">Assign this plan</button>
-    </div>`).join('') || '<p class="muted">No plans yet — create one in Plans & licenses.</p>';
+    </div>`).join('') || '<p class="muted">No packages yet — create one in Packages & licenses.</p>';
   document.querySelectorAll('[data-assign]').forEach(b => b.onclick = async () => {
     const p = plans.find(x => x.id === Number(b.dataset.assign));
     if (!confirm(`Assign "${p ? p.name : ''}" to "${nm}"?` + (w && w.license ? '\nThe current license will be retired.' : ''))) return;
@@ -4117,7 +4128,10 @@ function licenseValidity(l) {
     `${esc(g.feature)}: ${g.mode === 'unlimited' ? '∞' : g.credits_used + '/' + g.credits_total}`).join('<br>') || '—';
 }
 function renderLicensesTable(licenses) {
-  const pill = (s) => `<span class="pill ${s === 'active' ? 'green' : s === 'paused' ? 'amber' : 'red'}">${esc(s.toUpperCase())}</span>`;
+  const pill = (s) => {
+    if (s === 'pending_activation') return `<span class="pill blue">Issued — awaiting activation</span>`;
+    return `<span class="pill ${s === 'active' ? 'green' : s === 'paused' ? 'amber' : 'red'}">${esc(s.toUpperCase())}</span>`;
+  };
   $('licenses-body').innerHTML = licenses.map(l => `
     <tr>
       <td data-label="Code"><b style="color:var(--ink); font-family:monospace;">${esc(l.code)}</b></td>
@@ -4128,12 +4142,17 @@ function renderLicensesTable(licenses) {
       <td data-label=""><div style="display:flex; gap:6px; flex-wrap:wrap;">
         ${l.status === 'active' ? `<button class="btn-soft" data-licpause="${l.id}">Pause</button>` : ''}
         ${l.status === 'paused' ? `<button class="btn-soft" data-licresume="${l.id}">Resume</button>` : ''}
+        ${l.status === 'pending_activation' ? `<button class="btn-soft danger" data-licrevoke="${l.id}">Revoke</button>` : ''}
         ${l.kind !== 'time' ? `<button class="btn-soft" data-lictopup="${l.id}">+ Credits</button>` : ''}
         ${['active', 'paused'].includes(l.status) ? `<button class="btn-soft danger" data-liccancel="${l.id}">Cancel</button>` : ''}
       </div></td>
     </tr>`).join('') || '<tr><td colspan="6" class="tbl-empty">No licenses issued yet.</td></tr>';
   document.querySelectorAll('[data-licpause]').forEach(b => b.onclick = () => licAction(b.dataset.licpause, 'pause'));
   document.querySelectorAll('[data-licresume]').forEach(b => b.onclick = () => licAction(b.dataset.licresume, 'resume'));
+  document.querySelectorAll('[data-licrevoke]').forEach(b => b.onclick = async () => {
+    if (!confirm('Revoke this issued key? The client will not be able to activate it.')) return;
+    licAction(b.dataset.licrevoke, 'cancel');
+  });
   document.querySelectorAll('[data-liccancel]').forEach(b => b.onclick = async () => {
     if (!confirm('Cancel this license? The workspace loses its licensed features.')) return;
     licAction(b.dataset.liccancel, 'cancel');
@@ -4358,6 +4377,8 @@ function connectSSE() {
             return;
           }
           applyAccessGating();
+          renderNav();
+          markActiveNav();
           toast('Your plan was updated — features refreshed.', '');
         }
       } else if (evt.type === 'broadcast_progress') {
@@ -4654,8 +4675,17 @@ document.addEventListener('DOMContentLoaded', () => {
   $('btn-create-user').onclick = () => {
     $('um-username').value = ''; $('um-password').value = ''; $('um-workspace').value = ''; $('um-type').value = 'physical';
     const errEl = $('um-err'); if (errEl) { errEl.textContent = ''; errEl.classList.remove('show'); }
+    document.querySelectorAll('#um-trial-chips .chip').forEach(x => x.classList.toggle('sel', x.dataset.min === '60'));
+    const tc = $('um-trial-custom'); if (tc) { tc.value = ''; }
+    const tcr = $('um-trial-custom-row'); if (tcr) tcr.classList.add('hidden');
     $('user-modal').classList.remove('hidden');
   };
+  // Test-license duration picker (chips + custom minutes).
+  document.querySelectorAll('#um-trial-chips .chip').forEach(b => b.onclick = () => {
+    document.querySelectorAll('#um-trial-chips .chip').forEach(x => x.classList.toggle('sel', x === b));
+    const tcr = $('um-trial-custom-row');
+    if (tcr) tcr.classList.toggle('hidden', b.dataset.min !== 'custom');
+  });
   $('btn-close-user').onclick = () => $('user-modal').classList.add('hidden');
   $('btn-save-user').onclick = async () => {
     const errEl = $('um-err');
@@ -4669,7 +4699,10 @@ document.addEventListener('DOMContentLoaded', () => {
     saveBtn.disabled = true;
     saveBtn.textContent = 'Creating…';
     try {
-      const res = await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ username, password, workspaceName, businessType: $('um-type').value }) });
+      const trialMinutes = selectedTrialMinutes();
+      const body = { username, password, workspaceName, businessType: $('um-type').value };
+      if (trialMinutes) body.trialMinutes = trialMinutes;
+      const res = await api('/api/admin/users', { method: 'POST', body: JSON.stringify(body) });
       $('user-modal').classList.add('hidden');
       toast(`Workspace "${res.client_name || workspaceName}" created successfully!`, 'ok');
       await loadAdmin();
@@ -4876,7 +4909,7 @@ const GUIDES = [
     steps: [
       { t: 'Connect WhatsApp', d: 'Go to Connect Channels → WhatsApp → Add account, then scan the QR code with your business phone. New chats will appear in your Inbox automatically.', img: '/img/guide-connect.png?v=20261006c', go: ['Connect WhatsApp', () => gotoSettings('channels')] },
       { t: 'Add your products', d: 'Go to My Products → Add product. Enter the name, price and a short description. The AI uses this to answer "how much?" questions.', img: '/img/guide-products.png?v=20261006c', go: ['Add a product', () => showView('products')] },
-      { t: 'Teach the AI', d: 'Go to Teach the AI → add your delivery rules, payment methods and common answers. Anything you write here, the AI will know.', img: '/img/guide-teach.png?v=20261006c', go: ['Teach the AI', () => gotoSettings('kb')] },
+      { t: 'Teach the AI', d: 'Go to Teach the AI → add your delivery rules, payment methods and common answers. Anything you write here, the AI will know.', img: '/img/guide-teach.png?v=20261006c', go: ['Teach the AI', () => gotoSettings('kb')], req: 'knowledge' },
     ]
   },
   {
@@ -4915,13 +4948,13 @@ function renderGuide() {
         <div><div class="guide-title">${esc(g.title)}</div><div class="muted small">${esc(g.sub)}</div></div>
       </div>
       <div class="guide-steps">
-        ${g.steps.map((s, i) => `
+        ${g.steps.map((s, i) => ({ s, i })).filter(({ s }) => !s.req || hasFeature(s.req)).map(({ s, i }, n) => `
           <div class="guide-step">
-            <span class="guide-num">${i + 1}</span>
+            <span class="guide-num">${n + 1}</span>
             <div class="guide-body">
               <div class="guide-step-t">${esc(s.t)}</div>
               <div class="guide-step-d">${esc(s.d)}</div>
-              ${s.img ? `<span class="guide-img-wrap"><img class="guide-img" src="${s.img}" alt="${esc(s.t)}" loading="lazy"><span class="guide-img-num">${i + 1}</span></span>` : ''}
+              ${s.img ? `<span class="guide-img-wrap"><img class="guide-img" src="${s.img}" alt="${esc(s.t)}" loading="lazy"><span class="guide-img-num">${n + 1}</span></span>` : ''}
               ${s.go ? `<button class="btn-soft guide-go" data-g="${g.id}" data-s="${i}">${esc(s.go[0])} →</button>` : ''}
             </div>
           </div>`).join('')}
@@ -4963,16 +4996,16 @@ async function renderGetStarted() {
   const steps = [
     { done: channels > 0, t: 'Connect a channel', s: channels > 0 ? 'Connected ✓' : 'Link WhatsApp or Telegram', go: () => gotoSettings('channels') },
     { done: products > 0, t: 'Add your products', s: products > 0 ? products + ' added ✓' : 'What do you sell?', go: () => showView('products') },
-    { done: docs > 0, t: 'Teach the AI', s: docs > 0 ? docs + ' taught ✓' : 'Prices, policies, FAQs', go: () => gotoSettings('kb') },
-  ];
+    { done: docs > 0, t: 'Teach the AI', s: docs > 0 ? docs + ' taught ✓' : 'Prices, policies, FAQs', go: () => gotoSettings('kb'), req: 'knowledge' },
+  ].filter(x => !x.req || hasFeature(x.req));
   const doneCount = steps.filter(x => x.done).length;
-  if (doneCount === 3 && !force) { ov.classList.add('hidden'); return; }
+  if ((!steps.length || doneCount === steps.length) && !force) { ov.classList.add('hidden'); return; }
   ov.classList.remove('hidden');
   el.innerHTML = `
     <button class="gs-close" id="gs-close" aria-label="Close">×</button>
     <div class="gs-head">
-      <div><div class="gs-title">Get started</div><div class="muted small">${doneCount} of 3 done — finish setup and you're live</div></div>
-      <div class="gs-bar"><span style="width:${doneCount / 3 * 100}%"></span></div>
+      <div><div class="gs-title">Get started</div><div class="muted small">${doneCount} of ${steps.length} done — finish setup and you're live</div></div>
+      <div class="gs-bar"><span style="width:${steps.length ? doneCount / steps.length * 100 : 0}%"></span></div>
     </div>
     ${steps.map((x, i) => `
       <button class="gs-step ${x.done ? 'done' : ''}" data-gs="${i}">
