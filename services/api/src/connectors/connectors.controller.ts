@@ -114,28 +114,38 @@ export class ConnectorsController {
     const clientRes = await this.pool.query('SELECT widget_key, website_url FROM clients WHERE id = $1', [targetClient]);
     const client = clientRes.rows[0];
 
+    // Honest statuses only: a channel with no real session/page is
+    // 'disconnected' with an empty list — never invent a "Primary" account.
+    // (2026-11-12: the old fallbacks fabricated a connected "Primary WA" /
+    // "Primary TG" for every fresh workspace; removed — no demo data in prod.)
+    const messengerPages = metaPages.rows.filter((p) => p.channel === 'messenger');
+    const instagramPages = metaPages.rows.filter((p) => p.channel === 'instagram');
     return {
       whatsapp: {
         method: 'QR code scan (Baileys Linked devices)',
-        accounts: waAccounts.length ? waAccounts : [{ slot: 'default', status: 'connected', label: 'Primary WA' }],
+        status: waAccounts.some((a) => a.status === 'connected') ? 'connected' : 'disconnected',
+        accounts: waAccounts,
       },
       telegram: {
         method: 'QR code scan (Linked devices)',
-        accounts: tgAccounts.length ? tgAccounts : [{ slot: 'default', status: 'connected', label: 'Primary TG' }],
+        status: tgAccounts.some((a) => a.status === 'connected') ? 'connected' : 'disconnected',
+        accounts: tgAccounts,
       },
       messenger: {
         method: 'Facebook Page OAuth',
-        pages: metaPages.rows.filter((p) => p.channel === 'messenger'),
+        status: messengerPages.some((p) => p.status === 'connected') ? 'connected' : 'disconnected',
+        pages: messengerPages,
       },
       instagram: {
         method: 'Facebook Page OAuth (linked business account)',
-        pages: metaPages.rows.filter((p) => p.channel === 'instagram'),
+        status: instagramPages.some((p) => p.status === 'connected') ? 'connected' : 'disconnected',
+        pages: instagramPages,
       },
       webchat: {
         mode: 'live',
-        status: 'connected',
+        status: client?.widget_key ? 'ready' : 'disconnected',
         method: 'One-line embed script',
-        widgetKey: client?.widget_key || 'test-widget-key',
+        widgetKey: client?.widget_key || null,
         websiteUrl: client?.website_url || null,
         note: 'Paste the snippet on any website — visitor chats land in this inbox and the AI answers from your products + website.',
       },

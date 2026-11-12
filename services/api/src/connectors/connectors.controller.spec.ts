@@ -57,3 +57,61 @@ describe('ConnectorsController.getWebhookUrls', () => {
     expect(urls.telegram).toBe('https://box.tect0nic.com/webhooks/telegram');
   });
 });
+
+describe('ConnectorsController.getConnectors — honest statuses (no demo data)', () => {
+  // Fake pool: answers per table so the endpoint's fallbacks are observable.
+  function fakePool(sessions: any[], pages: any[], client: any) {
+    return {
+      query: async (sql: string) => {
+        if (sql.includes('FROM channel_sessions')) return { rows: sessions };
+        if (sql.includes('FROM meta_pages')) return { rows: pages };
+        if (sql.includes('FROM clients')) return { rows: client ? [client] : [] };
+        return { rows: [] };
+      },
+    } as any;
+  }
+  const events = { getQrCode: async () => null } as any;
+
+  it('empty workspace: no invented Primary accounts, everything disconnected', async () => {
+    const ctrl = new ConnectorsController(
+      fakePool([], [], { widget_key: 'wk_real123', website_url: null }),
+      events,
+    );
+    const res: any = await ctrl.getConnectors(1, 1);
+    expect(res.whatsapp.accounts).toEqual([]);
+    expect(res.whatsapp.status).toBe('disconnected');
+    expect(res.telegram.accounts).toEqual([]);
+    expect(res.telegram.status).toBe('disconnected');
+    expect(res.messenger.pages).toEqual([]);
+    expect(res.messenger.status).toBe('disconnected');
+    expect(res.instagram.pages).toEqual([]);
+    expect(res.instagram.status).toBe('disconnected');
+    expect(res.webchat.widgetKey).toBe('wk_real123');
+    expect(res.webchat.widgetKey).not.toBe('test-widget-key');
+    expect(JSON.stringify(res)).not.toContain('Primary');
+  });
+
+  it('no widget key: webchat reports disconnected with a null key', async () => {
+    const ctrl = new ConnectorsController(fakePool([], [], { widget_key: null, website_url: null }), events);
+    const res: any = await ctrl.getConnectors(1, 1);
+    expect(res.webchat.status).toBe('disconnected');
+    expect(res.webchat.widgetKey).toBeNull();
+  });
+
+  it('a real connected WA session is reported as-is', async () => {
+    const ctrl = new ConnectorsController(
+      fakePool(
+        [{ channel: 'whatsapp', slot: 'default', status: 'connected', label: 'Shop WA', ai_paused: false }],
+        [],
+        { widget_key: 'wk_real123', website_url: null },
+      ),
+      events,
+    );
+    const res: any = await ctrl.getConnectors(1, 1);
+    expect(res.whatsapp.status).toBe('connected');
+    expect(res.whatsapp.accounts).toHaveLength(1);
+    expect(res.whatsapp.accounts[0].label).toBe('Shop WA');
+    expect(res.telegram.status).toBe('disconnected');
+  });
+});
+

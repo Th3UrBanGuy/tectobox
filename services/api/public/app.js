@@ -2435,11 +2435,14 @@ function wcToast(msg) {
 }
 function webchatCard() {
   const w = state.webchat || {};
+  // Honest status: the embed is "ready" once a real widget key exists —
+  // never a hardcoded "connected" (2026-11-12: no demo data in prod).
+  const wcStatus = (state.connectors && state.connectors.webchat && state.connectors.webchat.status) || 'disconnected';
   const snippet = `<script src="${location.origin}/widget.js?v=20261006w" data-client="${w.widget_key || ''}"></script>`;
   return `<div class="chan-card fade-in">
     <div class="top"><span class="plat-badge p-webchat">WC</span>
       <span class="nm">Webchat</span>
-      <span style="margin-left:auto;">${statusPill('connected')}</span></div>
+      <span style="margin-left:auto;">${statusPill(wcStatus)}</span></div>
     <div class="note">Paste the snippet on any website — visitor chats land in this inbox and the AI answers from your products + website content. Style the bubble under <b>Settings → Appearance</b>.</div>
     <div class="ca-label" style="margin-top:14px;">Put it on your website</div>
     <div class="code-box" style="word-break:break-all; font-size:12px;">${esc(snippet)}</div>
