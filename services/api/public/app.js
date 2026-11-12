@@ -453,6 +453,7 @@ const ICONS = {
   key_solid: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="15" r="4.5"/><path d="M11.2 11.8L20 3m-3 3l2.5 2.5M16 7l2 2"/></svg>',
   shield: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
   chev: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
+  menu: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>',
 };
 
 function renderNav() {
@@ -517,15 +518,17 @@ function renderNav() {
     };
   });
 
-  // Mobile bottom tab bar
+  // Mobile bottom tab bar — first tab opens the sidebar drawer (Menu)
   const mobileItems = isAdminUser
     ? [
+        { id: 'menu', label: 'Menu', icon: 'menu' },
         { id: 'admin', label: 'Admin', icon: 'grid' },
         { id: 'inbox', label: 'Inbox', icon: 'inbox' },
         { id: 'leads', label: 'Leads', icon: 'sheets' },
         { id: 'more', label: 'Account', icon: 'crown' },
       ]
     : [
+        { id: 'menu', label: 'Menu', icon: 'menu' },
         { id: 'inbox', label: 'Inbox', icon: 'inbox' },
         { id: 'leads', label: 'Leads', icon: 'sheets' },
         { id: 'orders', label: 'Orders', icon: 'cart' },
@@ -537,7 +540,10 @@ function renderNav() {
     bt.innerHTML = mobileItems.map(i =>
       `<button class="btab" data-nav="${i.id}">${ICONS[i.icon] || ''}<span>${esc(i.label)}</span></button>`).join('');
     document.querySelectorAll('#bottom-tabs .btab').forEach(b =>
-      b.onclick = () => { showView(b.dataset.nav); if (b.dataset.nav === 'admin') loadAdmin(); });
+      b.onclick = () => {
+        if (b.dataset.nav === 'menu') { toggleMobileDrawer(); return; }
+        showView(b.dataset.nav); if (b.dataset.nav === 'admin') loadAdmin();
+      });
   }
 }
 
@@ -565,6 +571,8 @@ const ALL_VIEWS = [
 ];
 
 function showView(view) {
+  // Any navigation closes the mobile sidebar drawer
+  document.body.classList.remove('sidebar-open');
   state.view = view;
   var _tt = $('topnav-title'); if (_tt) _tt.textContent = VIEW_TITLES[view] || '';
 
@@ -4719,8 +4727,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   initSlashCommands();
   initSidebarCollapse();
+  initMobileDrawer();
   boot();
 });
+
+/* Mobile drawer (≤900px): the bottom-dock "Menu" tab opens the full sidebar
+   as an overlay drawer. Closes via scrim, close button, any navigation
+   (showView), Escape, or resize to desktop. */
+function toggleMobileDrawer() {
+  const sidebar = $('app-sidebar');
+  const opening = !document.body.classList.contains('sidebar-open');
+  document.body.classList.toggle('sidebar-open', opening);
+  if (opening && sidebar) sidebar.classList.remove('collapsed');
+}
+function initMobileDrawer() {
+  const scrim = $('sidebar-scrim');
+  if (scrim) scrim.onclick = () => document.body.classList.remove('sidebar-open');
+  const closeBtn = $('btn-sidebar-close');
+  if (closeBtn) closeBtn.onclick = () => document.body.classList.remove('sidebar-open');
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') document.body.classList.remove('sidebar-open');
+  });
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 900) document.body.classList.remove('sidebar-open');
+  });
+}
 
 function initSidebarCollapse() {
   const sidebar = $('app-sidebar');
