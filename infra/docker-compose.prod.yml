@@ -1,4 +1,24 @@
-version: "3.9"
+# ==============================================================================
+# Tectobox Production Infrastructure & Services Stack
+# Canonical production compose configuration (BP4 unified compose).
+#
+# Production Deploy Sequence:
+# 1. Update source code:
+#    git fetch origin && git merge --ff-only origin/main
+# 2. Build images (WITHOUT --project-directory):
+#    docker compose -f infra/docker-compose.prod.yml build
+# 3. Apply database migrations (idempotent):
+#    bash scripts/migrate.sh
+# 4. Recreate containers (WITH -p tectobox --project-directory /opt/tectobox):
+#    docker compose -f infra/docker-compose.prod.yml -p tectobox --project-directory /opt/tectobox up -d --remove-orphans
+# 5. Service health & verification:
+#    docker compose -f infra/docker-compose.prod.yml -p tectobox --project-directory /opt/tectobox ps
+#
+# Note: All services attach to tectobox_internal-net automatically by default;
+# no manual network attach (docker network connect) is required afterwards.
+# ==============================================================================
+
+name: tectobox
 
 services:
   # Edge Gateway / Reverse Proxy with Automatic SSL and Security Headers
@@ -13,15 +33,13 @@ services:
       DOMAIN: ${DOMAIN:-}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+      - tectobox_caddy_data:/data
+      - tectobox_caddy_config:/config
     depends_on:
       api:
         condition: service_healthy
       ingress:
         condition: service_started
-    networks:
-      - internal-net
 
   postgres:
     image: postgres:16-alpine
@@ -32,7 +50,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tectobox_prod_secret}
       POSTGRES_DB: ${POSTGRES_DB:-tectobox}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - tectobox_pgdata:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
       - ./postgres/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql
     healthcheck:
@@ -40,23 +58,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - internal-net
 
   redis:
     image: redis:7-alpine
     container_name: tectobox-prod-redis
     restart: unless-stopped
     volumes:
-      - redisdata:/data
+      - tectobox_redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-tectobox_redis_secret}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-tectobox_redis_secret}
-    networks:
-      - internal-net
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -67,18 +81,16 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-tectobox_rabbit_secret}
       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -rabbitmq_management load_definitions "/etc/rabbitmq/definitions.json"
     volumes:
-      - rabbitmqdata:/var/lib/rabbitmq
+      - tectobox_rabbitmqdata:/var/lib/rabbitmq
       - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - internal-net
 
   ai:
-    image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-ai:${IMAGE_TAG:-latest}
+    image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-ai:${IMAGE_TAG}
     build:
       context: ..
       dockerfile: infra/Dockerfile.ai.prod
@@ -91,11 +103,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-    networks:
-      - internal-net
 
   ingress:
-    image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-ingress:${IMAGE_TAG:-latest}
+    image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-ingress:${IMAGE_TAG}
     build:
       context: ..
       dockerfile: infra/Dockerfile.ingress.prod
@@ -110,11 +120,9 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-    networks:
-      - internal-net
 
   api:
-    image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-api:${IMAGE_TAG:-latest}
+    image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-api:${IMAGE_TAG}
     build:
       context: ..
       dockerfile: infra/Dockerfile.api.prod
@@ -146,11 +154,9 @@ services:
         condition: service_healthy
       ai:
         condition: service_healthy
-    networks:
-      - internal-net
 
   workers:
-    image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-workers:${IMAGE_TAG:-latest}
+    image: ghcr.io/${IMAGE_REPO_OWNER:-th3urbanguy}/tectobox-workers:${IMAGE_TAG}
     build:
       context: ..
       dockerfile: infra/Dockerfile.workers.prod
@@ -162,23 +168,27 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-tectobox}:${RABBITMQ_PASS:-tectobox_rabbit_secret}@rabbitmq:5672/
       SESSION_DIR: /data/sessions
     volumes:
-      - sessiondata:/data/sessions
+      - infra_sessiondata:/data/sessions
     depends_on:
       redis:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    networks:
-      - internal-net
 
 networks:
-  internal-net:
-    driver: bridge
+  default:
+    name: tectobox_internal-net
 
 volumes:
-  pgdata:
-  redisdata:
-  rabbitmqdata:
-  sessiondata:
-  caddy_data:
-  caddy_config:
+  tectobox_pgdata:
+    external: true
+  tectobox_redisdata:
+    external: true
+  tectobox_rabbitmqdata:
+    external: true
+  infra_sessiondata:
+    external: true
+  tectobox_caddy_data:
+    external: true
+  tectobox_caddy_config:
+    external: true

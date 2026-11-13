@@ -28,7 +28,7 @@ This document establishes the official enterprise production standards, security
 | **7** | **Database Indexing & Caching** | Composite indexes on tenant and status fields, cursor pagination, redis caching | `infra/postgres/schema.sql`, query bounds | **Enforced** |
 | **8** | **Chaos & Stress Proofing** | Malformed payloads, 0-byte files, race conditions, idempotent message queues | `services/workers`, `tests/` matrix | **Enforced** |
 | **9** | **Observability & PII Redaction** | Structured JSON logging, automatic masking of tokens, passwords, and PII | `services/api/src/common/logger/logger.service.ts` | **Enforced** |
-| **10** | **Release & Production Packaging** | Non-root containers, healthchecks, Caddy security headers, automated CI/CD | `docker-compose.yml`, `.github/workflows` | **Enforced** |
+| **10** | **Release & Production Packaging** | Non-root containers, healthchecks, Caddy security headers, automated CI/CD | `infra/docker-compose.prod.yml`, `.github/workflows` | **Enforced** |
 
 ---
 
