@@ -23,10 +23,10 @@ import { RequireFeature } from '../licensing/feature.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
+import { metaOAuthState } from '../meta/meta.controller.js';
 
 const META_GRAPH = 'v21.0';
 const META_SCOPES = 'pages_show_list,pages_messaging,pages_manage_metadata,instagram_basic,instagram_manage_messages';
-const pendingMetaOAuth = new Map<string, { clientId: number; createdAt: number }>();
 const pendingMetaPick = new Map<string, { clientId: number; pages: any[]; createdAt: number }>();
 
 function escHtml(s: any): string {
@@ -319,7 +319,7 @@ export class ConnectorsController {
       return { error: 'META_APP_ID is not configured on the server' };
     }
     const state = `${targetClient}.${randomBytes(10).toString('hex')}`;
-    pendingMetaOAuth.set(state, { clientId: targetClient, createdAt: Date.now() });
+    metaOAuthState.setState(state, targetClient);
 
     const redirectUri = `${req.protocol}://${req.get('host')}/api/meta/oauth/callback`;
     const url =
@@ -337,13 +337,12 @@ export class ConnectorsController {
     @Req() req: Request,
     @Res() res: Response
   ) {
-    const pending = pendingMetaOAuth.get(state);
+    const pending = metaOAuthState.consumeState(state);
     if (!code || !pending) {
       return res
         .status(400)
         .send('<h3>Invalid or expired connection session.</h3><p>Please start again from the Connectors tab.</p>');
     }
-    pendingMetaOAuth.delete(state);
 
     const redirectUri = `${req.protocol}://${req.get('host')}/api/meta/oauth/callback`;
     try {

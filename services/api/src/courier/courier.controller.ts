@@ -3,37 +3,25 @@ import { TenantGuard } from '../tenant/tenant.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
+import { CourierService } from './courier.service.js';
 
 @Controller('api')
 @UseGuards(TenantGuard)
 export class CourierController {
-  constructor(@Inject(DB_POOL) private readonly pool: pg.Pool) {}
+  private readonly courierService: CourierService;
+
+  constructor(@Inject(DB_POOL) private readonly pool: pg.Pool) {
+    this.courierService = new CourierService(pool);
+  }
 
   @Get('courier/config')
   async getCourierConfig(@CurrentTenant() tenantId: number) {
-    const res = await this.pool.query('SELECT courier_config_json FROM clients WHERE id = $1', [tenantId]);
-    if (!res.rows.length) return {};
-    try {
-      return JSON.parse(res.rows[0].courier_config_json || '{}');
-    } catch {
-      return {};
-    }
+    return this.courierService.getMaskedConfig(tenantId);
   }
 
   @Post('courier/config')
   async saveCourierConfig(@CurrentTenant() tenantId: number, @Body() body: any) {
-    const config = {
-      provider: body.provider || 'steadfast',
-      steadfast_api_key: String(body.steadfast_api_key || '').trim(),
-      steadfast_secret_key: String(body.steadfast_secret_key || '').trim(),
-      pathao_client_id: String(body.pathao_client_id || '').trim(),
-      pathao_client_secret: String(body.pathao_client_secret || '').trim(),
-      auto_send_tracking_sms: body.auto_send_tracking_sms !== false,
-      default_delivery_charge_inside: Number(body.default_delivery_charge_inside || 60),
-      default_delivery_charge_outside: Number(body.default_delivery_charge_outside || 120),
-    };
-
-    await this.pool.query('UPDATE clients SET courier_config_json = $1 WHERE id = $2', [JSON.stringify(config), tenantId]);
+    const config = await this.courierService.saveConfig(tenantId, body);
     return { ok: true, config };
   }
 
@@ -58,13 +46,13 @@ export class CourierController {
     }
     const phone = digits.slice(-11);
 
-    // 1. Check local order history across all clients
+    // 1. Check local order history scoped to requesting tenant
     const localRes = await this.pool.query(
       `SELECT status, count(*) as cnt
        FROM orders
-       WHERE customer_phone LIKE '%' || $1
+       WHERE client_id = $1 AND customer_phone LIKE '%' || $2
        GROUP BY status`,
-      [phone]
+      [tenantId, phone]
     );
 
     let delivered = 0;
@@ -83,9 +71,7 @@ export class CourierController {
     const totalOrders = delivered + returned + cancelled + pending;
 
     // 2. Check Steadfast Live API if credentials exist
-    const clientRow = await this.pool.query('SELECT courier_config_json FROM clients WHERE id = $1', [tenantId]);
-    let cfg: any = {};
-    try { cfg = JSON.parse(clientRow.rows[0]?.courier_config_json || '{}'); } catch {}
+    const cfg = await this.courierService.getDecryptedConfig(tenantId);
 
     if (cfg.steadfast_api_key && cfg.steadfast_secret_key) {
       try {
@@ -162,9 +148,7 @@ export class CourierController {
     const note = String(body.note || `Order #${order.id}`).trim();
 
     // Check credentials
-    const clientRow = await this.pool.query('SELECT name, courier_config_json FROM clients WHERE id = $1', [tenantId]);
-    let cfg: any = {};
-    try { cfg = JSON.parse(clientRow.rows[0]?.courier_config_json || '{}'); } catch {}
+    const cfg = await this.courierService.getDecryptedConfig(tenantId);
 
     let consignmentId = '';
     let trackingCode = '';

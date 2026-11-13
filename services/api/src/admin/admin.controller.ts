@@ -1,12 +1,13 @@
-import { Controller, Get, Post, Patch, Delete, Put, Body, Param, Query, Req, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Put, Body, Param, Query, Req, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException, NotImplementedException, UnauthorizedException } from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { AdminGuard } from '../auth/admin.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import crypto from 'crypto';
 import { DB_POOL } from '../database/database.module.js';
-import { hashPassword } from '../auth/password.util.js';
+import { hashPassword, verifyPassword } from '../auth/password.util.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../auth/totp.util.js';
+import { encrypt, decrypt, isEncrypted } from '../common/crypto.js';
 import { LicensingService } from '../licensing/licensing.service.js';
 
 @Controller('api')
@@ -354,7 +355,7 @@ export class AdminController {
 
   @Post('admin/notify')
   async sendNotification(@Body() body: any) {
-    return { ok: true, sent: 1, message: 'Notification broadcasted' };
+    throw new NotImplementedException('Notification broadcasting is not implemented');
   }
 
   @Get('admin/clients/:id/ai-budget')
@@ -453,8 +454,10 @@ export class AdminController {
   }
 
   @Get('admin/totp/status')
-  async getTotpStatus() {
-    const row = await this.pool.query('SELECT enabled, secret_enc FROM admin_totp WHERE user_id = 1');
+  async getTotpStatus(@Req() req: any) {
+    const userId = req?.user?.id;
+    if (!userId) throw new UnauthorizedException('Authentication required');
+    const row = await this.pool.query('SELECT enabled, secret_enc FROM admin_totp WHERE user_id = $1', [userId]);
     const r = row.rows[0];
     return {
       enabled: Boolean(r?.enabled),
@@ -463,36 +466,77 @@ export class AdminController {
   }
 
   @Post('admin/totp/setup')
-  async setupTotp(@Body() body: { password?: string }) {
+  async setupTotp(@Req() req: any, @Body() body: { password?: string }) {
+    const userId = req?.user?.id;
+    if (!userId) throw new UnauthorizedException('Authentication required');
+    if (!body?.password) {
+      throw new BadRequestException('Password confirmation is required');
+    }
+    const uRes = await this.pool.query('SELECT password_hash, username FROM users WHERE id = $1', [userId]);
+    const user = uRes.rows[0];
+    if (!user) throw new NotFoundException('User not found');
+    const valid = await verifyPassword(body.password, user.password_hash);
+    if (!valid) {
+      throw new BadRequestException('Incorrect password');
+    }
+
     const secret = generateSecret(20);
+    const encryptedSecret = encrypt(secret);
     await this.pool.query(
       `INSERT INTO admin_totp (user_id, secret_enc, enabled, created_at)
-       VALUES (1, $1, false, NOW())
+       VALUES ($1, $2, false, NOW())
        ON CONFLICT (user_id) DO UPDATE SET secret_enc = EXCLUDED.secret_enc, enabled = false`,
-      [secret]
+      [userId, encryptedSecret]
     );
     return {
       secret,
-      otpauth_url: otpauthUrl(secret, 'admin@tectobox.com'),
+      otpauth_url: otpauthUrl(secret, user.username || 'admin@tectobox.com'),
     };
   }
 
   @Post('admin/totp/enable')
-  async enableTotp(@Body() body: { token: string }) {
-    const row = await this.pool.query('SELECT secret_enc FROM admin_totp WHERE user_id = 1');
+  async enableTotp(@Req() req: any, @Body() body: { token: string }) {
+    const userId = req?.user?.id;
+    if (!userId) throw new UnauthorizedException('Authentication required');
+    const row = await this.pool.query('SELECT secret_enc FROM admin_totp WHERE user_id = $1', [userId]);
     const r = row.rows[0];
     if (!r?.secret_enc) throw new BadRequestException('TOTP setup required first');
-    const ok = verifyTotp(r.secret_enc, body?.token);
+
+    const storedSecret = r.secret_enc;
+    const isEnc = isEncrypted(storedSecret);
+    const secret = isEnc ? decrypt(storedSecret) : storedSecret;
+
+    const ok = verifyTotp(secret, body?.token);
     if (!ok) {
       throw new BadRequestException('Invalid code — check your authenticator app clock.');
     }
-    await this.pool.query('UPDATE admin_totp SET enabled = true WHERE user_id = 1');
+
+    // Migrate-on-read: if an existing stored secret is not encrypted (no version prefix), encrypt it on first successful use.
+    if (!isEnc) {
+      const newlyEncrypted = encrypt(secret);
+      await this.pool.query('UPDATE admin_totp SET enabled = true, secret_enc = $1 WHERE user_id = $2', [newlyEncrypted, userId]);
+    } else {
+      await this.pool.query('UPDATE admin_totp SET enabled = true WHERE user_id = $1', [userId]);
+    }
     return { ok: true, enabled: true };
   }
 
   @Post('admin/totp/disable')
-  async disableTotp() {
-    await this.pool.query('DELETE FROM admin_totp WHERE user_id = 1');
+  async disableTotp(@Req() req: any, @Body() body: { password?: string }) {
+    const userId = req?.user?.id;
+    if (!userId) throw new UnauthorizedException('Authentication required');
+    if (!body?.password) {
+      throw new BadRequestException('Password confirmation is required');
+    }
+    const uRes = await this.pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+    const user = uRes.rows[0];
+    if (!user) throw new NotFoundException('User not found');
+    const valid = await verifyPassword(body.password, user.password_hash);
+    if (!valid) {
+      throw new BadRequestException('Incorrect password');
+    }
+
+    await this.pool.query('DELETE FROM admin_totp WHERE user_id = $1', [userId]);
     return { ok: true, enabled: false };
   }
 }
