@@ -133,10 +133,11 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async getQrCode(clientId: number, slot: string): Promise<string | null> {
+  async getQrCode(clientId: number, slot: string, channel: string = 'whatsapp'): Promise<string | null> {
     if (this.redis) {
       try {
-        return await this.redis.get(`wa:qr:${clientId}:${slot}`);
+        const prefix = channel === 'telegram' ? 'tg:qr' : 'wa:qr';
+        return await this.redis.get(`${prefix}:${clientId}:${slot}`);
       } catch {
         return null;
       }
@@ -213,6 +214,72 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       return true;
     } catch (err: any) {
       console.warn('[events] Failed to publish WhatsApp connect command:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Telegram connect trigger (channel.connect.telegram).
+   * Durable routing key carrying clientId, slot, channel row id, and label.
+   */
+  async publishChannelConnectTelegram(
+    clientId: number,
+    slot: string,
+    channelRowId?: number,
+    label?: string
+  ): Promise<boolean> {
+    if (!this.isConnected || !this.mq) {
+      console.warn('[events] RabbitMQ not connected, cannot publish Telegram connect command');
+      return false;
+    }
+    try {
+      const channel = this.mq.getChannel();
+      if (channel) {
+        await channel.assertQueue('channel.connect.telegram', { durable: true });
+        await channel.bindQueue('channel.connect.telegram', 'tectobox.events', 'channel.connect.telegram');
+      }
+      await this.mq.publish('channel.connect.telegram', {
+        clientId,
+        slot,
+        channelRowId,
+        id: channelRowId,
+        label,
+      });
+      return true;
+    } catch (err: any) {
+      console.warn('[events] Failed to publish Telegram connect command:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Disconnect command (channel.disconnect.<channel>).
+   * Tells worker to destroy live session/socket and wipe auth credentials.
+   */
+  async publishChannelDisconnect(
+    channelName: string,
+    clientId: number,
+    slot: string
+  ): Promise<boolean> {
+    if (!this.isConnected || !this.mq) {
+      console.warn(`[events] RabbitMQ not connected, cannot publish disconnect for ${channelName}`);
+      return false;
+    }
+    try {
+      const routingKey = `channel.disconnect.${channelName}`;
+      const channel = this.mq.getChannel();
+      if (channel) {
+        await channel.assertQueue(routingKey, { durable: true });
+        await channel.bindQueue(routingKey, 'tectobox.events', routingKey);
+      }
+      await this.mq.publish(routingKey, {
+        clientId,
+        channel: channelName,
+        slot,
+      });
+      return true;
+    } catch (err: any) {
+      console.warn(`[events] Failed to publish disconnect for ${channelName}:`, err.message);
       return false;
     }
   }

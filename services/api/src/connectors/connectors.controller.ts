@@ -24,6 +24,7 @@ import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
 import { metaOAuthState } from '../meta/meta.controller.js';
+import { ConversationsController } from '../conversations/conversations.controller.js';
 
 const META_GRAPH = 'v21.0';
 const META_SCOPES = 'pages_show_list,pages_messaging,pages_manage_metadata,instagram_basic,instagram_manage_messages';
@@ -102,9 +103,20 @@ export class ConnectorsController {
         })
     );
 
-    const tgAccounts = sessions.rows
-      .filter((s) => s.channel === 'telegram')
-      .map((s) => ({ slot: s.slot, status: s.status, label: s.label, aiPaused: s.ai_paused }));
+    const tgAccounts = await Promise.all(
+      sessions.rows
+        .filter((s) => s.channel === 'telegram')
+        .map(async (s) => {
+          const qr = await this.eventsService.getQrCode(targetClient, s.slot, 'telegram');
+          return {
+            slot: s.slot,
+            status: s.status,
+            label: s.label,
+            aiPaused: s.ai_paused,
+            qr: qr || undefined,
+          };
+        })
+    );
 
     const metaPages = await this.pool.query(
       'SELECT channel, page_id, page_name, ig_username, status FROM meta_pages WHERE client_id = $1',
@@ -220,25 +232,41 @@ export class ConnectorsController {
     @Body() body: any
   ) {
     const targetClient = tenantId || clientId;
-    const slot = body.slot || 'default';
+    const slot = body?.slot || 'default';
+    const label = body?.label !== undefined ? String(body.label).trim() : null;
 
-    await this.pool.query(
-      `INSERT INTO channel_sessions (client_id, channel, slot, status, updated_at)
-       VALUES ($1, $2, $3, 'connecting', NOW())
+    const row = await this.pool.query(
+      `INSERT INTO channel_sessions (client_id, channel, slot, status, label, updated_at)
+       VALUES ($1, $2, $3, 'connecting', $4, NOW())
        ON CONFLICT(client_id, channel, slot) DO UPDATE
-       SET status = 'connecting', updated_at = NOW()`,
-      [targetClient, channel, slot]
+       SET status = 'connecting',
+           label = COALESCE(EXCLUDED.label, channel_sessions.label),
+           updated_at = NOW()
+       RETURNING id, client_id, channel, slot, label, status`,
+      [targetClient, channel, slot, label]
     );
+    const rowId = row?.rows?.[0]?.id;
+    const finalLabel = row?.rows?.[0]?.label ?? label;
 
-    // RC5: the row above only records intent — for WhatsApp actually start
-    // the session. The worker creates the Baileys socket, which emits the
-    // QR (or reconnects the saved pairing silently). Other channels keep
-    // the old behaviour (row only) until their own connect is built.
+    // RC5 & RC6: start real channel session in worker.
     if (channel === 'whatsapp') {
       const triggered = await this.eventsService.publishChannelConnect(targetClient, slot);
       if (!triggered) {
         console.warn(
           `[connectors] WhatsApp connect for client ${targetClient}:${slot} did not reach the worker (broker down?) — row stays 'connecting'; re-tap Connect to retry`
+        );
+      }
+    } else if (channel === 'telegram') {
+      // channel.connect.telegram: trigger Telegram worker session & QR flow
+      const triggered = await this.eventsService.publishChannelConnectTelegram(
+        targetClient,
+        slot,
+        rowId,
+        finalLabel
+      );
+      if (!triggered) {
+        console.warn(
+          `[connectors] Telegram connect (channel.connect.telegram) for client ${targetClient}:${slot} did not reach the worker (broker down?) — row stays 'connecting'; re-tap Connect to retry`
         );
       }
     }
@@ -255,7 +283,17 @@ export class ConnectorsController {
     @Body() body: any
   ) {
     const targetClient = tenantId || clientId;
-    const slot = body.slot || 'default';
+    const slot = body?.slot || 'default';
+
+    if (channel === 'whatsapp' || channel === 'telegram') {
+      const triggered = await this.eventsService.publishChannelDisconnect(channel, targetClient, slot);
+      if (!triggered) {
+        console.warn(
+          `[connectors] Disconnect for client ${targetClient}:${channel}:${slot} did not reach worker (broker down?)`
+        );
+      }
+      return { ok: true, channel, slot, status: 'disconnecting' };
+    }
 
     await this.pool.query(
       `UPDATE channel_sessions
@@ -265,6 +303,18 @@ export class ConnectorsController {
     );
 
     return { ok: true, channel, slot, status: 'disconnected' };
+  }
+
+  @Delete('clients/:clientId/conversations/:conversationId')
+  @UseGuards(TenantGuard)
+  async deleteConversation(
+    @CurrentTenant() tenantId: number,
+    @Param('clientId', ParseIntPipe) clientId: number,
+    @Param('conversationId', ParseIntPipe) conversationId: number,
+    @Req() req: any
+  ) {
+    const ctrl = new ConversationsController(this.pool);
+    return ctrl.deleteConversation(tenantId, clientId, conversationId, req);
   }
 
   @Post('clients/:clientId/connectors/:channel/ai-pause')
