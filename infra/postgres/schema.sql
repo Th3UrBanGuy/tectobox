@@ -200,6 +200,7 @@ CREATE TABLE users (
     role VARCHAR(50) NOT NULL DEFAULT 'client',
     client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
     active BOOLEAN NOT NULL DEFAULT true,
+    token_version INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

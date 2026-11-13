@@ -25,26 +25,7 @@ export class TenantGuard implements CanActivate {
       const authHeader = request.headers?.authorization;
       if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.split(' ')[1];
-        // C4: JWT secret comes from the environment only — no dev fallback.
-        const jwtSecret = process.env.JWT_SECRET;
-        if (!jwtSecret) {
-          throw new UnauthorizedException('Authentication secret not configured');
-        }
-
-        let decoded: any;
-        try {
-          decoded = jwt.verify(token, jwtSecret);
-        } catch {
-          throw new UnauthorizedException('Invalid or expired authentication token');
-        }
-
-        user = {
-          id: decoded.sub || decoded.id,
-          username: decoded.username,
-          role: decoded.role,
-          clientId: decoded.clientId ?? null,
-        };
-        request.user = user;
+        return this.validateBearerToken(token, request);
       } else {
         const sid = request.cookies?.tb_session || request.headers?.cookie?.match(/tb_session=([^;]+)/)?.[1];
         if (sid && this.pool) {
@@ -56,6 +37,52 @@ export class TenantGuard implements CanActivate {
     if (!user) {
       throw new UnauthorizedException('Authentication required');
     }
+
+    return this.assignTenant(user, request);
+  }
+
+  private async validateBearerToken(token: string, request: any): Promise<boolean> {
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      throw new UnauthorizedException('Authentication secret not configured');
+    }
+
+    let decoded: any;
+    try {
+      // Pin algorithm explicitly to HS256 (L8)
+      decoded = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] });
+    } catch {
+      throw new UnauthorizedException('Invalid or expired authentication token');
+    }
+
+    const userId = decoded.sub || decoded.id;
+    if (!userId) {
+      throw new UnauthorizedException('Invalid or expired authentication token');
+    }
+
+    // Session revocation check (H3): verify token_version matches DB row
+    if (this.pool) {
+      const userRes = await this.pool.query(
+        'SELECT id, username, role, client_id, active, token_version FROM users WHERE id = $1 LIMIT 1',
+        [userId]
+      );
+      if (userRes.rows.length === 0 || userRes.rows[0].active === false) {
+        throw new UnauthorizedException('Invalid or expired authentication token');
+      }
+      const dbVersion = userRes.rows[0].token_version ?? 1;
+      const tokenVersion = decoded.token_version ?? decoded.tokenVersion;
+      if (tokenVersion === undefined || tokenVersion !== dbVersion) {
+        throw new UnauthorizedException('Token revoked');
+      }
+    }
+
+    const user: AuthenticatedUser = {
+      id: userId,
+      username: decoded.username,
+      role: decoded.role,
+      clientId: decoded.clientId ?? null,
+    };
+    request.user = user;
 
     return this.assignTenant(user, request);
   }

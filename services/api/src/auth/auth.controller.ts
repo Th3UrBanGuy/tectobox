@@ -61,7 +61,7 @@ export class AuthController {
 
     // Query user in PostgreSQL case-insensitively
     const userResult = await this.pool.query(
-      'SELECT id, username, role, client_id, password_hash, active FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1',
+      'SELECT id, username, role, client_id, password_hash, active, token_version FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1',
       [username.trim()]
     );
 
@@ -160,16 +160,18 @@ export class AuthController {
       );
     }
 
-    // Include strictly necessary claims with explicit expiration
+    // Include strictly necessary claims with explicit expiration and pinned algorithm
     const token = jwt.sign(
       {
         sub: dbUser.id,
         username: dbUser.username,
         role: dbUser.role,
         clientId: dbUser.client_id,
+        token_version: dbUser.token_version ?? 1,
+        tokenVersion: dbUser.token_version ?? 1,
       },
       jwtSecret,
-      { expiresIn: '24h' }
+      { expiresIn: '24h', algorithm: 'HS256' }
     );
 
     return {
@@ -264,7 +266,7 @@ export class AuthController {
     const userId = req.user?.id;
 
     const userRes = await this.pool.query(
-      'SELECT id, username, role, password_hash, client_id FROM users WHERE id = $1 LIMIT 1',
+      'SELECT id, username, role, password_hash, client_id, token_version FROM users WHERE id = $1 LIMIT 1',
       [userId]
     );
     if (userRes.rows.length === 0) throw new UnauthorizedException('User not found');
@@ -305,19 +307,33 @@ export class AuthController {
 
     // 3. Handle password change
     let updatedHash = dbUser.password_hash;
+    let passwordChanged = false;
     if (new_password) {
       const cleanPassword = String(new_password).trim();
-      if (cleanPassword.length < 6) {
-        throw new BadRequestException('নতুন পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে। (Password must be at least 6 characters)');
+      if (cleanPassword.length < 12) {
+        throw new BadRequestException('নতুন পাসওয়ার্ড কমপক্ষে ১২ অক্ষরের হতে হবে। (Password must be at least 12 characters)');
       }
       updatedHash = await hashPassword(cleanPassword);
+      passwordChanged = true;
     }
 
+    let newTokenVersion = dbUser.token_version ?? 1;
+
     // 4. Save updates to database
-    await this.pool.query(
-      'UPDATE users SET username = $1, password_hash = $2 WHERE id = $3',
-      [updatedUsername, updatedHash, userId]
-    );
+    if (passwordChanged) {
+      newTokenVersion = (dbUser.token_version ?? 1) + 1;
+      await this.pool.query(
+        'UPDATE users SET username = $1, password_hash = $2, token_version = $3 WHERE id = $4',
+        [updatedUsername, updatedHash, newTokenVersion, userId]
+      );
+      // Invalidate existing cookie sessions
+      await this.pool.query('DELETE FROM sessions WHERE user_id = $1', [userId]).catch(() => {});
+    } else {
+      await this.pool.query(
+        'UPDATE users SET username = $1, password_hash = $2 WHERE id = $3',
+        [updatedUsername, updatedHash, userId]
+      );
+    }
 
     // Issue refreshed token (C4: env-only JWT secret, fail closed).
     const jwtSecret = process.env.JWT_SECRET;
@@ -330,9 +346,11 @@ export class AuthController {
         username: updatedUsername,
         role: dbUser.role,
         clientId: dbUser.client_id,
+        token_version: newTokenVersion,
+        tokenVersion: newTokenVersion,
       },
       jwtSecret,
-      { expiresIn: '24h' }
+      { expiresIn: '24h', algorithm: 'HS256' }
     );
 
     return {
@@ -450,11 +468,6 @@ export class AuthController {
     }
 
     return { ok: true, success: true };
-  }
-
-  @Get('captcha')
-  getCaptcha() {
-    return { token: 'bypass', svg: '<svg></svg>' };
   }
 }
 

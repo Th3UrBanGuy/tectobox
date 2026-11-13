@@ -8,6 +8,8 @@ import { AppModule } from './app.module.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { StructuredLogger } from './common/logger/logger.service.js';
 import { watchdogMiddleware } from './common/watchdog/watchdog.middleware.js';
+import { corsOriginCallback } from './auth/cors.util.js';
+import { createRateLimitMiddleware } from './auth/rate-limit.middleware.js';
 
 async function bootstrap() {
   const logger = new StructuredLogger();
@@ -18,7 +20,9 @@ async function bootstrap() {
   app.useGlobalFilters(new AllExceptionsFilter());
   app.use(cookieParser());
   app.enableCors({
-    origin: true,
+    origin: (origin, callback) => {
+      corsOriginCallback(origin, callback);
+    },
     credentials: true,
   });
 
@@ -75,62 +79,8 @@ async function bootstrap() {
     })
   );
 
-  // In-memory sliding window token bucket rate limiter & brute force guard
-  const ipBuckets = new Map<string, { tokens: number; lastRefill: number; failedAuth: number; blockedUntil?: number }>();
-  expressApp.use((req: any, res: any, next: any) => {
-    // Only rate-limit /api/ endpoints; exempt all static assets, UI routes, and health checks
-    if (!req.path.startsWith('/api/') || req.path === '/api/health') {
-      return next();
-    }
-
-    const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
-    const now = Date.now();
-    let entry = ipBuckets.get(ip);
-    if (!entry) {
-      entry = { tokens: 5000, lastRefill: now, failedAuth: 0 };
-      ipBuckets.set(ip, entry);
-    }
-
-    // Check brute force block
-    if (entry.blockedUntil && now < entry.blockedUntil) {
-      return res.status(429).json({
-        statusCode: 429,
-        error: 'Too Many Requests',
-        message: 'Temporarily blocked due to repeated failed attempts. Please retry later.',
-      });
-    }
-
-    // Token bucket refill: 5000 burst, 2000 tokens/second
-    const elapsedSec = (now - entry.lastRefill) / 1000;
-    entry.tokens = Math.min(5000, entry.tokens + elapsedSec * 2000);
-    entry.lastRefill = now;
-
-    if (entry.tokens >= 1) {
-      entry.tokens -= 1;
-      // Track auth failures for brute force prevention
-      if (req.path === '/api/auth/login' && req.method === 'POST') {
-        const origSend = res.send;
-        res.send = function (body: any) {
-          if (res.statusCode === 401 || res.statusCode === 400) {
-            entry!.failedAuth++;
-            if (entry!.failedAuth >= 10) {
-              entry!.blockedUntil = Date.now() + 15 * 60 * 1000; // 15 min block
-            }
-          } else if (res.statusCode === 200) {
-            entry!.failedAuth = 0;
-          }
-          return origSend.apply(this, arguments as any);
-        };
-      }
-      return next();
-    }
-
-    return res.status(429).json({
-      statusCode: 429,
-      error: 'Too Many Requests',
-      message: 'Rate limit exceeded. System is operating under load shedding.',
-    });
-  });
+  // Redis-backed global rate limiter (300 req/min per IP) & brute force guard
+  expressApp.use(createRateLimitMiddleware());
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
