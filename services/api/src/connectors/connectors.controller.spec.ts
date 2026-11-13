@@ -58,36 +58,73 @@ describe('ConnectorsController.getWebhookUrls', () => {
   });
 });
 
-describe('ConnectorsController.connectChannel — RC5 WhatsApp trigger', () => {
+describe('ConnectorsController.connectChannel — RC5 & RC6 triggers', () => {
   function fakePool() {
-    const queries: string[] = [];
+    const queries: { sql: string; params?: any[] }[] = [];
     return {
       queries,
-      query: async (sql: string) => {
-        queries.push(sql);
-        return { rows: [] };
+      query: async (sql: string, params?: any[]) => {
+        queries.push({ sql, params });
+        return { rows: [{ id: 42, label: params?.[3] }] };
       },
     } as any;
   }
 
   it('whatsapp: upserts the row AND publishes a connect command to the worker', async () => {
     const pool = fakePool();
-    const events = { publishChannelConnect: vi.fn(async () => true) } as any;
+    const events = {
+      publishChannelConnect: vi.fn(async () => true),
+      publishChannelConnectTelegram: vi.fn(async () => true),
+    } as any;
     const ctrl = new ConnectorsController(pool, events);
     const res: any = await ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'b' });
     expect(res).toEqual({ ok: true, channel: 'whatsapp', slot: 'b', status: 'connecting' });
-    expect(pool.queries.some((q: string) => q.includes('INSERT INTO channel_sessions'))).toBe(true);
+    expect(pool.queries.some((q) => q.sql.includes('INSERT INTO channel_sessions'))).toBe(true);
     expect(events.publishChannelConnect).toHaveBeenCalledTimes(1);
     expect(events.publishChannelConnect).toHaveBeenCalledWith(69, 'b');
   });
 
-  it('telegram: row only, no worker trigger (Telegram connect not built yet)', async () => {
+  it('telegram: upserts the row AND publishes a connect command to Telegram worker', async () => {
     const pool = fakePool();
-    const events = { publishChannelConnect: vi.fn(async () => true) } as any;
+    const events = {
+      publishChannelConnect: vi.fn(async () => true),
+      publishChannelConnectTelegram: vi.fn(async () => true),
+    } as any;
     const ctrl = new ConnectorsController(pool, events);
-    const res: any = await ctrl.connectChannel(69, 69, 'telegram', { slot: 'hh' });
-    expect(res.status).toBe('connecting');
-    expect(events.publishChannelConnect).not.toHaveBeenCalled();
+    const res: any = await ctrl.connectChannel(69, 69, 'telegram', { slot: 'hh', label: 'Primary TG' });
+    expect(res).toEqual({ ok: true, channel: 'telegram', slot: 'hh', status: 'connecting' });
+    expect(pool.queries.some((q) => q.sql.includes('INSERT INTO channel_sessions'))).toBe(true);
+    expect(events.publishChannelConnectTelegram).toHaveBeenCalledTimes(1);
+    expect(events.publishChannelConnectTelegram).toHaveBeenCalledWith(69, 'hh', 42, 'Primary TG');
+  });
+
+  it('stores label in channel_sessions upsert when provided', async () => {
+    const pool = fakePool();
+    const events = {
+      publishChannelConnect: vi.fn(async () => true),
+      publishChannelConnectTelegram: vi.fn(async () => true),
+    } as any;
+    const ctrl = new ConnectorsController(pool, events);
+    await ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'main', label: 'Shop WA' });
+    const insertQuery = pool.queries.find((q) => q.sql.includes('INSERT INTO channel_sessions'));
+    expect(insertQuery).toBeDefined();
+    expect(insertQuery?.params?.[3]).toBe('Shop WA');
+  });
+
+  it('disconnect publishes channel.disconnect command for whatsapp and telegram', async () => {
+    const pool = fakePool();
+    const events = {
+      publishChannelDisconnect: vi.fn(async () => true),
+    } as any;
+    const ctrl = new ConnectorsController(pool, events);
+
+    const waRes: any = await ctrl.disconnectChannel(69, 69, 'whatsapp', { slot: 'b' });
+    expect(waRes).toEqual({ ok: true, channel: 'whatsapp', slot: 'b', status: 'disconnecting' });
+    expect(events.publishChannelDisconnect).toHaveBeenCalledWith('whatsapp', 69, 'b');
+
+    const tgRes: any = await ctrl.disconnectChannel(69, 69, 'telegram', { slot: 'hh' });
+    expect(tgRes).toEqual({ ok: true, channel: 'telegram', slot: 'hh', status: 'disconnecting' });
+    expect(events.publishChannelDisconnect).toHaveBeenCalledWith('telegram', 69, 'hh');
   });
 
   it('broker down: still returns ok (row stays connecting; re-tap retries)', async () => {

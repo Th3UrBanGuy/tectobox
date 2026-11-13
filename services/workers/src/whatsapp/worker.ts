@@ -1,22 +1,33 @@
 import { RabbitMQClient } from '@tectonic/messaging';
 import { RedisCoordinator } from '@tectonic/coordination';
 import { Redis } from 'ioredis';
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, ConnectionState } from '@whiskeysockets/baileys';
-import { pacedSend, clearPacerQueue } from './pacer.js';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+// @ts-ignore
+import { pacedSend, clearPacerQueue } from './pacer.ts';
 import * as path from 'path';
+import * as fs from 'fs';
 import QRCode from 'qrcode';
 
-export async function startWhatsappWorker() {
-  const mq = new RabbitMQClient({
+export interface WhatsappWorkerDeps {
+  mq?: any;
+  redis?: any;
+  coordinator?: any;
+  initialSockets?: Map<string, { sock: any; token: number }>;
+}
+
+export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
+  const mq = deps.mq || new RabbitMQClient({
     url: process.env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/',
     exchange: 'tectobox.events'
   });
-  await mq.connect();
+  if (!deps.mq) {
+    await mq.connect();
+  }
 
-  const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-  const coordinator = new RedisCoordinator(redis);
+  const redis = deps.redis || new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+  const coordinator = deps.coordinator || new RedisCoordinator(redis);
 
-  const sockets = new Map<string, { sock: any; token: number }>();
+  const sockets = deps.initialSockets || new Map<string, { sock: any; token: number }>();
   let consumerTag: string | null = null;
   const channel = mq.getChannel();
 
@@ -341,6 +352,77 @@ export async function startWhatsappWorker() {
         // Drop, don't requeue: a connect command is cheap to re-issue by
         // re-tapping Connect, and a persistent failure would poison-loop.
         console.error('[whatsapp] connect command failed:', err);
+        channel.ack(msg);
+      }
+    });
+
+    // Disconnect commands from API (channel.disconnect.whatsapp).
+    // Destroys the live socket, wipes session data and publishes status disconnected.
+    const disconnectQueue = 'channel.disconnect.whatsapp';
+    await channel.assertQueue(disconnectQueue, { durable: true });
+    await channel.bindQueue(disconnectQueue, 'tectobox.events', disconnectQueue);
+    await channel.consume(disconnectQueue, async (msg: any) => {
+      if (!msg) return;
+
+      let payload: any;
+      try {
+        payload = JSON.parse(msg.content.toString());
+      } catch (err) {
+        console.error('[whatsapp] malformed disconnect payload, dropping:', err);
+        channel.nack(msg, false, false);
+        return;
+      }
+
+      const { clientId, slot } = payload || {};
+      if (!clientId) {
+        console.warn('[whatsapp] disconnect command without clientId, dropping:', payload);
+        channel.nack(msg, false, false);
+        return;
+      }
+
+      const effectiveSlot = slot || 'default';
+      const key = `wa:${clientId}:${effectiveSlot}`;
+      const leaseKey = `lease:${key}`;
+
+      try {
+        const entry = sockets.get(key);
+        if (entry) {
+          sockets.delete(key);
+          clearPacerQueue(String(clientId), effectiveSlot, new Error(`Session disconnected for WhatsApp client ${clientId}:${effectiveSlot}`));
+          if (entry.sock) {
+            try {
+              if (typeof entry.sock.destroy === 'function') {
+                await entry.sock.destroy();
+              } else if (typeof entry.sock.end === 'function') {
+                entry.sock.end(new Error('Disconnected by user'));
+              }
+            } catch (e: any) {
+              console.error(`[whatsapp] error destroying socket for ${key}:`, e);
+            }
+          }
+          await coordinator.releaseLease(leaseKey, entry.token).catch(() => {});
+        }
+
+        // Remove auth/session data on disk and in Redis
+        const baseSessionDir = process.env.SESSION_DIR || path.join(process.cwd(), 'wa-auth');
+        const authDir = path.join(baseSessionDir, key);
+        try {
+          fs.rmSync(authDir, { recursive: true, force: true });
+        } catch (e) {}
+
+        await redis.del(`wa:qr:${clientId}:${effectiveSlot}`).catch(() => {});
+        await publishChannelStatus(String(clientId), effectiveSlot, 'disconnected');
+        await coordinator.publishEvent(`tenant:${clientId}:events`, {
+          type: 'channel_status',
+          clientId: Number(clientId),
+          channel: 'whatsapp',
+          slot: effectiveSlot,
+          status: 'disconnected',
+        });
+
+        channel.ack(msg);
+      } catch (err) {
+        console.error('[whatsapp] disconnect command failed:', err);
         channel.ack(msg);
       }
     });

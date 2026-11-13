@@ -1560,11 +1560,34 @@ function renderChatHeader(conv) {
     <button class="icon-btn" id="btn-toggle-human" title="${conv.needs_human ? 'Resolve human handover (resume AI)' : 'Flag for human attention (pause AI)'}" style="color:${conv.needs_human ? '#f59e0b' : 'var(--muted)'};">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.9-2.3l-3.4-3.85a2 2 0 0 1 3-2.65L7 15"/></svg>
     </button>
+    <button class="icon-btn" id="btn-delete-conv" title="Delete conversation" style="color:var(--muted);">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+    </button>
     <button class="icon-btn m-info" id="btn-chat-info" aria-label="Details">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>
     </button>`;
   $('btn-chat-back').onclick = closeMobileChat;
   $('btn-chat-info').onclick = () => toggleMobileDetail(!$('inbox-panes').classList.contains('m-detail-open'));
+  const btnDeleteConv = $('btn-delete-conv');
+  if (btnDeleteConv) {
+    btnDeleteConv.onclick = async () => {
+      const ok = typeof askConfirm === 'function'
+        ? await askConfirm('Delete conversation?', 'This conversation and its messages will be permanently deleted.', 'Delete', true)
+        : confirm('Delete this conversation?');
+      if (!ok) return;
+      try {
+        await api(`/api/clients/${state.clientId}/conversations/${conv.id}`, { method: 'DELETE' });
+        state.conversations = (state.conversations || []).filter(c => c.id !== conv.id);
+        state.activeId = null;
+        state.messages = [];
+        renderChatHeader(null);
+        renderConvList();
+        toast('Conversation deleted ✓');
+      } catch (e) {
+        toast('Failed to delete conversation: ' + e.message, 'err');
+      }
+    };
+  }
   const btnToggleHuman = $('btn-toggle-human');
   if (btnToggleHuman) {
     btnToggleHuman.onclick = async () => {
@@ -2385,8 +2408,8 @@ async function renderSetupChecklist() {
     ]);
     conn = c; products = p; kb = k; convs = cv;
   } catch { box.innerHTML = ''; return; }
-  const waLive = (conn.whatsapp && (conn.whatsapp.accounts || []).some(a => a.live)) || false;
-  const tgLive = (conn.telegram && (conn.telegram.accounts || []).some(a => a.live)) || false;
+  const waLive = (conn.whatsapp && ((conn.whatsapp.accounts || []).some(a => a.status === 'connected') || conn.whatsapp.status === 'connected')) || false;
+  const tgLive = (conn.telegram && ((conn.telegram.accounts || []).some(a => a.status === 'connected') || conn.telegram.status === 'connected')) || false;
   const webchatUsed = (convs || []).some(c => c.platform === 'webchat');
   const steps = [
     { done: waLive || tgLive, t: 'Connect WhatsApp or Telegram', d: 'Scan one QR code — customer messages land here.', tab: 'channels', btn: 'Connect' },

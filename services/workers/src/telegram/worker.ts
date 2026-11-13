@@ -3,22 +3,61 @@ import { RedisCoordinator } from '@tectonic/coordination';
 import { Redis } from 'ioredis';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
+import QRCode from 'qrcode';
 
-export async function startTelegramWorker() {
-  const mq = new RabbitMQClient({
+export interface TelegramWorkerDeps {
+  mq?: any;
+  redis?: any;
+  coordinator?: any;
+  createClient?: (sessionString: string, apiId: number, apiHash: string) => any;
+}
+
+export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
+  const mq = deps.mq || new RabbitMQClient({
     url: process.env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/',
     exchange: 'tectobox.events'
   });
-  await mq.connect();
+  if (!deps.mq) {
+    await mq.connect();
+  }
 
-  const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-  const coordinator = new RedisCoordinator(redis);
+  const redis = deps.redis || new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+  const coordinator = deps.coordinator || new RedisCoordinator(redis);
 
   const sessions = new Map<string, { client: TelegramClient; token: number }>();
   const leaseRenewers = new Map<string, NodeJS.Timeout>();
 
-  const getClientWithFencing = async (clientId: string, sessionString: string) => {
-    const key = `tg:${clientId}`;
+  const publishChannelStatus = async (clientId: string, slot: string, status: string) => {
+    try {
+      await mq.publish('channel.status.telegram', {
+        clientId: Number(clientId),
+        channel: 'telegram',
+        slot,
+        status,
+      });
+    } catch (e: any) {
+      console.warn('[telegram] channel status publish failed:', e.message);
+    }
+  };
+
+  const getClientWithFencing = async (clientId: string, sessionStringOrSlot?: string, explicitSlot?: string) => {
+    // Support signature: (clientId, sessionString) or (clientId, slot, sessionString)
+    let slot = 'default';
+    let sessionString = '';
+    if (explicitSlot !== undefined) {
+      slot = sessionStringOrSlot || 'default';
+      sessionString = explicitSlot || '';
+    } else if (sessionStringOrSlot) {
+      // If single optional arg, could be sessionString or slot
+      if (sessionStringOrSlot.length > 30) {
+        sessionString = sessionStringOrSlot;
+        slot = 'default';
+      } else {
+        slot = sessionStringOrSlot;
+      }
+    }
+
+    const key = slot && slot !== 'default' ? `tg:${clientId}:${slot}` : `tg:${clientId}`;
     const cached = sessions.get(key);
     if (cached) {
       const valid = await coordinator.validateLease(`lease:${key}`, cached.token);
@@ -38,10 +77,77 @@ export async function startTelegramWorker() {
     
     let client: TelegramClient;
     try {
-      client = new TelegramClient(new StringSession(sessionString), apiId, apiHash, {
-        connectionRetries: 5,
-      });
-      await client.connect();
+      if (!sessionString) {
+        sessionString = (await redis.get(`tg:session:${clientId}:${slot}`)) || '';
+      }
+      if (deps.createClient) {
+        client = deps.createClient(sessionString, apiId, apiHash);
+      } else {
+        client = new TelegramClient(new StringSession(sessionString), apiId, apiHash, {
+          connectionRetries: 5,
+        });
+      }
+      if (typeof client.connect === 'function') {
+        await client.connect();
+      }
+
+      // Check if signInUserWithQrCode is available on client
+      if (typeof (client as any).checkAuthorization === 'function') {
+        const isAuth = await (client as any).checkAuthorization();
+        if (!isAuth && typeof (client as any).signInUserWithQrCode === 'function') {
+          (client as any).signInUserWithQrCode({ apiId, apiHash }, {
+            qrCode: async ({ token: qrTok }: any) => {
+              try {
+                const qrLink = `tg://login?token=${qrTok.toString('base64url')}`;
+                const dataUrl = await QRCode.toDataURL(qrLink);
+                await redis.set(`tg:qr:${clientId}:${slot}`, dataUrl, 'EX', 120);
+                await coordinator.publishEvent(`tenant:${clientId}:events`, {
+                  type: 'qr',
+                  clientId: Number(clientId),
+                  channel: 'telegram',
+                  slot,
+                  dataUrl,
+                });
+              } catch (e: any) {
+                console.error('[telegram] failed to render QR:', e.message);
+              }
+            },
+            onError: async (err: any) => {
+              console.error('[telegram] sign-in error:', err?.message);
+              return false;
+            },
+            password: async () => {
+              throw new Error('Telegram account has 2FA enabled');
+            },
+          }).then(async () => {
+            await redis.del(`tg:qr:${clientId}:${slot}`).catch(() => {});
+            const savedStr = typeof (client.session as any)?.save === 'function' ? (client.session as any).save() : '';
+            if (savedStr) {
+              await redis.set(`tg:session:${clientId}:${slot}`, savedStr);
+            }
+            await coordinator.publishEvent(`tenant:${clientId}:events`, {
+              type: 'channel_status',
+              clientId: Number(clientId),
+              channel: 'telegram',
+              slot,
+              status: 'connected',
+            });
+            await publishChannelStatus(clientId, slot, 'connected');
+          }).catch((err: any) => {
+            console.error('[telegram] QR login failed:', err.message);
+          });
+        } else if (isAuth) {
+          await redis.del(`tg:qr:${clientId}:${slot}`).catch(() => {});
+          await coordinator.publishEvent(`tenant:${clientId}:events`, {
+            type: 'channel_status',
+            clientId: Number(clientId),
+            channel: 'telegram',
+            slot,
+            status: 'connected',
+          });
+          await publishChannelStatus(clientId, slot, 'connected');
+        }
+      }
     } catch (err) {
       console.error(`[telegram] failed to connect client ${clientId}:`, err);
       await coordinator.releaseLease(leaseKey, token);
@@ -72,6 +178,7 @@ export async function startTelegramWorker() {
       }
     }, 30000);
 
+    renewInterval.unref?.();
     leaseRenewers.set(key, renewInterval);
     const entry = { client, token };
     sessions.set(key, entry);
@@ -92,7 +199,7 @@ export async function startTelegramWorker() {
       retryTtlMs: 5000,
     });
     
-    const consumeResult = await channel.consume('message.outgoing.telegram', async (msg) => {
+    const consumeResult = await channel.consume('message.outgoing.telegram', async (msg: any) => {
       if (!msg) return;
 
       let payload: any;
@@ -197,6 +304,114 @@ export async function startTelegramWorker() {
       }
     });
     consumerTag = consumeResult?.consumerTag || null;
+
+    // channel.connect.telegram consumer
+    const connectQueue = 'channel.connect.telegram';
+    await channel.assertQueue(connectQueue, { durable: true });
+    await channel.bindQueue(connectQueue, 'tectobox.events', connectQueue);
+    await channel.consume(connectQueue, async (msg: any) => {
+      if (!msg) return;
+
+      let payload: any;
+      try {
+        payload = JSON.parse(msg.content.toString());
+      } catch (err) {
+        console.error('[telegram] malformed connect payload, dropping:', err);
+        channel.nack(msg, false, false);
+        return;
+      }
+
+      const { clientId, slot, channelRowId, id, label } = payload || {};
+      if (!clientId) {
+        console.warn('[telegram] connect command without clientId, dropping:', payload);
+        channel.nack(msg, false, false);
+        return;
+      }
+
+      const effectiveSlot = slot || 'default';
+      try {
+        const entry = await getClientWithFencing(String(clientId), effectiveSlot);
+        if (entry) {
+          console.log(`[telegram] connect command started session for ${clientId}:${effectiveSlot}`);
+          await publishChannelStatus(String(clientId), effectiveSlot, 'connected');
+        } else {
+          console.warn(`[telegram] connect ${clientId}:${effectiveSlot} could not acquire lease`);
+        }
+        channel.ack(msg);
+      } catch (err) {
+        console.error('[telegram] connect command failed:', err);
+        channel.ack(msg);
+      }
+    });
+
+    // channel.disconnect.telegram consumer
+    const disconnectQueue = 'channel.disconnect.telegram';
+    await channel.assertQueue(disconnectQueue, { durable: true });
+    await channel.bindQueue(disconnectQueue, 'tectobox.events', disconnectQueue);
+    await channel.consume(disconnectQueue, async (msg: any) => {
+      if (!msg) return;
+
+      let payload: any;
+      try {
+        payload = JSON.parse(msg.content.toString());
+      } catch (err) {
+        console.error('[telegram] malformed disconnect payload, dropping:', err);
+        channel.nack(msg, false, false);
+        return;
+      }
+
+      const { clientId, slot } = payload || {};
+      if (!clientId) {
+        console.warn('[telegram] disconnect command without clientId, dropping:', payload);
+        channel.nack(msg, false, false);
+        return;
+      }
+
+      const effectiveSlot = slot || 'default';
+      const key = effectiveSlot && effectiveSlot !== 'default' ? `tg:${clientId}:${effectiveSlot}` : `tg:${clientId}`;
+      const leaseKey = `lease:${key}`;
+
+      try {
+        const renewInterval = leaseRenewers.get(key);
+        if (renewInterval) {
+          clearInterval(renewInterval);
+          leaseRenewers.delete(key);
+        }
+
+        const entry = sessions.get(key);
+        if (entry) {
+          sessions.delete(key);
+          if (entry.client) {
+            try {
+              if (typeof (entry.client as any).destroy === 'function') {
+                await (entry.client as any).destroy();
+              } else if (typeof entry.client.disconnect === 'function') {
+                await entry.client.disconnect();
+              }
+            } catch (e: any) {
+              console.error(`[telegram] error destroying client for ${key}:`, e);
+            }
+          }
+          await coordinator.releaseLease(leaseKey, entry.token).catch(() => {});
+        }
+
+        await redis.del(`tg:qr:${clientId}:${effectiveSlot}`).catch(() => {});
+        await redis.del(`tg:session:${clientId}:${effectiveSlot}`).catch(() => {});
+        await publishChannelStatus(String(clientId), effectiveSlot, 'disconnected');
+        await coordinator.publishEvent(`tenant:${clientId}:events`, {
+          type: 'channel_status',
+          clientId: Number(clientId),
+          channel: 'telegram',
+          slot: effectiveSlot,
+          status: 'disconnected',
+        });
+
+        channel.ack(msg);
+      } catch (err) {
+        console.error('[telegram] disconnect command failed:', err);
+        channel.ack(msg);
+      }
+    });
   }
 
   console.log('[telegram-worker] started');
