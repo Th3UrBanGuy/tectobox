@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Put, Body, Param, Query, Req, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException, NotImplementedException, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Put, Body, Param, Query, Req, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException, NotImplementedException, UnauthorizedException, Optional } from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { AdminGuard } from '../auth/admin.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
@@ -9,14 +9,21 @@ import { hashPassword, verifyPassword } from '../auth/password.util.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../auth/totp.util.js';
 import { encrypt, decrypt, isEncrypted } from '../common/crypto.js';
 import { LicensingService } from '../licensing/licensing.service.js';
+import { EventsService } from '../events/events.service.js';
+import { CreateUserDto, ResetPasswordDto } from './dto/admin.dto.js';
 
 @Controller('api')
 @UseGuards(TenantGuard, AdminGuard)
 export class AdminController {
   constructor(
     @Inject(DB_POOL) private readonly pool: pg.Pool,
-    @Inject(LicensingService) private readonly licensing: LicensingService
+    @Inject(LicensingService) private readonly licensing: LicensingService,
+    @Optional() private readonly eventsService?: EventsService
   ) {}
+
+  private getEvents(): EventsService {
+    return this.eventsService || new EventsService(this.pool, this.licensing);
+  }
 
   @Get(['admin/overview', 'global-stats'])
   async getOverview() {
@@ -118,9 +125,12 @@ export class AdminController {
 
   @Delete('clients/:id')
   @Delete(['clients/:id', 'admin/clients/:id', 'admin/workspaces/:id'])
-  async deleteWorkspace(@Param('id', ParseIntPipe) id: number) {
+  async deleteWorkspace(@Param('id', ParseIntPipe) id: number, @Req() req?: any) {
     await this.pool.query('DELETE FROM users WHERE client_id = $1', [id]);
     await this.pool.query('DELETE FROM clients WHERE id = $1', [id]);
+    const actorId = req?.user?.username || req?.user?.id || 'admin';
+    const ip = req?.headers?.['x-forwarded-for'] || req?.socket?.remoteAddress || null;
+    await this.getEvents().writeAudit(actorId, id, 'workspace:delete', { ip });
     return { ok: true, success: true };
   }
 
@@ -136,8 +146,8 @@ export class AdminController {
   }
 
   @Post('admin/users')
-  async createUser(@Body() body: any, @Req() req?: any) {
-    if (!body?.username || typeof body.username !== 'string' || !body.username.trim()) {
+  async createUser(@Body() body: CreateUserDto, @Req() req?: any) {
+    if (!body.username || !body.password) {
       throw new BadRequestException('Username and password are required');
     }
     if (!body?.password || typeof body.password !== 'string' || !body.password.trim()) {
@@ -196,6 +206,10 @@ export class AdminController {
     }
 
     const user = result.rows[0];
+    const actorId = req?.user?.username || req?.user?.id || 'admin';
+    const ip = req?.headers?.['x-forwarded-for'] || req?.socket?.remoteAddress || null;
+    await this.getEvents().writeAudit(actorId, clientId, 'user:create', { newUserId: user.id, username: user.username, role: user.role, ip });
+
     return {
       ok: true,
       success: true,
@@ -230,7 +244,7 @@ export class AdminController {
   }
 
   @Post('admin/users/:id/reset-password')
-  async resetUserPassword(@Param('id', ParseIntPipe) id: number, @Body() body: { password: string }) {
+  async resetUserPassword(@Param('id', ParseIntPipe) id: number, @Body() body: ResetPasswordDto, @Req() req?: any) {
     if (!body?.password || typeof body.password !== 'string' || !body.password.trim()) {
       throw new BadRequestException('Password is required');
     }
@@ -247,6 +261,9 @@ export class AdminController {
       throw new NotFoundException('User not found');
     }
     await this.pool.query('DELETE FROM sessions WHERE user_id = $1', [id]).catch(() => {});
+    const actorId = req?.user?.username || req?.user?.id || 'admin';
+    const ip = req?.headers?.['x-forwarded-for'] || req?.socket?.remoteAddress || null;
+    await this.getEvents().writeAudit(actorId, null, 'password:reset', { targetUserId: id, ip });
     return { ok: true, success: true };
   }
 

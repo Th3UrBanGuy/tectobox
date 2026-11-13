@@ -22,6 +22,8 @@ import { DB_POOL } from '../database/database.module.js';
 import { verifyPassword, hashPassword } from './password.util.js';
 import { generateSecret, verifyTotp, otpauthUrl } from './totp.util.js';
 import { TenantGuard } from '../tenant/tenant.guard.js';
+import { EventsService } from '../events/events.service.js';
+import { Optional } from '@nestjs/common';
 
 const LoginDto = z.object({
   username: z.string().min(1),
@@ -37,7 +39,14 @@ const UpdateCredentialsDto = z.object({
 
 @Controller('api')
 export class AuthController {
-  constructor(@Inject(DB_POOL) private readonly pool: pg.Pool) {}
+  constructor(
+    @Inject(DB_POOL) private readonly pool: pg.Pool,
+    @Optional() private readonly eventsService?: EventsService
+  ) {}
+
+  private getEvents(): EventsService {
+    return this.eventsService || new EventsService(this.pool, undefined as any);
+  }
 
   @Post('auth/login')
   @HttpCode(HttpStatus.OK)
@@ -46,8 +55,10 @@ export class AuthController {
     @Req() req?: Request,
     @Res({ passthrough: true }) res?: Response
   ) {
+    const ip = (req?.headers?.['x-forwarded-for'] as string) || req?.socket?.remoteAddress || '127.0.0.1';
     const parsed = LoginDto.safeParse(body);
     if (!parsed.success) {
+      await this.getEvents().writeAudit(null, null, 'login:failure', { reason: 'invalid_format', ip });
       throw new UnauthorizedException('Invalid login credentials format');
     }
 
@@ -66,11 +77,13 @@ export class AuthController {
     );
 
     if (userResult.rows.length === 0) {
+      await this.getEvents().writeAudit(null, null, 'login:failure', { username, reason: 'user_not_found', ip });
       throw new UnauthorizedException('Invalid username or password');
     }
 
     const dbUser = userResult.rows[0];
     if (dbUser.active === false) {
+      await this.getEvents().writeAudit(dbUser.id, dbUser.client_id, 'login:failure', { username, reason: 'account_deactivated', ip });
       throw new UnauthorizedException('Account has been deactivated. Please contact administrator.');
     }
 
@@ -80,6 +93,7 @@ export class AuthController {
     const passwordValid = await verifyPassword(password, dbUser.password_hash);
 
     if (!passwordValid) {
+      await this.getEvents().writeAudit(dbUser.id, dbUser.client_id, 'login:failure', { username, reason: 'invalid_password', ip });
       throw new UnauthorizedException('ইউজারনেম অথবা পাসওয়ার্ড সঠিক নয়। দয়া করে পুনরায় চেক করুন। (Invalid username or password)');
     }
 
@@ -91,6 +105,7 @@ export class AuthController {
         [dbUser.client_id]
       );
       if (wsRes.rows[0]?.suspended) {
+        await this.getEvents().writeAudit(dbUser.id, dbUser.client_id, 'login:failure', { username, reason: 'workspace_suspended', ip });
         throw new UnauthorizedException('This workspace has been suspended. Please contact the platform admin.');
       }
     }
@@ -104,6 +119,7 @@ export class AuthController {
     if (totpRow && totpRow.enabled) {
       const code = String(totp || '').trim();
       if (!code) {
+        await this.getEvents().writeAudit(dbUser.id, dbUser.client_id, 'login:failure', { username, reason: 'totp_required', ip });
         if (res && typeof res.status === 'function') {
           return res.status(HttpStatus.UNAUTHORIZED).json({
             ok: false,
@@ -119,6 +135,7 @@ export class AuthController {
 
       const isTotpValid = verifyTotp(totpRow.secret_enc, code);
       if (!isTotpValid) {
+        await this.getEvents().writeAudit(dbUser.id, dbUser.client_id, 'login:failure', { username, reason: 'totp_invalid', ip });
         if (res && typeof res.status === 'function') {
           return res.status(HttpStatus.UNAUTHORIZED).json({
             ok: false,
@@ -173,6 +190,8 @@ export class AuthController {
       jwtSecret,
       { expiresIn: '24h', algorithm: 'HS256' }
     );
+
+    await this.getEvents().writeAudit(dbUser.id, dbUser.client_id, 'login', { username: dbUser.username, ip });
 
     return {
       ok: true,

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Req, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, UseGuards, Query, BadRequestException, PayloadTooLargeException } from '@nestjs/common';
 import type { Request } from 'express';
 import { AppService } from './app.service.js';
 import { TenantGuard } from './tenant/tenant.guard.js';
@@ -71,13 +71,16 @@ export class AppController {
   @UseGuards(TenantGuard)
   getDiagnosticsErrors(
     @CurrentTenant() tenantId: number,
+    @Req() req: Request,
     @Query('limit') limit?: string,
   ) {
     const parsedLimit = limit ? parseInt(limit, 10) : 50;
+    const user = (req as any)?.user;
+    const isAdmin = Boolean(user && (user.role === 'admin' || user.role === 'superadmin'));
     return {
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      errors: this.tracker.getRecentErrors(parsedLimit, tenantId),
+      errors: this.tracker.getRecentErrors(parsedLimit, tenantId, isAdmin),
     };
   }
 
@@ -93,26 +96,49 @@ export class AppController {
 
   // Client telemetry receiver: browser errors sent via beacon or fetch
   @Post('api/diagnostics/client-telemetry')
+  @UseGuards(TenantGuard)
   receiveClientTelemetry(
     @Body() body: any,
     @Req() req: Request,
   ) {
-    const tenantId = (req as any).user?.clientId || (req as any).tenantId || body?.tenantId || null;
+    if (!body || typeof body !== 'object') {
+      throw new BadRequestException('Invalid telemetry payload');
+    }
+
+    const rawStr = JSON.stringify(body);
+    if (rawStr.length > 65536) {
+      throw new PayloadTooLargeException('Telemetry payload exceeds maximum allowed size of 64KB');
+    }
+
+    if (Array.isArray(body) && body.length > 50) {
+      throw new BadRequestException('Telemetry event count exceeds limit of 50');
+    }
+    if (Array.isArray(body.events) && body.events.length > 50) {
+      throw new BadRequestException('Telemetry event count exceeds limit of 50');
+    }
+
+    const user = (req as any).user;
+    const tenantId = user?.clientId ?? (req as any).tenantId ?? null;
     const ip = (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress || '127.0.0.1';
-    const userAgent = req.headers['user-agent'] || body?.userAgent;
+    const userAgent = (req.headers['user-agent'] as string) || body?.userAgent;
 
-    const record = this.watchdog.recordClientTelemetry({
-      error: body?.error || 'ClientError',
-      message: body?.message || 'Unknown browser error',
-      url: body?.url,
-      line: body?.line,
-      col: body?.col,
-      stack: body?.stack,
-      userAgent,
-      tenantId,
-      ip,
-    });
+    const events = Array.isArray(body) ? body : (Array.isArray(body.events) ? body.events : [body]);
+    let lastRecordId = '';
+    for (const evt of events.slice(0, 50)) {
+      const record = this.watchdog.recordClientTelemetry({
+        error: String(evt?.error || 'ClientError').slice(0, 200),
+        message: String(evt?.message || 'Unknown browser error').slice(0, 1000),
+        url: evt?.url ? String(evt.url).slice(0, 500) : undefined,
+        line: typeof evt?.line === 'number' ? evt.line : undefined,
+        col: typeof evt?.col === 'number' ? evt.col : undefined,
+        stack: evt?.stack ? String(evt.stack).slice(0, 4000) : undefined,
+        userAgent: userAgent ? String(userAgent).slice(0, 500) : undefined,
+        tenantId,
+        ip,
+      });
+      lastRecordId = record.id;
+    }
 
-    return { received: true, id: record.id };
+    return { received: true, id: lastRecordId };
   }
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Req, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException, GoneException, ConflictException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Req, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException, GoneException, ConflictException, Optional } from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { AdminGuard } from '../auth/admin.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
@@ -6,6 +6,8 @@ import pg from 'pg';
 import crypto from 'crypto';
 import { DB_POOL } from '../database/database.module.js';
 import { LicensingService } from './licensing.service.js';
+import { EventsService } from '../events/events.service.js';
+import { IssueLicenseDto, ActivateLicenseDto } from './dto/licensing.dto.js';
 
 export const SYSTEM_FEATURES = [
   { key: 'combined_inbox', id: 'combined_inbox', label: 'Combined inbox', name: 'Combined inbox', desc: 'All platforms in one unified inbox view' },
@@ -26,8 +28,13 @@ const KEY_ACTIVATION_TTL_DAYS = 30;
 export class LicensingController {
   constructor(
     @Inject(DB_POOL) private readonly pool: pg.Pool,
-    @Inject(LicensingService) private readonly licensing: LicensingService
+    @Inject(LicensingService) private readonly licensing: LicensingService,
+    @Optional() private readonly eventsService?: EventsService
   ) {}
+
+  private getEvents(): EventsService {
+    return this.eventsService || new EventsService(this.pool, this.licensing);
+  }
 
   @Get('admin/features')
   getFeatures() {
@@ -119,7 +126,7 @@ export class LicensingController {
    */
   @Post('admin/licenses')
   @UseGuards(AdminGuard)
-  async issueLicense(@Body() body: any, @Req() req?: any) {
+  async issueLicense(@Body() body: IssueLicenseDto, @Req() req?: any) {
     const createdBy = req?.user?.username ?? null;
     const clientId = body.client_id ? Number(body.client_id) : null;
     if (!clientId) {
@@ -166,6 +173,7 @@ export class LicensingController {
       );
       const row = result.rows[0];
       await this.licensing.audit('key_issue', createdBy, clientId, row?.id ?? null, code, `key-only, ${days} days`);
+      await this.getEvents().writeAudit(createdBy, clientId, 'license:issue', { code, days, deliver: 'key-only', licenseId: row?.id, ip: req?.headers?.['x-forwarded-for'] || req?.socket?.remoteAddress || null });
       return { code, license: row };
     }
 
@@ -196,6 +204,7 @@ export class LicensingController {
     );
     const row = result.rows[0];
     await this.licensing.audit('issue', createdBy, clientId, row?.id ?? null, code, `applied, ${days} days`);
+    await this.getEvents().writeAudit(createdBy, clientId, 'license:issue', { code, days, deliver: 'apply', licenseId: row?.id, ip: req?.headers?.['x-forwarded-for'] || req?.socket?.remoteAddress || null });
     return row;
   }
 
@@ -210,7 +219,7 @@ export class LicensingController {
   @Post('client/licenses/activate')
   async activateLicense(
     @CurrentTenant() tenantId: number,
-    @Body() body: any,
+    @Body() body: ActivateLicenseDto,
     @Req() req?: any
   ) {
     const rawCode = String(body?.code || '').trim();

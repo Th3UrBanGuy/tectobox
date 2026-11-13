@@ -56,10 +56,11 @@ export class ErrorTrackingService {
     return record;
   }
 
-  getRecentErrors(limit = 50, tenantId?: number): TrackedErrorRecord[] {
+  getRecentErrors(limit = 50, tenantId?: number, includeNullTenant?: boolean): TrackedErrorRecord[] {
+    const allowSystem = includeNullTenant ?? (tenantId === undefined);
     const filtered = tenantId
-      ? this.buffer.filter((e) => !e.tenantId || e.tenantId === tenantId)
-      : this.buffer;
+      ? this.buffer.filter((e) => (allowSystem && !e.tenantId) || e.tenantId === tenantId)
+      : (allowSystem ? this.buffer : this.buffer.filter((e) => e.tenantId != null));
     return filtered.slice(0, Math.min(limit, this.maxBufferSize));
   }
 
