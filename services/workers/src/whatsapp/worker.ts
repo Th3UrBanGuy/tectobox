@@ -1,4 +1,5 @@
 import { RabbitMQClient } from '@tectonic/messaging';
+import { connectBroker } from '../broker/reconnect.ts';
 import { RedisCoordinator } from '@tectonic/coordination';
 import { Redis } from 'ioredis';
 import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
@@ -20,7 +21,7 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
     exchange: 'tectobox.events'
   });
   if (!deps.mq) {
-    await mq.connect();
+    await connectBroker(mq);
   }
 
   const redis = deps.redis || new Redis(process.env.REDIS_URL || 'redis://localhost:6379');

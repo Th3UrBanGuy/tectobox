@@ -34,53 +34,157 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   private outboxTimer: NodeJS.Timeout | null = null;
   private isProcessingOutbox = false;
   private isConnected = false;
+  private isClosing = false;
+  private isReconnecting = false;
+  private reconnectTimer: NodeJS.Timeout | null = null;
 
   constructor(
     @Inject(DB_POOL) private readonly pool: pg.Pool,
     @Inject(LicensingService) private readonly licensing: LicensingService
   ) {}
 
+  getMqClient(): RabbitMQClient | null {
+    return this.mq;
+  }
+
+  setMqClient(mq: any) {
+    this.mq = mq;
+  }
+
+  getIsConnected(): boolean {
+    return this.isConnected;
+  }
+
+  setIsConnected(connected: boolean) {
+    this.isConnected = connected;
+  }
+
+  attachConnectionLifecycle() {
+    const mqAny = this.mq as any;
+    const conn = mqAny?.conn;
+    const channel = this.mq?.getChannel();
+
+    const handleDisconnect = (reason: string) => {
+      if (this.isClosing) return;
+      if (!this.isConnected && this.isReconnecting) return;
+      console.warn(`[events] RabbitMQ disconnected (${reason}), initiating reconnect...`);
+      this.isConnected = false;
+      this.triggerReconnect().catch((err) => {
+        console.error('[events] Reconnect loop error:', err);
+      });
+    };
+
+    if (conn && typeof conn.on === 'function') {
+      conn.on('close', () => handleDisconnect('connection closed'));
+      conn.on('error', (err: any) => handleDisconnect(`connection error: ${err?.message || err}`));
+    }
+    if (channel && typeof (channel as any).on === 'function') {
+      (channel as any).on('close', () => handleDisconnect('channel closed'));
+      (channel as any).on('error', (err: any) => handleDisconnect(`channel error: ${err?.message || err}`));
+    }
+  }
+
+  async triggerReconnect(): Promise<void> {
+    if (this.isClosing || this.isReconnecting) return;
+    this.isReconnecting = true;
+
+    let delay = Number(process.env.RABBITMQ_RECONNECT_INITIAL_MS) || 1000;
+    const maxDelay = Number(process.env.RABBITMQ_RECONNECT_MAX_MS) || 30000;
+
+    while (!this.isConnected && !this.isClosing) {
+      console.log(`[events] Attempting broker reconnect in ${delay}ms...`);
+      await new Promise((r) => setTimeout(r, delay));
+      if (this.isClosing) break;
+
+      try {
+        const rabbitUrl = process.env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/';
+        if (this.mq) {
+          try { await this.mq.close(); } catch {}
+        }
+        this.mq = new RabbitMQClient({
+          url: rabbitUrl,
+          exchange: 'tectobox.events',
+        });
+        await this.mq.connect();
+        this.isConnected = true;
+        this.isReconnecting = false;
+        console.log('[events] Reconnected to RabbitMQ broker successfully');
+        this.attachConnectionLifecycle();
+        await this.startInboundConsumer();
+        await this.startChannelStatusConsumer();
+        return;
+      } catch (err: any) {
+        console.warn(`[events] Reconnect attempt failed: ${err?.message || err}`);
+        delay = Math.min(delay * 2, maxDelay);
+      }
+    }
+    this.isReconnecting = false;
+  }
+
   async onModuleInit() {
+    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     try {
-      const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
       this.redis = new Redis(redisUrl, {
         retryStrategy: (times: number) => Math.min(times * 1000, 10000),
         maxRetriesPerRequest: 1,
       });
       this.redis.on('error', (err: any) => {
-        // Log gracefully without crashing process
         console.warn('[events] Redis connection warning:', err?.message || err);
       });
       this.coordinator = new RedisCoordinator(this.redis);
-
-      const rabbitUrl = process.env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/';
-      this.mq = new RabbitMQClient({
-        url: rabbitUrl,
-        exchange: 'tectobox.events',
-      });
-
-      await this.mq.connect();
-      this.isConnected = true;
-      console.log('[events] Connected to RabbitMQ & Redis');
-
-      // Start inbound consumer
-      await this.startInboundConsumer();
-
-      // Start channel-status consumer (worker -> DB status sync for
-      // channel_sessions, e.g. WhatsApp connected/disconnected)
-      await this.startChannelStatusConsumer();
-
-      // Start outbox polling
-      this.startOutboxPolling();
     } catch (err: any) {
-      console.warn('[events] Initialization warning (offline infrastructure mode):', err.message);
+      console.warn('[events] Redis init warning:', err?.message || err);
+    }
+
+    const rabbitUrl = process.env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/';
+    const startupTimeoutMs = Number(process.env.RABBITMQ_STARTUP_TIMEOUT_MS ?? process.env.BROKER_STARTUP_TIMEOUT_MS) || 60000;
+    const startTime = Date.now();
+    let attempt = 0;
+
+    while (!this.isConnected && !this.isClosing) {
+      attempt++;
+      try {
+        this.mq = new RabbitMQClient({
+          url: rabbitUrl,
+          exchange: 'tectobox.events',
+        });
+        await this.mq.connect();
+        this.isConnected = true;
+        console.log('[events] Connected to RabbitMQ & Redis');
+        this.attachConnectionLifecycle();
+        await this.startInboundConsumer();
+        await this.startChannelStatusConsumer();
+        this.startOutboxPolling();
+        return;
+      } catch (err: any) {
+        const elapsed = Date.now() - startTime;
+        if (elapsed >= startupTimeoutMs) {
+          console.error(
+            `[events] Fatal: RabbitMQ broker unreachable after ${elapsed}ms (${attempt} attempts, limit ${startupTimeoutMs}ms): ${err.message}. Exiting non-zero.`
+          );
+          process.exit(1);
+          return;
+        }
+        const backoff = Math.min(500 * Math.pow(1.5, attempt - 1), 3000);
+        const remaining = startupTimeoutMs - elapsed;
+        const waitTime = Math.min(backoff, remaining);
+        console.warn(
+          `[events] RabbitMQ broker connection attempt ${attempt} failed (${err.message}), retrying in ${waitTime}ms (elapsed: ${elapsed}ms, limit: ${startupTimeoutMs}ms)...`
+        );
+        await new Promise((r) => setTimeout(r, waitTime));
+      }
     }
   }
 
   async onModuleDestroy() {
+    this.isClosing = true;
     if (this.outboxTimer) {
       clearInterval(this.outboxTimer);
       this.outboxTimer = null;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
     if (this.mq) {
       await this.mq.close().catch(() => {});
