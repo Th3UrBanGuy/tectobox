@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { demoResponder } from './router.js';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { demoResponder, queryGoAIEngine } from './router.js';
 
 describe('demoResponder (API)', () => {
   it('answers delivery from knowledge when delivery knowledge is seeded', () => {
@@ -77,5 +77,34 @@ describe('demoResponder (API)', () => {
 
     const reply = demoResponder('client1', 'What is your return policy?', [], [], knowledge);
     expect(reply).toContain('7 days');
+  });
+});
+
+describe('queryGoAIEngine (F1 bridge)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends snake_case client_id/client_name/business_type to the Go bridge', async () => {
+    let sentBody = '';
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, opts: any) => {
+      sentBody = String(opts?.body || '');
+      return { ok: true, json: async () => ({ reply: 'ok', language: 'en', model: 'x', cached: false }) };
+    }));
+    const res = await queryGoAIEngine({
+      clientId: 77,
+      clientName: 'Shop B',
+      businessType: 'physical',
+      text: 'hi',
+      knowledge: [],
+    });
+    expect(res?.reply).toBe('ok');
+    const body = JSON.parse(sentBody);
+    expect(body.client_id).toBe(77);
+    expect(body.client_name).toBe('Shop B');
+    expect(body.business_type).toBe('physical');
+    expect(body).not.toHaveProperty('clientId');
+    expect(body).not.toHaveProperty('clientName');
+    expect(body).not.toHaveProperty('businessType');
   });
 });

@@ -174,7 +174,19 @@ export async function queryGoAIEngine(params: {
     const res = await fetch(goUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      // NOTE (F1): the Go bridge expects snake_case keys (client_id,
+      // client_name, business_type). Sending camelCase leaves Go's
+      // ClientID nil, so every workspace shared one "<nil>" cache key
+      // and rate-limit bucket — cross-workspace reply leakage.
+      body: JSON.stringify({
+        ...params,
+        client_id: params.clientId,
+        client_name: params.clientName,
+        business_type: params.businessType,
+        clientId: undefined,
+        clientName: undefined,
+        businessType: undefined,
+      }),
       // 30s: measured Gemini replies take ~5-16s end-to-end (web2api
       // ~5s+ for the full system prompt + 600 tokens, plus tier
       // fallthrough). The old 5.5s abort was calibrated for the dead

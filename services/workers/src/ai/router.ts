@@ -168,7 +168,19 @@ export async function queryGoAIEngine(params: {
     const res = await fetch(goUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      // NOTE (F1): the Go bridge expects snake_case keys (client_id,
+      // client_name, business_type). Sending camelCase leaves Go's
+      // ClientID nil, so every workspace shared one "<nil>" cache key
+      // and rate-limit bucket — cross-workspace reply leakage.
+      body: JSON.stringify({
+        ...params,
+        client_id: params.clientId,
+        client_name: params.clientName,
+        business_type: params.businessType,
+        clientId: undefined,
+        clientName: undefined,
+        businessType: undefined,
+      }),
       signal: AbortSignal.timeout(5500),
     });
     if (res.ok) {
