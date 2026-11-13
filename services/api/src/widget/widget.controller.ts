@@ -252,7 +252,7 @@ export class WidgetController {
           modelUsed = 'payment-detector:auto';
         } else if (budgetExceeded) {
           // Graceful fallback to deterministic catalog responder without consuming LLM budget
-          replyText = demoResponder(client.id, text, prodsRes.rows, history);
+          replyText = demoResponder(client.id, text, prodsRes.rows, history, kbRes.rows);
           modelUsed = 'budget-fallback:deterministic';
         } else {
           // Licence credit: atomic reserve-a-credit before generating. If
@@ -263,7 +263,7 @@ export class WidgetController {
             ? await this.licensing.consumeAiCredit(client.id)
             : false;
           if (!creditOk) {
-            replyText = demoResponder(client.id, text, prodsRes.rows, history);
+            replyText = demoResponder(client.id, text, prodsRes.rows, history, kbRes.rows);
             modelUsed = 'budget-fallback:deterministic';
           } else {
             // Ultra-fast path: Go AI Engine with native language detection & in-memory caching
@@ -299,7 +299,7 @@ export class WidgetController {
               replyText = await getAIResponse(promptMessages, `widget:${client.id}`);
 
               if (!replyText || replyText.trim().length === 0) {
-                replyText = demoResponder(client.id, text, prodsRes.rows, history);
+                replyText = demoResponder(client.id, text, prodsRes.rows, history, kbRes.rows);
               }
             }
 
