@@ -20,6 +20,22 @@ export async function startWhatsappWorker() {
   let consumerTag: string | null = null;
   const channel = mq.getChannel();
 
+  // Best-effort channel status sync (worker -> API -> DB). Never throws:
+  // a missing API consumer (or a broker restart) must not break the
+  // socket's connection lifecycle.
+  const publishChannelStatus = async (clientId: string, slot: string, status: string) => {
+    try {
+      await mq.publish('channel.status.whatsapp', {
+        clientId: Number(clientId),
+        channel: 'whatsapp',
+        slot,
+        status,
+      });
+    } catch (e: any) {
+      console.warn('[whatsapp] channel status publish failed:', e.message);
+    }
+  };
+
   const getSocketWithFencing = async (clientId: string, slot: string) => {
     const key = `wa:${clientId}:${slot}`;
     const cached = sockets.get(key);
@@ -114,6 +130,7 @@ export async function startWhatsappWorker() {
           slot,
           status: 'disconnected',
         });
+        await publishChannelStatus(clientId, slot, 'disconnected');
       } else if (connection === 'open') {
         console.log('[whatsapp] opened connection');
         await redis.del(`wa:qr:${clientId}:${slot}`).catch(() => {});
@@ -124,6 +141,7 @@ export async function startWhatsappWorker() {
           slot,
           status: 'connected',
         });
+        await publishChannelStatus(clientId, slot, 'connected');
       }
     });
 
@@ -282,6 +300,50 @@ export async function startWhatsappWorker() {
       }
     });
     consumerTag = consumeResult?.consumerTag || null;
+
+    // RC5: connect commands from the API (POST .../connectors/whatsapp/connect).
+    // Starting the socket here is the whole trigger: Baileys emits a QR on
+    // connection.update (stored in Redis + SSE, polled by the QR modal), or
+    // reconnects the saved pairing silently. Idempotent — if a live socket
+    // already exists for the slot, getSocketWithFencing returns it and no
+    // duplicate session is created.
+    const connectQueue = 'channel.connect.whatsapp';
+    await channel.assertQueue(connectQueue, { durable: true });
+    await channel.bindQueue(connectQueue, 'tectobox.events', connectQueue);
+    await channel.consume(connectQueue, async (msg: any) => {
+      if (!msg) return;
+
+      let payload: any;
+      try {
+        payload = JSON.parse(msg.content.toString());
+      } catch (err) {
+        console.error('[whatsapp] malformed connect payload, dropping:', err);
+        channel.nack(msg, false, false);
+        return;
+      }
+
+      const { clientId, slot } = payload || {};
+      if (!clientId) {
+        console.warn('[whatsapp] connect command without clientId, dropping:', payload);
+        channel.nack(msg, false, false);
+        return;
+      }
+
+      try {
+        const entry = await getSocketWithFencing(String(clientId), slot || 'default');
+        if (entry) {
+          console.log(`[whatsapp] connect command started session for ${clientId}:${slot || 'default'}`);
+        } else {
+          console.warn(`[whatsapp] connect ${clientId}:${slot || 'default'} could not acquire a lease — re-tap Connect to retry`);
+        }
+        channel.ack(msg);
+      } catch (err) {
+        // Drop, don't requeue: a connect command is cheap to re-issue by
+        // re-tapping Connect, and a persistent failure would poison-loop.
+        console.error('[whatsapp] connect command failed:', err);
+        channel.ack(msg);
+      }
+    });
   }
 
   console.log('[whatsapp-worker] started');

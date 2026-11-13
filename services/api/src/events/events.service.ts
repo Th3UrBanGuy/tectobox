@@ -66,6 +66,10 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       // Start inbound consumer
       await this.startInboundConsumer();
 
+      // Start channel-status consumer (worker -> DB status sync for
+      // channel_sessions, e.g. WhatsApp connected/disconnected)
+      await this.startChannelStatusConsumer();
+
       // Start outbox polling
       this.startOutboxPolling();
     } catch (err: any) {
@@ -153,6 +157,33 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       return true;
     } catch (err: any) {
       console.warn('[events] Failed to publish broadcast job:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * RC5: ask the WhatsApp worker to start a Baileys session for this
+   * client/slot. The worker emits the QR (or reconnects the saved pairing
+   * silently). The queue is asserted here so a connect issued while the
+   * worker is restarting is durably queued instead of unroutable.
+   * Returns false when the broker is not connected (caller keeps the
+   * 'connecting' row; re-tapping Connect retries).
+   */
+  async publishChannelConnect(clientId: number, slot: string): Promise<boolean> {
+    if (!this.isConnected || !this.mq) {
+      console.warn('[events] RabbitMQ not connected, cannot publish WhatsApp connect command');
+      return false;
+    }
+    try {
+      const channel = this.mq.getChannel();
+      if (channel) {
+        await channel.assertQueue('channel.connect.whatsapp', { durable: true });
+        await channel.bindQueue('channel.connect.whatsapp', 'tectobox.events', 'channel.connect.whatsapp');
+      }
+      await this.mq.publish('channel.connect.whatsapp', { clientId, slot });
+      return true;
+    } catch (err: any) {
+      console.warn('[events] Failed to publish WhatsApp connect command:', err.message);
       return false;
     }
   }
@@ -355,6 +386,50 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       } catch (err: any) {
         console.error('[events] Error handling inbound message event:', err);
         channel.ack(msg); // Avoid unhandled poison loop
+      }
+    });
+  }
+
+  /**
+   * RC5: consume channel status events published by the workers
+   * (routing key `channel.status.<platform>`) and sync them into
+   * channel_sessions. Nothing else flips a session to 'connected':
+   * without this the row stays 'connecting' forever after a scan, the
+   * Channels tab never shows the account as connected, and a silent
+   * reconnect (saved pairing) looks like a 90s timeout to the frontend.
+   * Always acks — a bad status payload must never poison-loop.
+   */
+  private async startChannelStatusConsumer(): Promise<void> {
+    if (!this.mq) return;
+    const channel = this.mq.getChannel();
+    if (!channel) return;
+
+    const queueName = 'tectobox.channel.status';
+    await channel.assertQueue(queueName, { durable: true });
+    await channel.bindQueue(queueName, 'tectobox.events', 'channel.status.#');
+
+    await channel.consume(queueName, async (msg) => {
+      if (!msg) return;
+      try {
+        const payload = JSON.parse(msg.content.toString());
+        const clientId = Number(payload.clientId);
+        const ch = String(payload.channel || 'whatsapp');
+        const slot = String(payload.slot || 'default');
+        const status = String(payload.status || '');
+        if (!clientId || !['connected', 'disconnected', 'connecting', 'error'].includes(status)) {
+          return;
+        }
+        await this.pool.query(
+          `UPDATE channel_sessions SET status = $1, updated_at = NOW()
+           WHERE client_id = $2 AND channel = $3 AND slot = $4`,
+          [status, clientId, ch, slot]
+        );
+        // Nudge open frontends to re-read /connectors.
+        await this.broadcastTenantEvent(clientId, { type: 'connectors', clientId });
+      } catch (err: any) {
+        console.error('[events] channel status consumer error:', err.message);
+      } finally {
+        channel.ack(msg);
       }
     });
   }

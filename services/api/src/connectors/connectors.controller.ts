@@ -230,6 +230,19 @@ export class ConnectorsController {
       [targetClient, channel, slot]
     );
 
+    // RC5: the row above only records intent — for WhatsApp actually start
+    // the session. The worker creates the Baileys socket, which emits the
+    // QR (or reconnects the saved pairing silently). Other channels keep
+    // the old behaviour (row only) until their own connect is built.
+    if (channel === 'whatsapp') {
+      const triggered = await this.eventsService.publishChannelConnect(targetClient, slot);
+      if (!triggered) {
+        console.warn(
+          `[connectors] WhatsApp connect for client ${targetClient}:${slot} did not reach the worker (broker down?) — row stays 'connecting'; re-tap Connect to retry`
+        );
+      }
+    }
+
     return { ok: true, channel, slot, status: 'connecting' };
   }
 

@@ -58,6 +58,55 @@ describe('ConnectorsController.getWebhookUrls', () => {
   });
 });
 
+describe('ConnectorsController.connectChannel — RC5 WhatsApp trigger', () => {
+  function fakePool() {
+    const queries: string[] = [];
+    return {
+      queries,
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: [] };
+      },
+    } as any;
+  }
+
+  it('whatsapp: upserts the row AND publishes a connect command to the worker', async () => {
+    const pool = fakePool();
+    const events = { publishChannelConnect: vi.fn(async () => true) } as any;
+    const ctrl = new ConnectorsController(pool, events);
+    const res: any = await ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'b' });
+    expect(res).toEqual({ ok: true, channel: 'whatsapp', slot: 'b', status: 'connecting' });
+    expect(pool.queries.some((q: string) => q.includes('INSERT INTO channel_sessions'))).toBe(true);
+    expect(events.publishChannelConnect).toHaveBeenCalledTimes(1);
+    expect(events.publishChannelConnect).toHaveBeenCalledWith(69, 'b');
+  });
+
+  it('telegram: row only, no worker trigger (Telegram connect not built yet)', async () => {
+    const pool = fakePool();
+    const events = { publishChannelConnect: vi.fn(async () => true) } as any;
+    const ctrl = new ConnectorsController(pool, events);
+    const res: any = await ctrl.connectChannel(69, 69, 'telegram', { slot: 'hh' });
+    expect(res.status).toBe('connecting');
+    expect(events.publishChannelConnect).not.toHaveBeenCalled();
+  });
+
+  it('broker down: still returns ok (row stays connecting; re-tap retries)', async () => {
+    const pool = fakePool();
+    const events = { publishChannelConnect: vi.fn(async () => false) } as any;
+    const ctrl = new ConnectorsController(pool, events);
+    const res: any = await ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'tt' });
+    expect(res).toEqual({ ok: true, channel: 'whatsapp', slot: 'tt', status: 'connecting' });
+    expect(events.publishChannelConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('defaults to the default slot when none is given', async () => {
+    const pool = fakePool();
+    const events = { publishChannelConnect: vi.fn(async () => true) } as any;
+    const ctrl = new ConnectorsController(pool, events);
+    await ctrl.connectChannel(69, 69, 'whatsapp', {});
+    expect(events.publishChannelConnect).toHaveBeenCalledWith(69, 'default');
+  });
+});
 describe('ConnectorsController.getConnectors — honest statuses (no demo data)', () => {
   // Fake pool: answers per table so the endpoint's fallbacks are observable.
   function fakePool(sessions: any[], pages: any[], client: any) {
