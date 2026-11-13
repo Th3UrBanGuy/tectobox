@@ -204,7 +204,7 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 
 	// Tier 3: Direct APIs (OpenRouter / OpenAI / Gemini API if configured)
 	t3Ctx, t3Cancel := context.WithTimeout(ctx, 2000*time.Millisecond)
-	if reply, modelName, err := e.tryDirectAPIs(t3Ctx, sysPrompt, cleanMsg); err == nil && len(reply) > 0 {
+	if reply, modelName, err := e.tryDirectAPIs(t3Ctx, pctx, sysPrompt, cleanMsg); err == nil && len(reply) > 0 {
 		t3Cancel()
 		e.setCache(cKey, reply, 5*time.Minute)
 		return reply, lang, modelName, false
@@ -217,21 +217,32 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 	return demoReply, lang, "deterministic-catalog", false
 }
 
-func (e *Engine) tryDirectAPIs(ctx context.Context, sysPrompt, userMsg string) (string, string, error) {
+func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPrompt, userMsg string) (string, string, error) {
 	// 0. Gemini via local gemini-web2api-go (OpenAI-compatible endpoint).
 	// Runs first: it is the configured backend. web2api drives the Gemini
 	// web UI, so first replies take ~5s — the 2s Tier-3 context would
 	// always time out, hence a detached 25s context here.
-	if url := os.Getenv("GEMINI_WEB2API_URL"); url != "" {
-		if key := os.Getenv("GEMINI_WEB2API_KEY"); key != "" {
-			model := os.Getenv("GEMINI_WEB2API_MODEL")
-			if model == "" {
-				model = "gemini-3.6-flash"
-			}
-			wCtx, wCancel := context.WithTimeout(context.WithoutCancel(ctx), 25*time.Second)
-			defer wCancel()
-			if reply, err := e.callOpenAICompatible(wCtx, url, key, model, sysPrompt, userMsg); err == nil && reply != "" {
-				return reply, "gemini-web2api:" + model, nil
+	//
+	// NOTE (F1 Knowledge Leak Fix):
+	// The gemini-web2api proxy (GEMINI_WEB2API_URL) uses a single shared browser session
+	// for all requests without per-workspace session isolation. In multi-tenant environments,
+	// routing different workspaces to the same web2api session causes cross-workspace prompt
+	// and knowledge leakage (e.g. Shop 45 return policy leaking to other workspaces).
+	// Because gemini-web2api does not support isolated per-workspace sessions, Tier 3 web2api
+	// is skipped for workspace/widget traffic (pctx.ClientID != ""), safely falling through
+	// to the knowledge-grounded deterministic responder (Tier 4) or isolated direct APIs.
+	if pctx.ClientID == "" {
+		if url := os.Getenv("GEMINI_WEB2API_URL"); url != "" {
+			if key := os.Getenv("GEMINI_WEB2API_KEY"); key != "" {
+				model := os.Getenv("GEMINI_WEB2API_MODEL")
+				if model == "" {
+					model = "gemini-3.6-flash"
+				}
+				wCtx, wCancel := context.WithTimeout(context.WithoutCancel(ctx), 25*time.Second)
+				defer wCancel()
+				if reply, err := e.callOpenAICompatible(wCtx, url, key, model, sysPrompt, userMsg); err == nil && reply != "" {
+					return reply, "gemini-web2api:" + model, nil
+				}
 			}
 		}
 	}
@@ -378,11 +389,43 @@ func BuildSystemPrompt(ctx PromptContext, lang detector.Language) string {
 
 // DemoResponder provides deterministic, ultra-fast responses grounded in catalog & language
 func DemoResponder(lang detector.Language, text string, products []ProductItem, knowledge []KnowledgeItem, history []ChatMessage) string {
-	t := strings.ToLower(text)
+	// Helper for Unicode-aware word boundary matching
+	matchWord := func(s, word string) bool {
+		if word == "" {
+			return false
+		}
+		pattern := `(?i)(?:^|[^\p{L}\p{M}\p{N}_])` + regexp.QuoteMeta(word) + `(?:[^\p{L}\p{M}\p{N}_]|$)`
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return false
+		}
+		return re.MatchString(s)
+	}
 
-	// 1. Delivery / Shipping intent (checked first to avoid matching substrings in 'Dhaka' or 'charges')
-	reDelivery := regexp.MustCompile(`(?i)(delivery|charge|shipping|courier|pathan|kobe|somoy|shomoy|ডেলিভারি|চার্জ|কুরিয়ার|পাঠান|সময়|কবে)`)
-	if reDelivery.MatchString(t) {
+	// 1. Delivery / Shipping intent (checked first; using word boundaries so words like 'চার্জার' or 'charger' don't match)
+	reDelivery := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(delivery|charge|shipping|courier|pathan|kobe|somoy|shomoy|ডেলিভারি|চার্জ|কুরিয়ার|কুরিয়ার|পাঠান|সময়|কবে)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	if reDelivery.MatchString(text) {
+		// Check knowledge FIRST for delivery / charge / shipping entries
+		if len(knowledge) > 0 {
+			for _, k := range knowledge {
+				combined := strings.ToLower(k.Title + " " + k.Content + " " + k.Category)
+				if strings.Contains(combined, "delivery") || strings.Contains(combined, "charge") ||
+					strings.Contains(combined, "shipping") || strings.Contains(combined, "courier") ||
+					strings.Contains(combined, "ডেলিভারি") || strings.Contains(combined, "চার্জ") ||
+					strings.Contains(combined, "কুরিয়ার") || strings.Contains(combined, "কুরিয়ার") {
+					switch lang {
+					case detector.LangBangla:
+						return fmt.Sprintf("আমাদের ডেলিভারি তথ্য: %s", k.Content)
+					case detector.LangBanglish:
+						return fmt.Sprintf("Amader delivery info: %s", k.Content)
+					default:
+						return fmt.Sprintf("Our delivery policy: %s", k.Content)
+					}
+				}
+			}
+		}
+
+		// Fallback to generic template only when no knowledge entry matches
 		switch lang {
 		case detector.LangBangla:
 			return "আমাদের ডেলিভারি চার্জ ঢাকার ভেতরে ৬০ টাকা (২৪-৪৮ ঘণ্টা) এবং ঢাকার বাইরে ১২০ টাকা (২-৩ দিন)। ক্যাশ অন ডেলিভারি সুবিধা রয়েছে।"
@@ -394,8 +437,8 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 	}
 
 	// 2. Order intent (with word boundaries and conversational memory across turns)
-	reOrder := regexp.MustCompile(`(?i)(\b(order|buy|purchase|kinte|nibo|nebo|lagbe|nite|chai|chaichi|haa|ha|yes|confirm)\b|অর্ডার|কিনব|কিনতে|নিব|চাই|নিতে|চাচ্ছি|হাঁ|হ্যাঁ)`)
-	if reOrder.MatchString(t) {
+	reOrder := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(order|buy|purchase|kinte|nibo|nebo|lagbe|nite|chai|chaichi|haa|ha|yes|confirm|অর্ডার|কিনব|কিনতে|নিব|চাই|নিতে|চাচ্ছি|হাঁ|হ্যাঁ)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	if reOrder.MatchString(text) {
 		var referencedProduct *ProductItem
 		for i := len(history) - 1; i >= 0; i-- {
 			hText := strings.ToLower(history[i].Content)
@@ -427,13 +470,13 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 	}
 
 	// 3. Knowledge Base & Policies inquiry (return, refund, exchange, warranty)
-	rePolicy := regexp.MustCompile(`(?i)(return|refund|exchange|warranty|guarantee|ferot|change|policy|ফেরত|ওয়ারেন্টি|পলিসি)`)
-	if rePolicy.MatchString(t) && len(knowledge) > 0 {
+	rePolicy := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(return|refund|exchange|warranty|guarantee|ferot|change|policy|ফেরত|ওয়ারেন্টি|ওয়ারেন্টি|পলিসি)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	if rePolicy.MatchString(text) && len(knowledge) > 0 {
 		for _, k := range knowledge {
-			kTitleLower := strings.ToLower(k.Title)
-			if strings.Contains(kTitleLower, "return") || strings.Contains(kTitleLower, "refund") ||
-				strings.Contains(kTitleLower, "policy") || strings.Contains(kTitleLower, "warranty") ||
-				strings.Contains(kTitleLower, "ফেরত") {
+			combined := strings.ToLower(k.Title + " " + k.Content + " " + k.Category)
+			if strings.Contains(combined, "return") || strings.Contains(combined, "refund") ||
+				strings.Contains(combined, "policy") || strings.Contains(combined, "warranty") ||
+				strings.Contains(combined, "ফেরত") || strings.Contains(combined, "পলিসি") {
 				switch lang {
 				case detector.LangBangla:
 					return fmt.Sprintf("আমাদের পলিসি: %s। বিস্তারিত জানতে আমাদের জানাতে পারেন।", k.Content)
@@ -447,14 +490,18 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 	}
 
 	// 4. Price & Product inquiry with intelligent matching
-	rePrice := regexp.MustCompile(`(?i)(dam|daam|price|cost|koto|rate|দাম|মূল্য|কত)`)
-	if (rePrice.MatchString(t) || len(products) > 0) && len(products) > 0 {
+	rePrice := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(dam|daam|price|cost|koto|rate|দাম|মূল্য|কত)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	if (rePrice.MatchString(text) || len(products) > 0) && len(products) > 0 {
 		var matchedProduct *ProductItem
 		for i := range products {
 			pNameLower := strings.ToLower(products[i].Name)
+			if matchWord(text, pNameLower) {
+				matchedProduct = &products[i]
+				break
+			}
 			words := strings.Fields(pNameLower)
 			for _, w := range words {
-				if len(w) > 3 && strings.Contains(t, w) {
+				if len(w) > 3 && (matchWord(text, w) || (w == "charger" && matchWord(text, "চার্জার")) || (w == "চার্জার" && matchWord(text, "charger"))) {
 					matchedProduct = &products[i]
 					break
 				}
@@ -464,7 +511,7 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 			}
 		}
 
-		if matchedProduct != nil || rePrice.MatchString(t) {
+		if matchedProduct != nil || rePrice.MatchString(text) {
 			if matchedProduct == nil {
 				matchedProduct = &products[0]
 			}

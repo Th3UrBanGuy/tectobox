@@ -84,7 +84,7 @@ export async function startAIWorker() {
           ], `ai:${clientId}`);
 
           if (!replyText || replyText.trim().length === 0) {
-            replyText = demoResponder(clientId, text, payload.products || [], payload.history || []);
+            replyText = demoResponder(clientId, text, payload.products || [], payload.history || [], payload.knowledge || []);
           }
         }
 
