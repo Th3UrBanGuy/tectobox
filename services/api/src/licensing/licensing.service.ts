@@ -6,7 +6,7 @@ import { DB_POOL } from '../database/database.module.js';
 /**
  * LicensingService — the single source of truth for license resolution.
  *
- * Ported from old-code/src/db.js resolveAccess / activeLicense /
+ * Ported from legacy src/db.js resolveAccess / activeLicense /
  * consumeAiCredit (Oct 7 semantics), MINUS the legacy pre-2026-10-07
  * carve-out: there is no legacy full access anymore. A workspace without
  * an active license is mode 'none' (locked), never full access.
@@ -146,7 +146,7 @@ export class LicensingService {
 
     if (lic.kind === 'time') {
       if (lic.ends_at && new Date(lic.ends_at).getTime() <= Date.now()) {
-        // Lazy expiry: flip the row inline at resolution (old-code pattern).
+        // Lazy expiry: flip the row inline at resolution (legacy pattern).
         await this.pool.query(
           "UPDATE licenses SET status = 'expired' WHERE id = $1 AND status = 'active'",
           [lic.id]

@@ -65,7 +65,7 @@ export interface MigrationResult {
 
 export function parseCliArgs(args: string[]): CliOptions {
   const isDryRun = args.includes('--dry-run');
-  let sqlitePath = process.env.SQLITE_PATH || path.join(process.cwd(), 'old-code/tectonic-inbox.db');
+  let sqlitePath = process.env.SQLITE_PATH || path.join(process.cwd(), 'backup/tectonic-inbox.db');
   let pgUrl = process.env.DATABASE_URL || 'postgresql://tectobox:tectobox_dev@localhost:5432/tectobox';
 
   for (let i = 0; i < args.length; i++) {
@@ -370,7 +370,7 @@ async function verifyTableRows(
 export async function runMigration(options: MigrationOptions): Promise<MigrationResult> {
   const {
     isDryRun,
-    sqlitePath = path.join(process.cwd(), 'old-code/tectonic-inbox.db'),
+    sqlitePath = path.join(process.cwd(), 'backup/tectonic-inbox.db'),
     pgUrl = process.env.DATABASE_URL || 'postgresql://tectobox:tectobox_dev@localhost:5432/tectobox',
     tables = TABLES,
     exitOnError = true

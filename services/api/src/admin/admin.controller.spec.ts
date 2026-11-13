@@ -211,4 +211,34 @@ describe('AdminController (seg-02 secrets & honest responses)', () => {
       );
     });
   });
+
+  describe('GET admin/audit (M14 Pagination)', () => {
+    it('paginates audit log with default limit 50, offset 0, and total count', async () => {
+      mockPool.query.mockImplementation(async (sql: string, params: any[]) => {
+        if (sql.includes('COUNT(*)')) return { rows: [{ total: '40' }] };
+        return { rows: [{ id: 1, event: 'user:login' }] };
+      });
+
+      const res: any = await controller.getAuditLog();
+      expect(res.total).toBe(40);
+      expect(res.limit).toBe(50);
+      expect(res.offset).toBe(0);
+      expect(res.length).toBe(1);
+    });
+
+    it('respects custom limit (capped at 200) and offset', async () => {
+      mockPool.query.mockImplementation(async (sql: string, params: any[]) => {
+        if (sql.includes('COUNT(*)')) return { rows: [{ total: '100' }] };
+        return { rows: [] };
+      });
+
+      const res: any = await controller.getAuditLog('300', '15');
+      expect(res.limit).toBe(200);
+      expect(res.offset).toBe(15);
+      expect(mockPool.query).toHaveBeenCalledWith(
+        expect.stringContaining('LIMIT $1 OFFSET $2'),
+        [200, 15]
+      );
+    });
+  });
 });

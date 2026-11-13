@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException } from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { RequireFeature } from '../licensing/feature.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
@@ -15,7 +15,20 @@ export class BroadcastsController {
   ) {}
 
   @Get('broadcasts')
-  async listBroadcasts(@CurrentTenant() tenantId: number) {
+  async listBroadcasts(
+    @CurrentTenant() tenantId: number,
+    @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string
+  ) {
+    const limit = Math.min(200, Math.max(1, parseInt(limitStr || '', 10) || 50));
+    const offset = Math.max(0, parseInt(offsetStr || '', 10) || 0);
+
+    const countRes = await this.pool.query(
+      'SELECT COUNT(*) AS total FROM broadcasts WHERE client_id = $1',
+      [tenantId]
+    );
+    const total = parseInt(countRes.rows[0]?.total || '0', 10);
+
     const result = await this.pool.query(
       `SELECT b.*,
               (SELECT COUNT(*) FROM broadcast_recipients r WHERE r.broadcast_id = b.id) AS total,
@@ -23,13 +36,17 @@ export class BroadcastsController {
               (SELECT COUNT(*) FROM broadcast_recipients r WHERE r.broadcast_id = b.id AND r.status = 'failed') AS failed
        FROM broadcasts b
        WHERE b.client_id = $1
-       ORDER BY b.id DESC`,
-      [tenantId]
+       ORDER BY b.id DESC
+       LIMIT $2 OFFSET $3`,
+      [tenantId, limit, offset]
     );
 
     const res: any = result.rows;
     res.success = true;
     res.broadcasts = result.rows;
+    res.total = total;
+    res.limit = limit;
+    res.offset = offset;
     return res;
   }
 

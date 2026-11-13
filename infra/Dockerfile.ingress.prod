@@ -13,9 +13,12 @@ FROM alpine:3.19 AS runner
 
 WORKDIR /app
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates tzdata \
+    && addgroup -S appgroup && adduser -S appuser -G appgroup
 
 COPY --from=builder /app/ingress /app/ingress
+
+USER appuser
 
 EXPOSE 8080
 

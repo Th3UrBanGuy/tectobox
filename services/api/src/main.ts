@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import express from 'express';
+import helmet from 'helmet';
 import path from 'path';
 import fs from 'fs';
 import { AppModule } from './app.module.js';
@@ -11,13 +12,26 @@ import { StructuredLogger } from './common/logger/logger.service.js';
 import { watchdogMiddleware } from './common/watchdog/watchdog.middleware.js';
 import { corsOriginCallback, getAllowedOrigins } from './auth/cors.util.js';
 import { createRateLimitMiddleware } from './auth/rate-limit.middleware.js';
+import { loadAppConfig } from './config/app.config.js';
 
 async function bootstrap() {
+  // M15: Validate configuration with Zod at startup; fail fast if required env vars are missing
+  const appConfig = loadAppConfig();
+
   const logger = new StructuredLogger();
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger,
   });
   app.enableShutdownHooks();
+
+  // L2: Helmet security headers
+  app.use(
+    helmet({
+      contentSecurityPolicy: false, // Allow inline scripts and public UI assets
+      crossOriginEmbedderPolicy: false,
+    })
+  );
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -58,7 +72,6 @@ async function bootstrap() {
     path.join(process.cwd(), 'services/api/public'),
     path.join(process.cwd(), 'public'),
     path.resolve(process.cwd(), '..', 'services', 'api', 'public'),
-    path.resolve(process.cwd(), 'old-code', 'public'),
   ];
   const publicDir = candidatePublicDirs.find((d) => fs.existsSync(d)) || candidatePublicDirs[0];
 
@@ -76,17 +89,7 @@ async function bootstrap() {
     res.sendFile(path.join(publicDir, 'index.html'));
   });
 
-  expressApp.get('/install', (_req: any, res: any) => {
-    res.setHeader('Cache-Control', 'no-cache');
-    res.sendFile(path.join(publicDir, 'install.html'));
-  });
-
-  expressApp.get('/welcome', (_req: any, res: any) => {
-    res.setHeader('Cache-Control', 'no-cache');
-    res.sendFile(path.join(publicDir, 'welcome.html'));
-  });
-
-  // CDN & Static Asset Optimization headers (immutable caching for images/icons, no-cache for app HTML/JS)
+  // Serve static assets with strict caching and immutable headers
   expressApp.use(
     express.static(publicDir, {
       dotfiles: 'deny',
@@ -108,9 +111,8 @@ async function bootstrap() {
   // Redis-backed global rate limiter (300 req/min per IP) & brute force guard
   expressApp.use(createRateLimitMiddleware());
 
-  const port = process.env.PORT ?? 3000;
+  const port = appConfig.port;
   await app.listen(port);
   console.log(`[tectobox] Core API running on port ${port}`);
 }
 await bootstrap();
-

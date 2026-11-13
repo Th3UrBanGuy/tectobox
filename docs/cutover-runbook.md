@@ -91,8 +91,6 @@ If critical issues arise during the maintenance window:
    ```bash
    cd infra && docker compose -f docker-compose.prod.yml down
    ```
-2. Restart the legacy Express app:
-   ```bash
-   cd old-code && pnpm start
-   ```
-The original SQLite database file `old-code/tectonic-inbox.db` is read-only during migration and remains completely intact as an immediate fallback.
+2. If restoring from archive:
+   Extract `old-code-backup.tar.gz` and restore the SQLite snapshot `backup/tectonic-inbox.db`.
+The original SQLite database file snapshot remains intact in the backup archive as a historical fallback.

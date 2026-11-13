@@ -1,3 +1,3 @@
 module github.com/tect0nicofficial/tectobox/services/ai
 
-go 1.21
+go 1.22

@@ -276,8 +276,22 @@ resp = client.chat.completions.create(
 ## Requirements
 
 - Python 3.8+
-- `httpx` (`pip install httpx`) — used for streaming requests
+- `httpx==0.27.0` (pinned in `requirements.txt`) — used for streaming requests
 - Network access to `gemini.google.com` (proxy/VPN may be needed in some regions)
+
+## Version Pinning & Upgrading (M13)
+
+- **Pinned Version**: `1.1.0` (defined in `pyproject.toml` and `gemini_web2api/__init__.py::__version__ = "1.1.0"`)
+- **Dependency Pinning**: `requirements.txt` pins `httpx==0.27.0` to ensure reproducible and deterministic builds.
+
+### How to Upgrade
+1. Update `version = "X.Y.Z"` in `services/ai-proxy/pyproject.toml`.
+2. Update `__version__ = "X.Y.Z"` in `services/ai-proxy/gemini_web2api/__init__.py`.
+3. Update pinned dependency versions in `services/ai-proxy/requirements.txt` (e.g. `pip compile` or manual version bump).
+4. Verify tests pass:
+   ```bash
+   python -m unittest discover -s tests
+   ```
 
 ## How It Works
 

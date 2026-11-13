@@ -12,36 +12,61 @@ export class OrdersController {
   @Get('orders')
   async getOrders(
     @CurrentTenant() tenantId: number,
-    @Query('status') status?: string
+    @Query('status') status?: string,
+    @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string
   ) {
-    let sql = `SELECT id, client_id, conversation_id, items_json, subtotal_bdt, delivery_charge_bdt,
-                      total_bdt, advance_required_bdt, advance_paid_bdt, transaction_id, payment_status,
-                      status, customer_name, customer_phone, customer_address, courier_name,
-                      courier_tracking_code, courier_consignment_id, courier_status, idempotency_key, created_at
-               FROM orders
-               WHERE client_id = $1`;
+    const limit = Math.min(200, Math.max(1, parseInt(limitStr || '', 10) || 50));
+    const offset = Math.max(0, parseInt(offsetStr || '', 10) || 0);
+
+    let whereSql = `WHERE client_id = $1`;
     const params: any[] = [tenantId];
 
     if (status && status !== 'all') {
       params.push(status);
-      sql += ` AND status = $${params.length}`;
+      whereSql += ` AND status = $${params.length}`;
     }
 
-    sql += ` ORDER BY created_at DESC LIMIT 100`;
-    const result = await this.pool.query(sql, params);
+    const countRes = await this.pool.query(`SELECT COUNT(*) AS total FROM orders ${whereSql}`, params);
+    const total = parseInt(countRes.rows[0]?.total || '0', 10);
+
+    const queryParams = [...params, limit, offset];
+    const dataSql = `SELECT id, client_id, conversation_id, items_json, subtotal_bdt, delivery_charge_bdt,
+                            total_bdt, advance_required_bdt, advance_paid_bdt, transaction_id, payment_status,
+                            status, customer_name, customer_phone, customer_address, courier_name,
+                            courier_tracking_code, courier_consignment_id, courier_status, idempotency_key, created_at
+                     FROM orders
+                     ${whereSql}
+                     ORDER BY created_at DESC
+                     LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`;
+    const result = await this.pool.query(dataSql, queryParams);
 
     const res: any = result.rows;
     res.success = true;
     res.tenantId = tenantId;
     res.orders = result.rows;
+    res.total = total;
+    res.limit = limit;
+    res.offset = offset;
     return res;
   }
 
   @Get('conversations/:id/orders')
   async getOrdersByConversation(
     @CurrentTenant() tenantId: number,
-    @Param('id', ParseIntPipe) conversationId: number
+    @Param('id', ParseIntPipe) conversationId: number,
+    @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string
   ) {
+    const limit = Math.min(200, Math.max(1, parseInt(limitStr || '', 10) || 50));
+    const offset = Math.max(0, parseInt(offsetStr || '', 10) || 0);
+
+    const countRes = await this.pool.query(
+      'SELECT COUNT(*) as total FROM orders WHERE client_id = $1 AND conversation_id = $2',
+      [tenantId, conversationId]
+    );
+    const total = parseInt(countRes.rows[0]?.total || '0', 10);
+
     const result = await this.pool.query(
       `SELECT id, client_id, conversation_id, items_json, subtotal_bdt, delivery_charge_bdt,
               total_bdt, advance_required_bdt, advance_paid_bdt, transaction_id, payment_status,
@@ -49,14 +74,18 @@ export class OrdersController {
               courier_tracking_code, courier_consignment_id, courier_status, idempotency_key, created_at
        FROM orders
        WHERE client_id = $1 AND conversation_id = $2
-       ORDER BY created_at DESC`,
-      [tenantId, conversationId]
+       ORDER BY created_at DESC
+       LIMIT $3 OFFSET $4`,
+      [tenantId, conversationId, limit, offset]
     );
 
     const res: any = result.rows;
     res.success = true;
     res.tenantId = tenantId;
     res.orders = result.rows;
+    res.total = total;
+    res.limit = limit;
+    res.offset = offset;
     return res;
   }
 

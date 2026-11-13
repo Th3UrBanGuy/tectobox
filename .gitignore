@@ -2,7 +2,15 @@ node_modules/
 dist/
 **/dist/
 *.tsbuildinfo
+# Environment and credentials
 .env
+.env.*
+!.env*.example
+*.local
+tunnel-token.yml
+*.pem
+*.key
+*.token
 *.db
 *.db-wal
 *.db-shm

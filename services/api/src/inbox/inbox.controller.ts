@@ -1,11 +1,24 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards, ParseIntPipe, Inject, Optional, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Param,
+  Query,
+  Body,
+  UseGuards,
+  Inject,
+  ParseIntPipe,
+  BadRequestException,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
 
-@Controller(['api', 'api/inbox'])
+@Controller('api')
 @UseGuards(TenantGuard)
 export class InboxController {
   constructor(
@@ -18,46 +31,66 @@ export class InboxController {
     @CurrentTenant() tenantId: number,
     @Query('platform') platform?: string,
     @Query('q') query?: string,
-    @Query('needs_human') needsHuman?: string
+    @Query('needs_human') needsHuman?: string,
+    @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string
   ) {
-    let sql = `SELECT c.id, c.client_id, c.platform, c.platform_user_id, c.slot, c.customer_name, c.customer_phone,
-                      c.last_message_at, c.unread_count, c.status, c.needs_human,
-                      (SELECT text FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_message_text
-               FROM conversations c
-               WHERE c.client_id = $1`;
+    const limit = Math.min(200, Math.max(1, parseInt(limitStr || '', 10) || 50));
+    const offset = Math.max(0, parseInt(offsetStr || '', 10) || 0);
+
+    let whereClause = `WHERE c.client_id = $1 AND c.deleted_at IS NULL`;
     const params: any[] = [tenantId];
 
     if (platform && platform !== 'all') {
       params.push(platform);
-      sql += ` AND c.platform = $${params.length}`;
+      whereClause += ` AND c.platform = $${params.length}`;
     }
 
     if (needsHuman === '1' || needsHuman === 'true') {
-      sql += ` AND c.needs_human = true`;
+      whereClause += ` AND c.needs_human = true`;
     }
 
     if (query && query.trim()) {
       params.push(`%${query.trim()}%`);
-      sql += ` AND (c.customer_name ILIKE $${params.length} OR c.customer_phone ILIKE $${params.length} OR c.platform_user_id ILIKE $${params.length})`;
+      whereClause += ` AND (c.customer_name ILIKE $${params.length} OR c.customer_phone ILIKE $${params.length} OR c.platform_user_id ILIKE $${params.length})`;
     }
 
-    sql += ` ORDER BY c.last_message_at DESC LIMIT 100`;
-    const result = await this.pool.query(sql, params);
+    const countSql = `SELECT COUNT(*) AS total FROM conversations c ${whereClause}`;
+    const countRes = await this.pool.query(countSql, params);
+    const total = parseInt(countRes.rows[0]?.total || '0', 10);
+
+    const queryParams = [...params, limit, offset];
+    const dataSql = `SELECT c.id, c.client_id, c.platform, c.platform_user_id, c.slot, c.customer_name, c.customer_phone,
+                            c.last_message_at, c.unread_count, c.status, c.needs_human,
+                            (SELECT text FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_message_text
+                     FROM conversations c
+                     ${whereClause}
+                     ORDER BY c.last_message_at DESC
+                     LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`;
+    const result = await this.pool.query(dataSql, queryParams);
 
     const res: any = result.rows;
     res.success = true;
     res.tenantId = tenantId;
     res.conversations = result.rows;
+    res.total = total;
+    res.limit = limit;
+    res.offset = offset;
     return res;
   }
 
   @Get('conversations/:id/messages')
   async getMessages(
     @CurrentTenant() tenantId: number,
-    @Param('id', ParseIntPipe) conversationId: number
+    @Param('id', ParseIntPipe) conversationId: number,
+    @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string
   ) {
+    const limit = Math.min(200, Math.max(1, parseInt(limitStr || '', 10) || 50));
+    const offset = Math.max(0, parseInt(offsetStr || '', 10) || 0);
+
     const convCheck = await this.pool.query(
-      'SELECT id FROM conversations WHERE id = $1 AND client_id = $2',
+      'SELECT id FROM conversations WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL',
       [conversationId, tenantId]
     );
 
@@ -65,12 +98,19 @@ export class InboxController {
       throw new NotFoundException('Conversation not found');
     }
 
+    const countRes = await this.pool.query(
+      'SELECT COUNT(*) as total FROM messages WHERE conversation_id = $1',
+      [conversationId]
+    );
+    const total = parseInt(countRes.rows[0]?.total || '0', 10);
+
     const messagesResult = await this.pool.query(
       `SELECT id, conversation_id, direction, text, raw_json, external_id, created_at 
        FROM messages 
        WHERE conversation_id = $1 
-       ORDER BY id ASC LIMIT 200`,
-      [conversationId]
+       ORDER BY id ASC
+       LIMIT $2 OFFSET $3`,
+      [conversationId, limit, offset]
     );
 
     const res: any = messagesResult.rows;
@@ -78,6 +118,9 @@ export class InboxController {
     res.tenantId = tenantId;
     res.conversationId = conversationId;
     res.messages = messagesResult.rows;
+    res.total = total;
+    res.limit = limit;
+    res.offset = offset;
     return res;
   }
 
@@ -89,7 +132,7 @@ export class InboxController {
     const result = await this.pool.query(
       `UPDATE conversations
        SET unread_count = 0
-       WHERE id = $1 AND client_id = $2
+       WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL
        RETURNING id, client_id, unread_count`,
       [conversationId, tenantId]
     );
@@ -120,7 +163,7 @@ export class InboxController {
     }
 
     const convResult = await this.pool.query(
-      'SELECT * FROM conversations WHERE id = $1 AND client_id = $2',
+      'SELECT * FROM conversations WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL',
       [conversationId, tenantId]
     );
 
@@ -198,7 +241,7 @@ export class InboxController {
     const res = await this.pool.query(
       `UPDATE conversations
        SET needs_human = $1
-       WHERE id = $2 AND client_id = $3
+       WHERE id = $2 AND client_id = $3 AND deleted_at IS NULL
        RETURNING id, client_id, needs_human`,
       [needsHuman, conversationId, tenantId]
     );
@@ -215,4 +258,3 @@ export class InboxController {
     return { ok: true, conversationId, needsHuman };
   }
 }
-

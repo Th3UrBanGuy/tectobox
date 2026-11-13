@@ -80,4 +80,13 @@ describe('BackupController tenant scoping (C3)', () => {
   it('Drive upload returns honest 501 NotImplementedException instead of fake file list', () => {
     expect(() => controller.uploadDrive()).toThrowError(/not implemented/i);
   });
+
+  it('L15: refuses export with 413 PayloadTooLargeException when rows exceed maximum guard limit', async () => {
+    const { PayloadTooLargeException } = await import('@nestjs/common');
+    mockService.exportClientData.mockRejectedValueOnce(
+      new PayloadTooLargeException('Backup export exceeds maximum allowed row count of 50000 (found 50001 rows). Contact support to export in chunks.')
+    );
+    const res = mockRes();
+    await expect(controller.exportJson(42, undefined, res, { user: { role: 'client', clientId: 42 } })).rejects.toThrow(PayloadTooLargeException);
+  });
 });

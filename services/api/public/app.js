@@ -1572,8 +1572,8 @@ function renderChatHeader(conv) {
   if (btnDeleteConv) {
     btnDeleteConv.onclick = async () => {
       const ok = typeof askConfirm === 'function'
-        ? await askConfirm('Delete conversation?', 'This conversation and its messages will be permanently deleted.', 'Delete', true)
-        : confirm('Delete this conversation?');
+        ? await askConfirm('Delete conversation?', 'This conversation and its messages will be scheduled for permanent deletion in 15 days (recoverable within 15 days).', 'Delete', true)
+        : confirm('Delete this conversation? Recoverable within 15 days before permanent deletion.');
       if (!ok) return;
       try {
         await api(`/api/clients/${state.clientId}/conversations/${conv.id}`, { method: 'DELETE' });

@@ -14,7 +14,7 @@
 
 ## Phase 1: Foundation
 - [x] Push existing history to `tect0nicofficial/tectobox`
-- [x] Restructure repo (`old-code/`, `services/`, `packages/`, `infra/`)
+- [x] Restructure repo (services/, packages/, infra/; legacy code archived)
 - [x] Create AGENTS.md, handoff.md, TODO.md
 - [x] Create docs/, plans/, tasks/, task-completed/
 - [x] Create docker-compose.dev.yml (Postgres + Redis + RabbitMQ)

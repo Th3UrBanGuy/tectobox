@@ -277,9 +277,25 @@ export class AdminController {
   }
 
   @Get('admin/audit')
-  async getAuditLog() {
-    const result = await this.pool.query('SELECT * FROM audit_log ORDER BY id DESC LIMIT 100');
-    return result.rows;
+  async getAuditLog(
+    @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string
+  ) {
+    const limit = Math.min(200, Math.max(1, parseInt(limitStr || '', 10) || 50));
+    const offset = Math.max(0, parseInt(offsetStr || '', 10) || 0);
+
+    const countRes = await this.pool.query('SELECT COUNT(*) AS total FROM audit_log');
+    const total = parseInt(countRes.rows[0]?.total || '0', 10);
+
+    const result = await this.pool.query(
+      'SELECT * FROM audit_log ORDER BY id DESC LIMIT $1 OFFSET $2',
+      [limit, offset]
+    );
+    const res: any = result.rows;
+    res.total = total;
+    res.limit = limit;
+    res.offset = offset;
+    return res;
   }
 
   @Get('admin/config')

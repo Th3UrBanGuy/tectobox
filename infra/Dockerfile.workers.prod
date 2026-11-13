@@ -31,4 +31,9 @@ COPY --from=builder /app/services/workers/dist ./services/workers/dist
 
 RUN pnpm install --prod --frozen-lockfile --config.ignore-scripts=true
 
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup \
+    && chown -R appuser:appgroup /app
+
+USER appuser
+
 CMD ["pnpm", "--filter", "@tectonic/workers", "run", "start"]
