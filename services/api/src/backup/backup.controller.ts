@@ -8,6 +8,7 @@ import {
   Res,
   UseGuards,
   ParseIntPipe,
+  NotImplementedException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { TenantGuard } from '../tenant/tenant.guard.js';
@@ -93,11 +94,7 @@ export class BackupController {
 
   @Post(['clients/:id/backup/drive/upload', 'backup/drive/upload'])
   uploadDrive() {
-    return {
-      ok: true,
-      folder: 'Tectobox Backups',
-      files: [{ name: 'tectonic-backup.json' }, { name: 'tectonic-backup.md' }],
-    };
+    throw new NotImplementedException('Google Drive backup upload is not implemented');
   }
 
   @Get(['clients/:id/backup/drive/list', 'backup/drive/list'])

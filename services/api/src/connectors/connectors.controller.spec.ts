@@ -10,6 +10,7 @@ vi.mock('@tectonic/messaging', () => ({
 }));
 
 import { ConnectorsController } from './connectors.controller.js';
+import { metaOAuthState } from '../meta/meta.controller.js';
 
 function fakeReq(host: string, proto?: string) {
   return {
@@ -161,6 +162,53 @@ describe('ConnectorsController.getConnectors — honest statuses (no demo data)'
     expect(res.whatsapp.accounts).toHaveLength(1);
     expect(res.whatsapp.accounts[0].label).toBe('Shop WA');
     expect(res.telegram.status).toBe('disconnected');
+  });
+});
+
+describe('ConnectorsController.metaOAuthCallback — 10-minute TTL expiry (M8)', () => {
+  const ctrl = new ConnectorsController({} as any, {} as any);
+
+  function mockRes() {
+    let statusCode = 200;
+    let body = '';
+    const res: any = {
+      status: vi.fn((code: number) => {
+        statusCode = code;
+        return res;
+      }),
+      send: vi.fn((data: string) => {
+        body = data;
+        return res;
+      }),
+      getStatusCode: () => statusCode,
+      getBody: () => body,
+    };
+    return res;
+  }
+
+  it('rejects a state older than 10 minutes with 400', async () => {
+    const expiredState = 'test-client.expired-state-xyz';
+    const elevenMinutesAgo = Date.now() - 11 * 60 * 1000;
+    metaOAuthState.setState(expiredState, 99, elevenMinutesAgo);
+
+    const res = mockRes();
+    const req = { protocol: 'https', get: () => 'example.com' } as any;
+
+    await ctrl.metaOAuthCallback('sample-code-123', expiredState, req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.getBody()).toContain('Invalid or expired connection session');
+    expect(metaOAuthState.getState(expiredState)).toBeNull();
+  });
+
+  it('rejects unknown or invalid state with 400', async () => {
+    const res = mockRes();
+    const req = { protocol: 'https', get: () => 'example.com' } as any;
+
+    await ctrl.metaOAuthCallback('sample-code-123', 'non-existent-state', req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.getBody()).toContain('Invalid or expired connection session');
   });
 });
 

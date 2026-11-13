@@ -76,4 +76,8 @@ describe('BackupController tenant scoping (C3)', () => {
 
     expect(mockService.exportClientData).toHaveBeenCalledWith(42);
   });
+
+  it('Drive upload returns honest 501 NotImplementedException instead of fake file list', () => {
+    expect(() => controller.uploadDrive()).toThrowError(/not implemented/i);
+  });
 });
