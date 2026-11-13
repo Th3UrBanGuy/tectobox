@@ -4772,7 +4772,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('btn-close-assign').onclick = () => $('assign-modal').classList.add('hidden');
   $('btn-save-pw').onclick = async () => {
     const password = $('pw-new').value;
-    if (!password || password.length < 4) return toast('Password must be at least 4 characters', 'err');
+    if (!password || password.length < 12) return toast('Password must be at least 12 characters', 'err');
     try {
       await api(`/api/admin/users/${state.pwUserId}/reset-password`, { method: 'POST', body: JSON.stringify({ password }) });
       $('pw-modal').classList.add('hidden');
@@ -5630,7 +5630,7 @@ async function loadPayments(tab = currentPaymentsTab) {
         btn.disabled = true;
         btn.textContent = 'Verifying…';
         try {
-          const r = await api(`/api/payments/${id}/verify`, { method: 'POST', body: JSON.stringify({ verified_by: state.me?.username || 'Owner' }) });
+          const r = await api(`/api/payments/${id}/verify`, { method: 'POST', body: JSON.stringify({}) });
           toast(r.message || 'Payment verified!', 'ok');
           loadPayments();
           loadPaymentStats();

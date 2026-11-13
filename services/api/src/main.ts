@@ -9,7 +9,7 @@ import { AppModule } from './app.module.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { StructuredLogger } from './common/logger/logger.service.js';
 import { watchdogMiddleware } from './common/watchdog/watchdog.middleware.js';
-import { corsOriginCallback } from './auth/cors.util.js';
+import { corsOriginCallback, getAllowedOrigins } from './auth/cors.util.js';
 import { createRateLimitMiddleware } from './auth/rate-limit.middleware.js';
 
 async function bootstrap() {
@@ -35,6 +35,24 @@ async function bootstrap() {
   });
 
   const expressApp = app.getHttpAdapter().getInstance();
+  // Coordinator fix (2026-11-14): the public widget is embedded on customer
+  // sites, so /api/widget/* must answer cross-origin from ANY origin. It is
+  // authenticated by widget key, never by cookie, so ACAO:* is safe here.
+  // The global allowlist above would otherwise break every embedded widget.
+  // Only origins NOT on the allowlist get the wildcard (allowlisted origins
+  // keep the credentialed CORS headers from enableCors).
+  expressApp.use((req: any, res: any, next: any) => {
+    if (req.path && req.path.startsWith('/api/widget/')) {
+      const origin = req.headers?.origin as string | undefined;
+      if (origin && !getAllowedOrigins().includes(origin)) {
+        res.header('Access-Control-Allow-Origin', '*');
+        res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+        res.header('Access-Control-Allow-Headers', 'Content-Type');
+        if (req.method === 'OPTIONS') return res.sendStatus(204);
+      }
+    }
+    next();
+  });
   expressApp.use(watchdogMiddleware);
   const candidatePublicDirs = [
     path.join(process.cwd(), 'services/api/public'),

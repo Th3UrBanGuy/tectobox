@@ -29,6 +29,8 @@
     "@tectonic/coordination": "workspace:*",
     "@tectonic/messaging": "workspace:*",
     "@types/cookie-parser": "^1.4.10",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
     "express": "^5.0.1",
     "ioredis": "^5.11.1",

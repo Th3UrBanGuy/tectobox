@@ -112,7 +112,7 @@ describe('Audit Log Write Helper & Endpoints (M2)', () => {
         }); // user insert
 
       await adminController.createUser(
-        { username: 'new_operator', password: 'password123' },
+        { username: 'new_operator', password: 'password1234' },
         { user: { username: 'admin_user', role: 'admin' }, headers: { 'x-forwarded-for': '10.0.0.1' } }
       );
 
@@ -128,7 +128,7 @@ describe('Audit Log Write Helper & Endpoints (M2)', () => {
       const mockLicensing = {} as any;
       const adminController = new AdminController(mockPool, mockLicensing, eventsService);
 
-      mockPool.query.mockResolvedValueOnce({ rows: [] }); // UPDATE users SET password_hash
+      mockPool.query.mockResolvedValueOnce({ rows: [{ id: 55 }] }); // UPDATE users SET password_hash ... RETURNING id
 
       await adminController.resetUserPassword(
         55,
