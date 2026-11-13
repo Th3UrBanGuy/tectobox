@@ -211,4 +211,40 @@ describe('AdminController (seg-02 secrets & honest responses)', () => {
       );
     });
   });
+
+  describe('listWorkspaces (F5 wrong id regression)', () => {
+    it('returns client id as id, client_id as client id, and user id under distinct user_id alias', async () => {
+      mockPool.query.mockImplementationOnce(async (sql: string) => {
+        expect(sql).not.toContain('u.id as id');
+        expect(sql).toContain('c.id as id');
+        expect(sql).toContain('u.id as user_id');
+        return {
+          rows: [
+            {
+              id: 14,
+              client_id: 14,
+              client_name: 'Alpha Electronics',
+              user_id: 15,
+              username: 'alpha_operator',
+              active: true,
+              conv_count: 10,
+              order_count: 4,
+              lead_count: 2,
+              license: null,
+            },
+          ],
+        };
+      });
+
+      const res = await controller.listWorkspaces();
+      expect(res).toHaveLength(1);
+      const ws = res[0];
+      // Assert returned id equals client id, not user id
+      expect(ws.id).toBe(14);
+      expect(ws.client_id).toBe(14);
+      expect(ws.user_id).toBe(15);
+      expect(ws.id).not.toBe(ws.user_id);
+      expect(ws.ai_budget).toBeDefined();
+    });
+  });
 });

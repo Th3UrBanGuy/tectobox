@@ -6,7 +6,18 @@ import {
   languageDirective,
   buildSystemPrompt,
   queryGoAIEngine,
-} from './router.js';
+} from './router.ts';
+
+export function getPrefetchLimit(): number {
+  const envVal = process.env.AI_PREFETCH;
+  if (envVal !== undefined && envVal.trim() !== '') {
+    const parsed = parseInt(envVal, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return 10;
+}
 
 export async function startAIWorker() {
   const mq = new RabbitMQClient({
@@ -17,7 +28,8 @@ export async function startAIWorker() {
 
   const channel = mq.getChannel();
   if (channel) {
-    await channel.prefetch(1);
+    const prefetch = getPrefetchLimit();
+    await channel.prefetch(prefetch);
     await channel.assertQueue('ai.requests', {
       durable: true,
       arguments: {

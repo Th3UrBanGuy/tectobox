@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -238,7 +239,17 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 				if model == "" {
 					model = "gemini-3.6-flash"
 				}
-				wCtx, wCancel := context.WithTimeout(context.WithoutCancel(ctx), 25*time.Second)
+				t3Timeout := 20 * time.Second
+				if envMs := os.Getenv("GEMINI_WEB2API_TIMEOUT_MS"); envMs != "" {
+					if d, err := strconv.Atoi(envMs); err == nil && d > 0 {
+						t3Timeout = time.Duration(d) * time.Millisecond
+					}
+				} else if envSec := os.Getenv("GEMINI_WEB2API_TIMEOUT_SEC"); envSec != "" {
+					if d, err := strconv.Atoi(envSec); err == nil && d > 0 {
+						t3Timeout = time.Duration(d) * time.Second
+					}
+				}
+				wCtx, wCancel := context.WithTimeout(context.WithoutCancel(ctx), t3Timeout)
 				defer wCancel()
 				if reply, err := e.callOpenAICompatible(wCtx, url, key, model, sysPrompt, userMsg); err == nil && reply != "" {
 					return reply, "gemini-web2api:" + model, nil

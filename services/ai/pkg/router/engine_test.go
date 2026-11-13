@@ -2,9 +2,12 @@ package router
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Acceptance criterion:
@@ -255,5 +258,48 @@ func TestTier3_SkipSharedWeb2APIForWorkspaceTraffic(t *testing.T) {
 	}
 	if model == "gemini-web2api:gemini-3.6-flash" {
 		t.Fatalf("workspace traffic must not route through shared web2api session")
+	}
+}
+
+// TestTier3_Web2APITimeoutBounded verifies that when web2api backend is slow / hangs,
+// the bounded timeout fires and falls through to Tier 4 demo responder.
+func TestTier3_Web2APITimeoutBounded(t *testing.T) {
+	// Start a mock slow server that sleeps longer than configured timeout
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"content":"late"}}]}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("GEMINI_WEB2API_URL", server.URL)
+	t.Setenv("GEMINI_WEB2API_KEY", "dummy-key")
+	t.Setenv("GEMINI_WEB2API_TIMEOUT_MS", "50") // 50ms bounded timeout for test
+
+	engine := NewEngine()
+	ctx := context.Background()
+
+	pctx := PromptContext{
+		ClientID: "", // Tier 3 web2api runs when ClientID == ""
+		Knowledge: []KnowledgeItem{
+			{
+				Title:   "Delivery Policy",
+				Content: "Delivery fee is 120 taka.",
+			},
+		},
+	}
+
+	start := time.Now()
+	reply, _, model, _ := engine.GenerateReply(ctx, pctx, "delivery charge", nil, "")
+	dur := time.Since(start)
+
+	if dur > 4*time.Second {
+		t.Fatalf("expected bounded timeout within 4s, took %v", dur)
+	}
+	if !strings.Contains(reply, "120") {
+		t.Fatalf("expected fallback demo responder reply containing 120, got: %s (model: %s)", reply, model)
+	}
+	if model != "deterministic-catalog" {
+		t.Fatalf("expected deterministic-catalog model on timeout fallback, got: %s", model)
 	}
 }
