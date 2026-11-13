@@ -2,7 +2,6 @@ import { RabbitMQClient } from '@tectonic/messaging';
 import { RedisCoordinator } from '@tectonic/coordination';
 import { Redis } from 'ioredis';
 import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
-// @ts-ignore
 import { pacedSend, clearPacerQueue } from './pacer.ts';
 import * as path from 'path';
 import * as fs from 'fs';
