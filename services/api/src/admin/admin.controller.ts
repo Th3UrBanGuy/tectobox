@@ -136,8 +136,16 @@ export class AdminController {
 
   @Post('admin/users')
   async createUser(@Body() body: any, @Req() req?: any) {
-    if (!body.username || !body.password) {
+    if (!body?.username || typeof body.username !== 'string' || !body.username.trim()) {
       throw new BadRequestException('Username and password are required');
+    }
+    if (!body?.password || typeof body.password !== 'string' || !body.password.trim()) {
+      throw new BadRequestException('Username and password are required');
+    }
+
+    const cleanPassword = body.password.trim();
+    if (cleanPassword.length < 12) {
+      throw new BadRequestException('Password must be at least 12 characters');
     }
 
     // Check if username already exists
@@ -164,11 +172,11 @@ export class AdminController {
       clientName = wsRes.rows[0].name;
     }
 
-    const passwordHash = await hashPassword(body.password);
+    const passwordHash = await hashPassword(cleanPassword);
     const result = await this.pool.query(
-      `INSERT INTO users (username, password_hash, role, client_id, active, created_at)
-       VALUES ($1, $2, $3, $4, true, NOW())
-       RETURNING id, username, role, client_id, active, created_at`,
+      `INSERT INTO users (username, password_hash, role, client_id, active, token_version, created_at)
+       VALUES ($1, $2, $3, $4, true, 1, NOW())
+       RETURNING id, username, role, client_id, active, token_version, created_at`,
       [body.username.trim(), passwordHash, body.role || 'operator', clientId]
     );
 
@@ -222,8 +230,22 @@ export class AdminController {
 
   @Post('admin/users/:id/reset-password')
   async resetUserPassword(@Param('id', ParseIntPipe) id: number, @Body() body: { password: string }) {
-    const passwordHash = await hashPassword(body.password || 'password123');
-    await this.pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, id]);
+    if (!body?.password || typeof body.password !== 'string' || !body.password.trim()) {
+      throw new BadRequestException('Password is required');
+    }
+    const cleanPassword = body.password.trim();
+    if (cleanPassword.length < 12) {
+      throw new BadRequestException('Password must be at least 12 characters');
+    }
+    const passwordHash = await hashPassword(cleanPassword);
+    const updateRes = await this.pool.query(
+      'UPDATE users SET password_hash = $1, token_version = COALESCE(token_version, 1) + 1 WHERE id = $2 RETURNING id',
+      [passwordHash, id]
+    );
+    if (updateRes.rows.length === 0) {
+      throw new NotFoundException('User not found');
+    }
+    await this.pool.query('DELETE FROM sessions WHERE user_id = $1', [id]).catch(() => {});
     return { ok: true, success: true };
   }
 
