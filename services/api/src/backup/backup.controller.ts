@@ -8,11 +8,16 @@ import {
   Res,
   UseGuards,
   ParseIntPipe,
+  Optional,
+  Inject,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import { BackupService } from './backup.service.js';
+import { EventsService } from '../events/events.service.js';
+import { DB_POOL } from '../database/database.module.js';
+import pg from 'pg';
 
 function backupFilename(clientName: string, ext: string) {
   const safe = String(clientName || 'backup').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 40) || 'backup';
@@ -38,7 +43,17 @@ function resolveBackupTarget(req: any, tenantId: number, id: string | undefined)
 @Controller('api')
 @UseGuards(TenantGuard)
 export class BackupController {
-  constructor(private readonly backupService: BackupService) {}
+  constructor(
+    private readonly backupService: BackupService,
+    @Optional() @Inject(DB_POOL) private readonly pool?: pg.Pool,
+    @Optional() private readonly eventsService?: EventsService
+  ) {}
+
+  private getEvents(): EventsService | null {
+    if (this.eventsService) return this.eventsService;
+    if (this.pool) return new EventsService(this.pool, undefined as any);
+    return null;
+  }
 
   @Get(['clients/:id/backup/export', 'backup/export'])
   async exportJson(
@@ -49,6 +64,9 @@ export class BackupController {
   ) {
     const targetId = resolveBackupTarget(req, tenantId, id);
     const bundle = await this.backupService.exportClientData(targetId);
+    const actorId = req?.user?.username || req?.user?.id || 'client';
+    const ip = (req?.headers?.['x-forwarded-for'] as string) || req?.socket?.remoteAddress || null;
+    await this.getEvents()?.writeAudit(actorId, targetId, 'backup:export', { format: 'json', ip });
     const fname = backupFilename(bundle.client.name, 'json');
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
@@ -64,6 +82,9 @@ export class BackupController {
   ) {
     const targetId = resolveBackupTarget(req, tenantId, id);
     const bundle = await this.backupService.exportClientData(targetId);
+    const actorId = req?.user?.username || req?.user?.id || 'client';
+    const ip = (req?.headers?.['x-forwarded-for'] as string) || req?.socket?.remoteAddress || null;
+    await this.getEvents()?.writeAudit(actorId, targetId, 'backup:export', { format: 'md', ip });
     const fname = backupFilename(bundle.client.name, 'md');
     res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);

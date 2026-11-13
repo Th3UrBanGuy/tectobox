@@ -122,9 +122,10 @@ describe('LicensingController admin handlers', () => {
     expect(res.code).toMatch(/^LIC-/);
     expect(res.license.status).toBe('pending_activation');
     // Key-only must NOT cancel the client's current active licence.
-    expect(mockPool.query).toHaveBeenCalledTimes(1);
+    expect(mockPool.query).toHaveBeenCalledTimes(2);
     expect(mockPool.query.mock.calls[0][0]).toMatch(/'pending_activation'/);
     expect(mockPool.query.mock.calls[0][0]).toMatch(/NULL, NULL/); // starts_at/ends_at NULL
+    expect(mockPool.query.mock.calls[1][0]).toMatch(/INSERT INTO audit_log/);
     expect(licensing.audit).toHaveBeenCalledWith(
       'key_issue', null, 42, 10, expect.stringMatching(/^LIC-/), expect.stringContaining('30 days')
     );

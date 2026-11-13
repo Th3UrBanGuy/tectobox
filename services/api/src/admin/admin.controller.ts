@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Put, Body, Param, Query, Req, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Put, Body, Param, Query, Req, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { AdminGuard } from '../auth/admin.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
@@ -8,14 +8,21 @@ import { DB_POOL } from '../database/database.module.js';
 import { hashPassword } from '../auth/password.util.js';
 import { generateSecret, verifyTotp, otpauthUrl } from '../auth/totp.util.js';
 import { LicensingService } from '../licensing/licensing.service.js';
+import { EventsService } from '../events/events.service.js';
+import { CreateUserDto, ResetPasswordDto } from './dto/admin.dto.js';
 
 @Controller('api')
 @UseGuards(TenantGuard, AdminGuard)
 export class AdminController {
   constructor(
     @Inject(DB_POOL) private readonly pool: pg.Pool,
-    @Inject(LicensingService) private readonly licensing: LicensingService
+    @Inject(LicensingService) private readonly licensing: LicensingService,
+    @Optional() private readonly eventsService?: EventsService
   ) {}
+
+  private getEvents(): EventsService {
+    return this.eventsService || new EventsService(this.pool, this.licensing);
+  }
 
   @Get(['admin/overview', 'global-stats'])
   async getOverview() {
@@ -117,9 +124,12 @@ export class AdminController {
 
   @Delete('clients/:id')
   @Delete(['clients/:id', 'admin/clients/:id', 'admin/workspaces/:id'])
-  async deleteWorkspace(@Param('id', ParseIntPipe) id: number) {
+  async deleteWorkspace(@Param('id', ParseIntPipe) id: number, @Req() req?: any) {
     await this.pool.query('DELETE FROM users WHERE client_id = $1', [id]);
     await this.pool.query('DELETE FROM clients WHERE id = $1', [id]);
+    const actorId = req?.user?.username || req?.user?.id || 'admin';
+    const ip = req?.headers?.['x-forwarded-for'] || req?.socket?.remoteAddress || null;
+    await this.getEvents().writeAudit(actorId, id, 'workspace:delete', { ip });
     return { ok: true, success: true };
   }
 
@@ -135,7 +145,7 @@ export class AdminController {
   }
 
   @Post('admin/users')
-  async createUser(@Body() body: any, @Req() req?: any) {
+  async createUser(@Body() body: CreateUserDto, @Req() req?: any) {
     if (!body.username || !body.password) {
       throw new BadRequestException('Username and password are required');
     }
@@ -187,6 +197,10 @@ export class AdminController {
     }
 
     const user = result.rows[0];
+    const actorId = req?.user?.username || req?.user?.id || 'admin';
+    const ip = req?.headers?.['x-forwarded-for'] || req?.socket?.remoteAddress || null;
+    await this.getEvents().writeAudit(actorId, clientId, 'user:create', { newUserId: user.id, username: user.username, role: user.role, ip });
+
     return {
       ok: true,
       success: true,
@@ -221,9 +235,12 @@ export class AdminController {
   }
 
   @Post('admin/users/:id/reset-password')
-  async resetUserPassword(@Param('id', ParseIntPipe) id: number, @Body() body: { password: string }) {
+  async resetUserPassword(@Param('id', ParseIntPipe) id: number, @Body() body: ResetPasswordDto, @Req() req?: any) {
     const passwordHash = await hashPassword(body.password || 'password123');
     await this.pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, id]);
+    const actorId = req?.user?.username || req?.user?.id || 'admin';
+    const ip = req?.headers?.['x-forwarded-for'] || req?.socket?.remoteAddress || null;
+    await this.getEvents().writeAudit(actorId, null, 'password:reset', { targetUserId: id, ip });
     return { ok: true, success: true };
   }
 

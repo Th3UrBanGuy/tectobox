@@ -5,6 +5,7 @@ import {
   Param,
   Query,
   Body,
+  Req,
   UseGuards,
   Inject,
   ParseIntPipe,
@@ -13,10 +14,12 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
+import { AdminGuard } from '../auth/admin.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
+import { VerifyPaymentDto, RejectPaymentDto } from './dto/payments.dto.js';
 
 @Controller('api')
 @UseGuards(TenantGuard)
@@ -231,10 +234,12 @@ export class PaymentsController implements OnModuleInit {
   }
 
   @Post('payments/:id/verify')
+  @UseGuards(AdminGuard)
   async verifyPayment(
     @CurrentTenant() tenantId: number | null,
     @Param('id', ParseIntPipe) paymentId: number,
-    @Body() body: any,
+    @Body() body: VerifyPaymentDto,
+    @Req() req?: any,
   ) {
     const checkSql = tenantId
       ? 'SELECT * FROM payments WHERE id = $1 AND client_id = $2 LIMIT 1'
@@ -247,15 +252,16 @@ export class PaymentsController implements OnModuleInit {
     }
     const payment = check.rows[0];
     const targetClientId = payment.client_id;
-    const verifiedBy = body.verified_by || 'Admin';
+    const sessionUser = req?.user?.username || String(req?.user?.id || 'admin');
+    const verifiedBy = sessionUser;
 
-    // Update payment record
+    // Update payment record scoped by client_id
     const updRes = await this.pool.query(
       `UPDATE payments
        SET status = 'verified', verified_by = $1, verified_at = NOW(), rejection_reason = NULL
-       WHERE id = $2
+       WHERE id = $2 AND client_id = $3
        RETURNING *`,
-      [verifiedBy, paymentId],
+      [verifiedBy, paymentId, targetClientId],
     );
     const updatedPayment = updRes.rows[0];
 
@@ -314,10 +320,12 @@ export class PaymentsController implements OnModuleInit {
   }
 
   @Post('payments/:id/reject')
+  @UseGuards(AdminGuard)
   async rejectPayment(
     @CurrentTenant() tenantId: number | null,
     @Param('id', ParseIntPipe) paymentId: number,
-    @Body() body: any,
+    @Body() body: RejectPaymentDto,
+    @Req() req?: any,
   ) {
     const checkSql = tenantId
       ? 'SELECT * FROM payments WHERE id = $1 AND client_id = $2 LIMIT 1'
@@ -330,15 +338,15 @@ export class PaymentsController implements OnModuleInit {
     }
     const payment = check.rows[0];
     const targetClientId = payment.client_id;
-    const reason = body.reason || 'TrxID স্টেটমেন্টে পাওয়া যায়নি / টাকা ক্রেডিট হয়নি';
+    const reason = body?.reason || 'TrxID স্টেটমেন্টে পাওয়া যায়নি / টাকা ক্রেডিট হয়নি';
 
-    // Update payment record
+    // Update payment record scoped by client_id
     const updRes = await this.pool.query(
       `UPDATE payments
        SET status = 'rejected', rejection_reason = $1, verified_at = NULL
-       WHERE id = $2
+       WHERE id = $2 AND client_id = $3
        RETURNING *`,
-      [reason, paymentId],
+      [reason, paymentId, targetClientId],
     );
     const updatedPayment = updRes.rows[0];
 
