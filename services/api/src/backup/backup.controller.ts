@@ -9,6 +9,7 @@ import {
   UseGuards,
   ParseIntPipe,
   NotImplementedException,
+  BadRequestException,
   Optional,
   Inject,
 } from '@nestjs/common';
@@ -35,8 +36,13 @@ function backupFilename(clientName: string, ext: string) {
 function resolveBackupTarget(req: any, tenantId: number, id: string | undefined): number {
   const isAdmin = req?.user?.role === 'admin' || req?.user?.role === 'superadmin';
   if (isAdmin && id) {
+    // P5 (2026-11-15): an admin passing a non-numeric id ('null',
+    // 'undefined', …) used to fall through to tenantId null and die
+    // inside exportClientData with a bare 404. Reject it here with a
+    // clean 400 instead of sending a null client anywhere.
     const parsed = parseInt(id, 10);
-    if (!Number.isNaN(parsed)) return parsed;
+    if (Number.isNaN(parsed)) throw new BadRequestException('Invalid workspace id — pick a workspace first');
+    return parsed;
   }
   return tenantId;
 }

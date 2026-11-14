@@ -9,6 +9,7 @@ import {
   demoResponder,
   languageDirective,
   parsePaymentClaim,
+  isActualPaymentStatement,
   detectCustomerLanguage,
 } from '../ai/router.js';
 import { evaluatePromptSafety } from '../ai/guardrails.js';
@@ -186,8 +187,14 @@ export class AiReplyService {
         timings.dbMs = Date.now() - dbStarted;
 
         // 6.1 Check if message contains a payment claim (TrxID / bKash / Nagad confirmation)
+        // P16 (2026-11-15): the claim flow is TRIGGERED only by an actual
+        // payment statement WITH a TrxID (isActualPaymentStatement). A
+        // question about payment ("Can I pay with bKash?", "What is your
+        // bKash number?") still parses into a claim object, but it must
+        // NEVER reach handlePaymentClaim — it falls through to the normal
+        // AI reply (payment methods / merchant number) instead.
         const paymentClaim = parsePaymentClaim(text, prodsRes.rows, history);
-        if (paymentClaim && this.paymentClaimService) {
+        if (paymentClaim && this.paymentClaimService && isActualPaymentStatement(text, paymentClaim.trxId)) {
           const claimResult = await this.paymentClaimService.handlePaymentClaim({
             client,
             conv,

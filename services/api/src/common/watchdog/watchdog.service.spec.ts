@@ -27,6 +27,19 @@ describe('WatchdogService', () => {
     expect(metrics.endpoints['/api/chats/:id']).toBeDefined();
   });
 
+  it('exposes flat aliases matching the nested shape (P11)', () => {
+    const metrics = watchdog.getMetrics();
+    expect(metrics.totalRequests).toBe(metrics.requests.total);
+    expect(metrics.activeRequests).toBe(metrics.requests.active);
+    expect(metrics.requestsPerMinute).toBe(metrics.requests.rates.rpm);
+    expect(metrics.avgLatencyMs).toBe(metrics.performance.avgLatencyMs);
+    expect(metrics.statusCodes).toEqual(metrics.requests.statusDistribution);
+    // The 404 recorded above counts toward the error rate (4xx + 5xx),
+    // so the counters are real numbers, not the old always-0.
+    expect(metrics.errorRate).toBeGreaterThan(0);
+    expect(metrics.totalRequests).toBeGreaterThan(0);
+  });
+
   it('records client telemetry into the system buffer', () => {
     const record = watchdog.recordClientTelemetry({
       error: 'TypeError',

@@ -53,7 +53,9 @@ function avatarInitials(name) {
 }
 function convAvatar(c, size) {
   const m = PLATFORMS[c.platform] || {};
-  const nm = c.customer_name || m.label || c.platform;
+  // P14: fall back to the visitor id before the platform label, so
+  // unnamed webchat visitors get distinct initials instead of "WE".
+  const nm = c.customer_name || c.platform_user_id || m.label || c.platform;
   const badge = { whatsapp: ['WA', 'p-whatsapp'], telegram: ['TG', 'p-telegram'], webchat: ['WC', 'p-webchat'], messenger: ['M', 'p-messenger'], instagram: ['IG', 'p-instagram'] }[c.platform];
   // Online dot: active within the last 10 minutes.
   let online = false;

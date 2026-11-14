@@ -4,13 +4,14 @@ import { AdminController } from './admin.controller.js';
 import { hashPassword } from '../auth/password.util.js';
 import { encrypt, decrypt, isEncrypted } from '../common/crypto.js';
 import { generateSecret, verifyTotp } from '../auth/totp.util.js';
-import { NotImplementedException, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 
 describe('AdminController (seg-02 secrets & honest responses)', () => {
   const originalEnv = process.env.ENCRYPTION_KEY;
   let controller: AdminController;
   let mockPool: any;
   let mockLicensing: any;
+  let mockEvents: any;
   let dbQueries: Array<{ sql: string; params: any[] }>;
 
   beforeEach(() => {
@@ -25,14 +26,92 @@ describe('AdminController (seg-02 secrets & honest responses)', () => {
     mockLicensing = {
       audit: vi.fn(),
     };
-    controller = new AdminController(mockPool, mockLicensing);
+    mockEvents = {
+      broadcastTenantEvent: vi.fn(async () => {}),
+      writeAudit: vi.fn(async () => {}),
+    };
+    controller = new AdminController(mockPool, mockLicensing, mockEvents);
   });
 
-  describe('POST admin/notify', () => {
-    it('returns honest 501 NotImplementedException instead of fake success', async () => {
-      await expect(controller.sendNotification({ message: 'Hello' })).rejects.toThrow(
-        NotImplementedException
-      );
+  describe('POST admin/notify (P12 — real send + history)', () => {
+    it('rejects an empty message with a clean validation error', async () => {
+      await expect(controller.sendNotification({ message: '   ' })).rejects.toThrow(BadRequestException);
+      await expect(controller.sendNotification({})).rejects.toThrow(BadRequestException);
+      expect(dbQueries).toHaveLength(0);
+    });
+
+    it('records the notification and broadcasts it to every workspace', async () => {
+      mockPool.query.mockImplementation(async (sql: string, params: any[] = []) => {
+        dbQueries.push({ sql, params });
+        if (sql.includes('SELECT id FROM clients') && !sql.includes('WHERE id = ANY')) return { rows: [{ id: 5 }, { id: 7 }] };
+        if (sql.includes('WHERE id = ANY')) return { rows: [{ id: 5 }, { id: 7 }] };
+        return { rows: [], rowCount: 1 };
+      });
+      const res = await controller.sendNotification({ message: 'Hello', title: 'Hi' });
+      expect(res).toEqual({ ok: true, sent: 2, skipped: 0 });
+      expect(dbQueries.some((q) => q.sql.includes('INSERT INTO admin_notifications'))).toBe(true);
+      expect(mockEvents.broadcastTenantEvent).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips unknown workspace ids instead of sending to them', async () => {
+      mockPool.query.mockImplementation(async (sql: string, params: any[] = []) => {
+        dbQueries.push({ sql, params });
+        if (sql.includes('WHERE id = ANY')) return { rows: [{ id: 5 }] };
+        return { rows: [], rowCount: 1 };
+      });
+      const res = await controller.sendNotification({ message: 'Hi', clientIds: [5, 999] });
+      expect(res).toEqual({ ok: true, sent: 1, skipped: 1 });
+      expect(mockEvents.broadcastTenantEvent).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('GET admin/overview (P1)', () => {
+    it('derives channel counts from the real resources, with no hardcoded floor', async () => {
+      const ov = await controller.getOverview();
+      expect(ov.channels).toBe(0);
+      expect(ov.connected).toBe(0);
+      expect(ov.errored).toBe(0);
+    });
+
+    it('counts a ready webchat as connected (one truth with the resources table)', async () => {
+      mockPool.query.mockImplementation(async (sql: string, params: any[] = []) => {
+        dbQueries.push({ sql, params });
+        if (sql.includes('FROM channel_sessions')) {
+          return { rows: [{ channel: 'webchat', status: 'ready', lastSeen: null, workspace: 'Xyz', client_id: 5, account: null }] };
+        }
+        if (sql.includes('FROM meta_pages')) return { rows: [] };
+        if (sql.includes('FROM clients')) return { rows: [{ count: '1' }] };
+        if (sql.includes('FROM conversations')) return { rows: [{ count: '0' }] };
+        if (sql.includes('FROM messages')) return { rows: [{ count: '0' }] };
+        if (sql.includes('FROM orders')) return { rows: [{ count: '0', total: '0' }] };
+        if (sql.includes('FROM leads')) return { rows: [{ count: '0' }] };
+        return { rows: [] };
+      });
+      const ov = await controller.getOverview();
+      expect(ov.channels).toBe(1);
+      expect(ov.connected).toBe(1);
+    });
+  });
+
+  describe('GET admin/config (P10)', () => {
+    it('returns the real internal AI URL and model defaults, never localhost', async () => {
+      const cfg = await controller.getConfig();
+      expect(cfg.aiBaseUrl).toBe('http://ai:8081/v1');
+      expect(cfg.aiModel).toBe('gemini-3.6-flash');
+      expect(cfg.aiModelPool).toContain('@cf/zai-org/glm-4.7-flash');
+      expect(cfg.aiBaseUrl).not.toContain('localhost');
+    });
+
+    it('maps camelCase saves to canonical keys so they round-trip', async () => {
+      await controller.updateConfig({ autoReply: false, aiModel: 'gemini-3.6-flash', aiBaseUrl: 'http://ai:8081/v1' });
+      const keys = dbQueries.map((q) => q.params?.[0]);
+      expect(keys).toContain('ai.auto_reply');
+      expect(keys).toContain('ai.model');
+      expect(keys).toContain('ai.base_url');
+      expect(keys).not.toContain('autoReply');
+      expect(keys).not.toContain('aiModel');
+      const autoReply = dbQueries.find((q) => q.params?.[0] === 'ai.auto_reply');
+      expect(autoReply?.params?.[1]).toBe('0');
     });
   });
 

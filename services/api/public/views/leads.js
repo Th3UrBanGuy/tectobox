@@ -38,9 +38,10 @@ async function loadLeads(quiet) {
 async function loadIntelSummary() {
   try {
     const s = await api('/api/leads/intel-stats');
-    const hot = (s.byTemperature && s.byTemperature.hot) || 0;
-    const warm = (s.byTemperature && s.byTemperature.warm) || 0;
-    $('lead-intel-summary').textContent = `${s.total || 0} leads · ${hot} hot · ${warm} warm`;
+    const hot = (s.byTemperature && s.byTemperature.hot) ?? s.hot ?? 0;
+    const warm = (s.byTemperature && s.byTemperature.warm) ?? s.warm ?? 0;
+    const cold = (s.byTemperature && s.byTemperature.cold) ?? s.cold ?? 0;
+    $('lead-intel-summary').textContent = `${s.total || 0} leads · ${hot} hot · ${warm} warm · ${cold} cold`;
   } catch { /* non-fatal */ }
 }
 // Smart segments: customers (bought), potential (hot/warm or engaged, not yet
@@ -57,14 +58,17 @@ function renderLeads() {
   document.querySelectorAll('#lead-segment-filters button').forEach(b => {
     const f = b.dataset.seg;
     const n = f === 'all' ? state.leads.length : state.leads.filter(l => leadSegmentOf(l) === f).length;
-    b.textContent = segName[f] + (state.leadSegment === 'all' || f === state.leadSegment ? ` (${n})` : '');
+    // P15: counts are always shown — the old code showed them only for
+    // the active filter, so the audit read "Customers 0, New 0" as a
+    // data bug when the counts were simply hidden.
+    b.textContent = segName[f] + ` (${n})`;
   });
   const rows = state.leads.filter(l => state.leadSegment === 'all' || leadSegmentOf(l) === state.leadSegment);
   document.querySelectorAll('#lead-temp-filters button').forEach(b => {
     const f = b.dataset.lt;
-    const base = f === 'all' ? 'All temps' : f[0].toUpperCase() + f.slice(1);
+    const base = f === 'all' ? 'All' : f[0].toUpperCase() + f.slice(1);
     const n = f === 'all' ? state.leads.length : state.leads.filter(l => (l.temperature || 'cold') === f).length;
-    b.textContent = base + (state.leadTemp === 'all' || f === state.leadTemp ? ` (${n})` : '');
+    b.textContent = base + ` (${n})`;
   });
   $('leads-body').innerHTML = rows.map(l => {
     const conv = l.conversion_probability != null ? Math.round(l.conversion_probability * 100) + '%' : '—';

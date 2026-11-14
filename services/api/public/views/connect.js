@@ -68,7 +68,7 @@ async function addAccount(channel) {
     body.method = 'phone';
     body.phoneNumber = phoneNumber;
     try {
-      await api(`/api/clients/${state.clientId}/connectors/${channel}/connect`, {
+      await clientApi(`/api/clients/:clientId/connectors/${channel}/connect`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
@@ -76,7 +76,7 @@ async function addAccount(channel) {
     startPhoneConnect(channel, slot, label.trim() || slot, phoneNumber);
   } else {
     try {
-      await api(`/api/clients/${state.clientId}/connectors/${channel}/connect`, {
+      await clientApi(`/api/clients/:clientId/connectors/${channel}/connect`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
@@ -233,11 +233,11 @@ function setupConnectModal(channel, slot, onPollExtra) {
       // refresh). Delete it — but only after a fresh read confirms it still
       // isn't 'connected', so a scan that landed a moment earlier is never
       // wiped. Fire-and-forget: the modal closes instantly either way.
-      api(`/api/clients/${state.clientId}/connectors`).then(s => {
+      clientApi(`/api/clients/:clientId/connectors`).then(s => {
         const accts = (((ch === 'whatsapp' ? s.whatsapp : s.telegram) || {}).accounts) || [];
         const acct = accts.find(a => (a.slot || 'default') === (sl || 'default'));
         if (acct && acct.status !== 'connected') {
-          api(`/api/clients/${state.clientId}/connectors/${ch}/${encodeURIComponent(sl)}`, { method: 'DELETE' }).catch(() => {});
+          clientApi(`/api/clients/:clientId/connectors/${ch}/${encodeURIComponent(sl)}`, { method: 'DELETE' }).catch(() => {});
         }
       }).catch(() => {});
     }
@@ -246,7 +246,7 @@ function setupConnectModal(channel, slot, onPollExtra) {
   state.qrClose = closeQrModal;
   state.qrPoll = setInterval(async () => {
     try {
-      const s = await api(`/api/clients/${state.clientId}/connectors`);
+      const s = await clientApi(`/api/clients/:clientId/connectors`);
       const accounts = (pollChannel === 'whatsapp' ? (s.whatsapp && s.whatsapp.accounts) : (s.telegram && s.telegram.accounts)) || [];
       const acct = accounts.find(a => (a.slot || 'default') === (pollSlot || 'default'));
       if (acct && acct.status === 'connected') closeQrModal();
@@ -276,7 +276,7 @@ function setQrImage(src) {
 async function startQrConnect(channel, slot = 'default', label = null) {
   if (slot === 'default' && !label) {
     try {
-      await api(`/api/clients/${state.clientId}/connectors/${channel}/connect`, { method: 'POST' });
+      await clientApi(`/api/clients/:clientId/connectors/${channel}/connect`, { method: 'POST' });
     } catch (e) { return toast('Could not start: ' + e.message, 'err'); }
   }
   state.qrMethod = 'qr';
@@ -360,13 +360,13 @@ function enableTgCodeForm() {
 async function startMetaOAuth() {
   let res;
   try {
-    res = await api(`/api/clients/${state.clientId}/connectors/messenger/oauth/start`);
+    res = await clientApi(`/api/clients/:clientId/connectors/messenger/oauth/start`);
   } catch (e) { return toast('Could not start: ' + e.message, 'err'); }
   if (!res.url) return toast('Could not start: no URL returned', 'err');
   window.open(res.url, '_blank', 'width=640,height=720');
   const t = setInterval(async () => {
     try {
-      const s = await api(`/api/clients/${state.clientId}/connectors`);
+      const s = await clientApi(`/api/clients/:clientId/connectors`);
       if (s.messenger && s.messenger.status === 'connected') {
         clearInterval(t); clearTimeout(kill);
         if (state.view === 'settings') loadConnectors();

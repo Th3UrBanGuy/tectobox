@@ -226,7 +226,7 @@ function renderConvList() {
   }
   box.innerHTML = list.map((c, i) => {
     const m = PLATFORMS[c.platform] || {};
-    const nm = c.customer_name || m.label || c.platform;
+    const nm = convDisplayName(c);
     const unread = c.unread_count > 0;
     // Keep the "AI is replying…" warmth across list re-renders.
     const thinking = state._thinking === c.id;
@@ -251,6 +251,10 @@ function renderConvList() {
 }
 
 async function renderInboxEmpty() {
+  // P13: the admin has no conversations of their own and no channels to
+  // connect — the empty state + pane hiding here is meaningless for
+  // them and would hide the foreign conversation View-chat just opened.
+  if (isAdmin(state.me?.role)) { $('inbox-panes').classList.remove('hidden'); $('inbox-empty').innerHTML = ''; return; }
   const empty = $('inbox-empty'), panes = $('inbox-panes');
   // Hide the list panes synchronously when there is nothing to list, BEFORE
   // the connectors fetch resolves — otherwise the Chats toolbar and the
@@ -260,7 +264,7 @@ async function renderInboxEmpty() {
   if (!state.conversations.length) panes.classList.add('hidden');
   let connected = 0;
   try {
-    const conns = await api(`/api/clients/${state.clientId}/connectors`);
+    const conns = await clientApi(`/api/clients/:clientId/connectors`);
     connected = Object.values(conns).filter(s => s.status === 'connected').length;
   } catch {}
   if (!state.conversations.length && connected === 0) {
@@ -280,20 +284,63 @@ async function renderInboxEmpty() {
   }
 }
 
+/** P14: the display name for a conversation — the customer's name, else
+ * the lead name (already joined by the API), else the visitor/platform
+ * id, else the platform label. Never just "Webchat" when an id exists. */
+function convDisplayName(c) {
+  if (!c) return 'Chat';
+  const m = PLATFORMS[c.platform] || {};
+  return c.customer_name || c.platform_user_id || m.label || c.platform;
+}
+
 async function selectConversation(id) {
   state.activeId = id;
   state.orderLines = {};
   renderConvList();
-  try { await api(`/api/conversations/${id}/read`, { method: 'POST' }); } catch {}
-  const conv = state.conversations.find(c => c.id === id);
-  if (conv) { conv.unread_count = 0; renderConvList(); }
-  state.messages = await api(`/api/conversations/${id}/messages`);
-  renderChatHeader(conv);
-  renderMessages();
-  renderCustomerTab(conv);
-  renderOrderTab();
-  setComposerEnabled(true);
-  restoreDraft();
+  // P14: paint the centre panel synchronously (header + skeleton) so
+  // opening a conversation never flashes white while messages load.
+  let conv = (state.conversations || []).find(c => c.id === id) || null;
+  if (conv) {
+    renderChatHeader(conv);
+    $('messages').innerHTML = `<div class="warm-empty"><b>Loading messages…</b></div>`;
+  }
+  const isAdminView = isAdmin(state.me?.role);
+  try {
+    if (isAdminView) {
+      // P13/P20: the conversation belongs to ANOTHER workspace. The
+      // admin's own inbox is empty, so the old code found nothing and
+      // rendered "Pick a conversation" + an empty detail panel. Fetch
+      // through the admin endpoints and render read-only — the foreign
+      // row is NEVER mixed into state.conversations.
+      const detail = await api(`/api/admin/conversations/${id}`);
+      conv = detail;
+      state.adminReadOnly = true;
+      renderChatHeader(conv);
+      $('inbox-panes')?.classList.remove('hidden');
+      const empty = $('inbox-empty');
+      if (empty) empty.innerHTML = '';
+      state.messages = await api(`/api/admin/conversations/${id}/messages`);
+      renderMessages();
+      renderCustomerTab(conv, detail.orders || []);
+      renderOrderTab();
+      setComposerEnabled(false);
+    } else {
+      state.adminReadOnly = false;
+      try { await api(`/api/conversations/${id}/read`, { method: 'POST' }); } catch {}
+      if (conv) { conv.unread_count = 0; renderConvList(); }
+      state.messages = await api(`/api/conversations/${id}/messages`);
+      renderChatHeader(conv);
+      renderMessages();
+      renderCustomerTab(conv);
+      renderOrderTab();
+      setComposerEnabled(true);
+      restoreDraft();
+    }
+  } catch (e) {
+    toast('Could not open conversation: ' + e.message, 'err');
+    renderChatHeader(null);
+    return;
+  }
   // Animated entrance: the chat slides in beside the contact.
   const pane = document.querySelector('.chat-pane');
   if (pane) {
@@ -304,7 +351,7 @@ async function selectConversation(id) {
   if (isMobileView()) {
     $('inbox-panes').classList.add('m-chat-open');
     $('inbox-panes').classList.remove('m-detail-open');
-  } else {
+  } else if (!isAdminView) {
     $('msg-input').focus();
   }
 }
@@ -322,7 +369,7 @@ function renderChatHeader(conv) {
     return;
   }
   const m = PLATFORMS[conv.platform] || {};
-  const nm = conv.customer_name || m.label || 'Chat';
+  const nm = convDisplayName(conv);
   const sub = conv.customer_phone ? esc(conv.customer_phone) : esc(m.label || '');
   box.innerHTML = `
     <button class="icon-btn m-back" id="btn-chat-back" aria-label="Back">
@@ -332,12 +379,12 @@ function renderChatHeader(conv) {
     <div style="flex:1; min-width:0;"><div class="nm">${esc(nm)}</div>
     <div class="sub">${sub}</div></div>
     ${conv.needs_human ? '<span class="pill amber" id="badge-needs-human">Needs human</span>' : ''}
-    <button class="icon-btn" id="btn-toggle-human" title="${conv.needs_human ? 'Resolve human handover (resume AI)' : 'Flag for human attention (pause AI)'}" style="color:${conv.needs_human ? '#f59e0b' : 'var(--muted)'};">
+    ${state.adminReadOnly ? '' : `<button class="icon-btn" id="btn-toggle-human" title="${conv.needs_human ? 'Resolve human handover (resume AI)' : 'Flag for human attention (pause AI)'}" style="color:${conv.needs_human ? '#f59e0b' : 'var(--muted)'};">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.9-2.3l-3.4-3.85a2 2 0 0 1 3-2.65L7 15"/></svg>
     </button>
     <button class="icon-btn" id="btn-delete-conv" title="Delete conversation" style="color:var(--muted);">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-    </button>
+    </button>`}
     <button class="icon-btn m-info" id="btn-chat-info" aria-label="Details">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>
     </button>`;
@@ -351,7 +398,7 @@ function renderChatHeader(conv) {
         : confirm('Delete this conversation? Recoverable within 15 days before permanent deletion.');
       if (!ok) return;
       try {
-        await api(`/api/clients/${state.clientId}/conversations/${conv.id}`, { method: 'DELETE' });
+        await clientApi(`/api/clients/:clientId/conversations/${conv.id}`, { method: 'DELETE' });
         state.conversations = (state.conversations || []).filter(c => c.id !== conv.id);
         state.activeId = null;
         state.messages = [];
@@ -610,7 +657,7 @@ async function quickReplyText(which) {
       return 'Stock update:\n\n' + ps.map(p => `• ${p.name} — ${(p.stock || 0) > 0 ? `In stock (${p.stock} pcs)` : 'Out of stock'}`).join('\n');
     }
     if (which === 'Delivery info') {
-      if (!state.knowledge) state.knowledge = await api(`/api/clients/${state.clientId}/knowledge`);
+      if (!state.knowledge) state.knowledge = await clientApi(`/api/clients/:clientId/knowledge`);
       const ship = (state.knowledge || []).find(k => (k.category || '') === 'shipping');
       if (ship && ship.content) return ship.content;
       return 'Delivery charge: ৳60 inside Dhaka (24–48 hours), ৳120 outside Dhaka (3–5 working days). Cash on delivery available all over Bangladesh.';
@@ -624,12 +671,17 @@ function leadForConv(conv) {
   if (!conv) return null;
   return (state.leads || []).find(l => l.platform === conv.platform && String(l.platform_user_id) === String(conv.platform_user_id)) || null;
 }
-async function renderCustomerTab(conv) {
+async function renderCustomerTab(conv, ordersOverride) {
   const box = $('tab-customer');
   if (!conv) { box.innerHTML = '<div class="tbl-empty">Select a conversation</div>'; return; }
   const m = PLATFORMS[conv.platform] || {};
-  let orders = [];
-  try { orders = await api(`/api/conversations/${conv.id}/orders`); } catch {}
+  // P13: the admin path passes the orders the admin endpoint already
+  // returned; the tenant path fetches them as before.
+  let orders = ordersOverride || [];
+  if (!ordersOverride) {
+    try { orders = await api(`/api/conversations/${conv.id}/orders`); } catch {}
+  }
+  const readOnly = !!state.adminReadOnly;
   const lead = leadForConv(conv);
   const status = lead ? lead.status : 'lead';
   const score = lead && lead.score != null ? Math.round(lead.score) : null;
@@ -647,7 +699,7 @@ async function renderCustomerTab(conv) {
   box.innerHTML = `
     <div class="cust-hero">
       ${convAvatar(conv, 'lg')}
-      <div class="nm">${esc(conv.customer_name || m.label)}</div>
+      <div class="nm">${esc(convDisplayName(conv))}</div>
       <div class="sub">${esc(conv.customer_phone || m.label || '')}</div>
       ${ring}
     </div>
@@ -656,7 +708,7 @@ async function renderCustomerTab(conv) {
     <div class="kv"><span class="k">Platform ID</span><span class="v" style="font-family:ui-monospace,monospace; font-size:11.5px;">${esc(conv.platform_user_id)}</span></div>
     <div class="kv"><span class="k">Lead status</span><span class="v">${leadPill(status)}</span></div>
     <div id="cust-fraud-box" style="margin:10px 0;"></div>
-    ${status !== 'confirmed' ? `<button class="btn-soft mt8" id="btn-advance-cust" style="width:100%; justify-content:center;">Advance to ${LEAD_NEXT[status]} →</button>` : ''}
+    ${!readOnly && status !== 'confirmed' ? `<button class="btn-soft mt8" id="btn-advance-cust" style="width:100%; justify-content:center;">Advance to ${LEAD_NEXT[status]} →</button>` : ''}
     <div style="font-weight:800; color:var(--ink); font-size:13.5px; margin:16px 0 8px;">Order history (${orders.length})</div>
     ${orders.length ? orders.map(o => {
       let items = [];
@@ -688,10 +740,10 @@ async function renderCustomerTab(conv) {
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:6px; border-top:1px dashed var(--line);">
           <span class="pill ${isBooked ? 'green' : 'amber'}">${isBooked ? esc(o.courier_tracking_code || 'Booked') : 'Unbooked'}</span>
-          <div style="display:flex; gap:6px;">
+          ${readOnly ? '' : `<div style="display:flex; gap:6px;">
             ${!isBooked ? `<button class="mini-btn" data-cust-book="${o.id}">Book courier</button>` : ''}
             <button class="mini-btn" data-cust-print="${o.id}">Label</button>
-          </div>
+          </div>`}
         </div>
       </div>`;
     }).join('') : '<div class="small muted">No orders yet</div>'}`;

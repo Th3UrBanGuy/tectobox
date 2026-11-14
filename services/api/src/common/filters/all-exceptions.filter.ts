@@ -9,6 +9,21 @@ import {
 import type { Request, Response } from 'express';
 import { ErrorTrackingService } from '../errors/error-tracking.service.js';
 
+/**
+ * Framework-internal messages that must never reach the user. NestJS's
+ * ParseIntPipe, for example, throws
+ * "Validation failed (numeric string is expected)" — an internal
+ * validation string that leaked to the API-key form (P7, 2026-11-15).
+ * Our own BadRequest messages ("Name is required — নাম দিন") pass
+ * through untouched; only these known internal phrases are rewritten
+ * to a clean, user-facing message.
+ */
+function sanitizeClientMessage(message: string): string {
+  if (/numeric string is expected/i.test(message)) return 'Invalid id — a number is required';
+  if (/^validation failed/i.test(message)) return 'Invalid input';
+  return message;
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
@@ -30,9 +45,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const res = exception.getResponse();
       if (typeof res === 'string') {
-        message = res;
+        message = sanitizeClientMessage(res);
       } else if (typeof res === 'object' && res !== null) {
-        message = (res as any).message || (res as any).error || message;
+        const raw = (res as any).message || (res as any).error || message;
+        message = typeof raw === 'string' ? sanitizeClientMessage(raw) : raw;
         errorName = (res as any).error || exception.name;
       }
     } else if (exception instanceof Error) {

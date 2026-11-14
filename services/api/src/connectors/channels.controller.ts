@@ -109,7 +109,13 @@ export class ChannelsController {
       },
       webchat: {
         mode: 'live',
-        status: client?.widget_key ? 'ready' : 'disconnected',
+        // P17: a widget key means webchat IS connected — the old 'ready'
+        // status was treated as "not connected" by the frontend's
+        // anyConnected check, so xyz saw "Nothing connected yet" despite
+        // 29 webchat conversations. The admin resources endpoint
+        // normalises 'ready' → 'connected' too; emitting 'connected'
+        // here makes it one truth everywhere.
+        status: client?.widget_key ? 'connected' : 'disconnected',
         method: 'One-line embed script',
         widgetKey: client?.widget_key || null,
         websiteUrl: client?.website_url || null,

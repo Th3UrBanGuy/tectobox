@@ -151,9 +151,9 @@ async function renderSetupChecklist() {
   let conn = state.connectors, products = state.products, kb = state.knowledge, convs = state.conversations;
   try {
     const [c, p, k, cv] = await Promise.all([
-      conn ? conn : api(`/api/clients/${state.clientId}/connectors`),
+      conn ? conn : clientApi(`/api/clients/:clientId/connectors`),
       (products && products.length) ? products : api('/api/products'),
-      (kb && kb.length) ? kb : api(`/api/clients/${state.clientId}/knowledge`),
+      (kb && kb.length) ? kb : clientApi(`/api/clients/:clientId/knowledge`),
       (convs && convs.length) ? convs : api('/api/conversations'),
     ]);
     conn = c; products = p; kb = k; convs = cv;
@@ -324,13 +324,30 @@ function appearanceCard() {
     </div>`;
 }
 async function loadAppearanceTab() {
-  if (!state.webchat || !state.webchat.widget_key) {
+  // P6 (2026-11-15): the admin has no tenant of their own, so the
+  // tenant-scoped /api/webchat/config returned {} and the embed
+  // rendered data-client="". Admins pick a workspace; the config — and
+  // the workspace's REAL widget key — comes from the admin endpoint.
+  let adminPicker = '';
+  if (isAdmin(state.me?.role)) {
+    let workspaces = [];
+    try { workspaces = await api('/api/admin/workspaces'); } catch {}
+    if (!state.adminWebchatId && workspaces.length) state.adminWebchatId = workspaces[0].client_id || workspaces[0].id;
+    if (!state.adminWebchatId) {
+      $('appearance-card').innerHTML = '<div class="card small err">No workspace yet — create one first.</div>';
+      return;
+    }
+    adminPicker = `<label class="lbl">Workspace</label><select id="wc-ws-pick" class="input mb16">` +
+      workspaces.map(w => `<option value="${w.client_id || w.id}"${(w.client_id || w.id) === state.adminWebchatId ? ' selected' : ''}>${esc(w.client_name || w.username || ('#' + (w.client_id || w.id)))}</option>`).join('') + `</select>`;
+    try { state.webchat = await api(`/api/admin/clients/${state.adminWebchatId}/webchat-config`); }
+    catch { state.webchat = {}; }
+  } else if (!state.webchat || !state.webchat.widget_key) {
     try { state.webchat = await api('/api/webchat/config'); } catch { state.webchat = {}; }
   }
   const w = state.webchat || {};
   const snippet = `<script src="${location.origin}/widget.js?v=20261006w" data-client="${w.widget_key || ''}"></script>`;
 
-  $('appearance-card').innerHTML = `
+  $('appearance-card').innerHTML = `${adminPicker}
     <div style="background:var(--active); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:20px;">
       <div style="font-weight:700; font-size:16px; color:var(--ink); margin-bottom:4px; display:flex; align-items:center; gap:8px;">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> Webchat Website Integration
@@ -354,6 +371,8 @@ async function loadAppearanceTab() {
       toast('Copy failed — please select code manually', 'err');
     }
   };
+  const pick = $('wc-ws-pick');
+  if (pick) pick.onchange = () => { state.adminWebchatId = Number(pick.value); loadAppearanceTab(); };
   const testBtn = $('wc-tab-test');
   if (testBtn) testBtn.onclick = () => {
     if (document.querySelector('script[data-wc-test]')) {
@@ -459,12 +478,26 @@ async function renderApiKeysTab() {
     showView(firstAvailableView());
     return;
   }
+  // P5/P7: the admin has no clientId — the old tab silently loaded an
+  // empty list and created keys against /api/clients/null. Admins pick
+  // a workspace; its keys are listed/created/revoked there.
+  let adminPicker = '';
+  if (isAdmin(state.me?.role)) {
+    let workspaces = [];
+    try { workspaces = await api('/api/admin/workspaces'); } catch {}
+    if (!state.adminApiKeyClientId && workspaces.length) state.adminApiKeyClientId = workspaces[0].client_id || workspaces[0].id;
+    adminPicker = workspaces.length
+      ? `<label class="lbl">Workspace</label><select id="ak-ws-pick" class="input mb16">` +
+        workspaces.map(w => `<option value="${w.client_id || w.id}"${(w.client_id || w.id) === state.adminApiKeyClientId ? ' selected' : ''}>${esc(w.client_name || w.username || ('#' + (w.client_id || w.id)))}</option>`).join('') + `</select>`
+      : `<div class="card small err" style="margin-bottom:14px;">No workspace yet — create one first.</div>`;
+  }
   card.innerHTML = `<div class="card small muted">Loading API keys…</div>`;
   let keys = [];
-  try { keys = (await api(`/api/clients/${state.clientId}/api-keys`)).filter(k => !k.revoked); } catch {}
+  try { keys = (await clientApi(`/api/clients/:clientId/api-keys`, { clientId: state.adminApiKeyClientId })).filter(k => !k.revoked); } catch {}
   card.innerHTML = `
     <div class="ttl" style="font-size:17px; margin-bottom:4px;">API Keys</div>
     <p class="muted small" style="margin-bottom:14px;">Use these keys with the <a href="/api-docs.html" target="_blank" rel="noopener">public API v1</a> (<span class="mono">Authorization: Bearer &lt;key&gt;</span>). The full key is shown once — store it safely.</p>
+    ${adminPicker}
     <div style="display:flex; gap:8px; margin-bottom:14px;">
       <input id="ak-name" class="input no-icon" placeholder="Key name (e.g. website)" style="flex:1; min-width:0;">
       <button class="btn-primary" id="ak-create">Create key</button>
@@ -476,10 +509,16 @@ async function renderApiKeysTab() {
         <span class="mrow-tx"><b>${esc(k.name || 'key')}</b><small class="mono">${esc(k.prefix || '')}… · last used ${k.last_used_at ? esc(fmtDT(k.last_used_at)) : 'never'}</small></span>
         <button class="mini-btn danger" data-ak-del="${k.id}">Revoke</button>
       </div>`).join('') || '<p class="muted small">No API keys yet.</p>'}</div>`;
+  const akPick = card.querySelector('#ak-ws-pick');
+  if (akPick) akPick.onchange = () => { state.adminApiKeyClientId = Number(akPick.value); renderApiKeysTab(); };
   card.querySelector('#ak-create').onclick = async () => {
-    const name = card.querySelector('#ak-name').value.trim() || 'integration';
+    // P19: the name is REQUIRED — the old `|| 'integration'` default
+    // created stray keys (the xyz "integration" key the coordinator had
+    // to delete by hand). Empty name → clear error, no request sent.
+    const name = card.querySelector('#ak-name').value.trim();
+    if (!name) { toast('Name is required — নাম দিন', 'err'); return; }
     try {
-      const r = await api(`/api/clients/${state.clientId}/api-keys`, { method: 'POST', body: JSON.stringify({ name }) });
+      const r = await clientApi(`/api/clients/:clientId/api-keys`, { method: 'POST', clientId: state.adminApiKeyClientId, body: JSON.stringify({ name }) });
       // Re-render the list WITHOUT wiping the one-time key display.
       const onceHtml = `<div class="notice warn" style="margin-bottom:10px;"><span>New key (copy now — shown once):<br><code style="user-select:all;">${esc(r.api_key)}</code></span></div>`;
       await renderApiKeysTab();
@@ -488,9 +527,15 @@ async function renderApiKeysTab() {
     } catch (e) { toast('Failed: ' + e.message, 'err'); }
   };
   card.querySelectorAll('[data-ak-del]').forEach(b => b.onclick = async () => {
-    if (!confirm('Revoke this API key?')) return;
-    try { await api(`/api/clients/${state.clientId}/api-keys/${b.dataset.akDel}`, { method: 'DELETE' }); renderApiKeysTab(); }
-    catch (e) { toast('Failed: ' + e.message, 'err'); }
+    // P19: the old native confirm() never surfaced in automated QA and
+    // the delete silently returned ok — so Revoke looked dead. Use the
+    // modal confirm, toast the result, and re-render after it lands.
+    if (!await askConfirm('Revoke this API key?', 'The key stops working immediately.', 'Revoke')) return;
+    try {
+      await clientApi(`/api/clients/:clientId/api-keys/${b.dataset.akDel}`, { method: 'DELETE', clientId: state.adminApiKeyClientId });
+      toast('API key revoked', 'ok');
+      await renderApiKeysTab();
+    } catch (e) { toast('Failed: ' + e.message, 'err'); }
   });
 }
 async function loadBackupTab() {
@@ -498,6 +543,22 @@ async function loadBackupTab() {
   card.innerHTML = `<div class="card small muted">Loading backup status…</div>`;
   let st = { configured: false, connected: false };
   try { st = await api('/api/backup/drive/status'); } catch {}
+  // P5: the admin has no clientId — the old export buttons built
+  // `/api/clients/${state.clientId}/backup/export` literally as
+  // `/api/clients/null/…` (404). Admins pick a workspace first; the
+  // export/import/Drive calls all target the picked real id.
+  let adminPicker = '';
+  let backupTarget = state.clientId;
+  if (isAdmin(state.me?.role)) {
+    let workspaces = [];
+    try { workspaces = await api('/api/admin/workspaces'); } catch {}
+    if (!state.adminBackupId && workspaces.length) state.adminBackupId = workspaces[0].client_id || workspaces[0].id;
+    backupTarget = state.adminBackupId;
+    adminPicker = workspaces.length
+      ? `<label class="lbl">Workspace</label><select id="bk-ws-pick" class="input mb16">` +
+        workspaces.map(w => `<option value="${w.client_id || w.id}"${(w.client_id || w.id) === state.adminBackupId ? ' selected' : ''}>${esc(w.client_name || w.username || ('#' + (w.client_id || w.id)))}</option>`).join('') + `</select>`
+      : `<div class="card small err" style="margin-bottom:14px;">No workspace yet — create one first.</div>`;
+  }
   const driveSection = !st.configured ? `
     <div class="card small" style="background:var(--hover); margin-top:14px;">
       <div class="ttl" style="margin-bottom:6px;">Google Drive not configured</div>
@@ -513,13 +574,14 @@ async function loadBackupTab() {
     </div>
     <div id="bk-drive-files" style="margin-top:10px;"></div>` : `
     <div style="margin-top:14px;">
-      <a class="btn primary" href="/api/backup/drive/connect?client_id=${state.clientId}" target="_blank" rel="noopener">Connect Google Drive</a>
+      <a class="btn primary" href="/api/backup/drive/connect?client_id=${backupTarget || ''}" target="_blank" rel="noopener">Connect Google Drive</a>
       <div class="muted small" style="margin-top:8px;">Backups go to a <b>${esc(st.folder || 'Tectobox Backups')}</b> folder in your Drive.</div>
     </div>`;
 
   card.innerHTML = `
     <div class="ttl" style="font-size:17px; margin-bottom:4px;">Backup & Restore</div>
     <p class="muted small" style="margin-bottom:14px;">Export everything — products, knowledge, leads, orders, conversations — as a portable backup. Restore it on any device.</p>
+    ${adminPicker}
     <div class="row" style="gap:10px; flex-wrap:wrap;">
       <button class="btn primary" data-bk-export>Download backup (.json)</button>
       <button class="mini-btn" data-bk-export-md>Export summary (.md)</button>
@@ -531,19 +593,33 @@ async function loadBackupTab() {
     ${driveSection}`;
 
   const say = (t, err) => { $('bk-status').innerHTML = `<span class="${err ? 'err' : 'ok'}">${esc(t)}</span>`; };
+  const bkPick = $('bk-ws-pick');
+  if (bkPick) bkPick.onchange = () => { state.adminBackupId = Number(bkPick.value); loadBackupTab(); };
+  // P5: never build an export URL from a null client id — resolve the
+  // real target (picked workspace for admins, own id for clients) and
+  // refuse with a clear message when there is none.
+  const backupId = () => {
+    const id = isAdmin(state.me?.role) ? state.adminBackupId : state.clientId;
+    if (!id || String(id) === 'null') return null;
+    return id;
+  };
   card.querySelector('[data-bk-export]').onclick = () => {
-    window.location = `/api/clients/${state.clientId}/backup/export`;
+    const id = backupId();
+    if (!id) { say('Pick a workspace first.', true); return; }
+    window.location = `/api/clients/${id}/backup/export`;
     say('Backup downloading…');
   };
   card.querySelector('[data-bk-export-md]').onclick = () => {
-    window.location = `/api/clients/${state.clientId}/backup/export-md`;
+    const id = backupId();
+    if (!id) { say('Pick a workspace first.', true); return; }
+    window.location = `/api/clients/${id}/backup/export-md`;
   };
   card.querySelector('[data-bk-import]').onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
     try {
       const bundle = JSON.parse(await f.text());
       say('Restoring…');
-      const r = await api(`/api/clients/${state.clientId}/backup/import`, { method: 'POST', body: JSON.stringify(bundle) });
+      const r = await clientApi(`/api/clients/:clientId/backup/import`, { method: 'POST', clientId: state.adminBackupId, body: JSON.stringify(bundle) });
       say(`Restored: ${r.imported.products} products, ${r.imported.knowledge} knowledge docs, ${r.imported.leads} leads, ${r.imported.orders} orders.`);
     } catch (err) { say('Restore failed: ' + err.message, true); }
     e.target.value = '';
@@ -552,7 +628,7 @@ async function loadBackupTab() {
   if (du) du.onclick = async () => {
     say('Uploading to Drive…');
     try {
-      const r = await api(`/api/clients/${state.clientId}/backup/drive/upload`, { method: 'POST' });
+      const r = await clientApi(`/api/clients/:clientId/backup/drive/upload`, { method: 'POST', clientId: state.adminBackupId });
       say(`Backed up to Drive → ${r.folder}/ (${r.files.map(f => f.name).join(', ')})`);
       loadBackupTab();
     } catch (e) { say('Drive upload failed: ' + e.message, true); }
@@ -562,7 +638,7 @@ async function loadBackupTab() {
     const el = $('bk-drive-files');
     el.innerHTML = `<div class="muted small">Loading…</div>`;
     try {
-      const r = await api(`/api/clients/${state.clientId}/backup/drive/list`);
+      const r = await clientApi(`/api/clients/:clientId/backup/drive/list`, { clientId: state.adminBackupId });
       el.innerHTML = r.files.length ? r.files.map(f => `
         <div class="row" style="justify-content:space-between; padding:8px 0; border-top:1px solid var(--line);">
           <div><div class="small">${esc(f.name)}</div><div class="muted" style="font-size:11px;">${new Date(f.modifiedTime).toLocaleString()}</div></div>
@@ -572,7 +648,7 @@ async function loadBackupTab() {
         if (!await askConfirm('Restore this backup?', 'Existing data is kept — backup content is merged in.', 'Restore')) return;
         say('Restoring from Drive…');
         try {
-          const rr = await api(`/api/clients/${state.clientId}/backup/drive/restore`, { method: 'POST', body: JSON.stringify({ fileId: b.dataset.restore }) });
+          const rr = await clientApi(`/api/clients/:clientId/backup/drive/restore`, { method: 'POST', clientId: state.adminBackupId, body: JSON.stringify({ fileId: b.dataset.restore }) });
           say(`Restored from Drive: ${rr.imported.products} products, ${rr.imported.knowledge} docs, ${rr.imported.leads} leads, ${rr.imported.orders} orders.`);
         } catch (e) { say('Restore failed: ' + e.message, true); }
       });
@@ -656,7 +732,10 @@ function wireAppearance() {
   if (saveBtn) saveBtn.onclick = async () => {
     saveBtn.disabled = true;
     try {
-      const r = await api('/api/webchat/config', { method: 'POST', body: JSON.stringify(st) });
+      // P6: an admin saves the PICKED workspace's appearance via the
+      // admin endpoint; everyone else saves their own tenant config.
+      const url = state.adminWebchatId ? `/api/admin/clients/${state.adminWebchatId}/webchat-config` : '/api/webchat/config';
+      const r = await api(url, { method: 'POST', body: JSON.stringify(st) });
       if (r && r.ok) { state.webchat.appearance = r.appearance; wcToast('Appearance saved ✓'); }
       else wcToast('Save failed');
     } catch (e) { wcToast('Save failed: ' + (e.message || '')); }

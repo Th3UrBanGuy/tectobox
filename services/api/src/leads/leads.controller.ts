@@ -3,6 +3,7 @@ import { TenantGuard } from '../tenant/tenant.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
+import { extractLeadSignals } from '../widget/lead-intel.js';
 
 @Controller('api')
 @UseGuards(TenantGuard)
@@ -118,19 +119,60 @@ export class LeadsController {
       throw new NotFoundException('Lead not found');
     }
 
-    // Deterministic lead scoring based on phone/order existence
+    // P15 (2026-11-15): recompute the intel fields from the lead's real
+    // conversation history via extractLeadSignals — the same module the
+    // intake upsert uses — instead of the old phone-only 75/35 guess.
+    // The existing 50 placeholder leads are fixed on demand this way
+    // (per-lead Re-analyze), with no invented data: no chat signals
+    // means the fields stay empty/zero.
     const lead = check.rows[0];
-    const hasPhone = Boolean(lead.phone && lead.phone.length >= 7);
-    const score = hasPhone ? 75 : 35;
-    const temp = hasPhone ? 'warm' : 'cold';
-    const stage = lead.status === 'confirmed' ? 'won' : (hasPhone ? 'qualified' : 'contacted');
+    const productsRes = await this.pool.query(
+      'SELECT id, name, price_bdt FROM products WHERE client_id = $1 ORDER BY id',
+      [tenantId]
+    );
+    const msgsRes = await this.pool.query(
+      `SELECT m.text FROM messages m
+       JOIN conversations c ON c.id = m.conversation_id
+       WHERE c.client_id = $1 AND c.platform = $2 AND c.platform_user_id = $3
+         AND m.direction = 'in'
+       ORDER BY m.created_at ASC LIMIT 200`,
+      [tenantId, lead.platform, lead.platform_user_id]
+    );
+    let score = 0;
+    let intentSummary = '';
+    let nextAction = '';
+    const affinityByName = new Map<string, { productId?: number; name: string; priceBdt: number; quantity: number }>();
+    for (const row of msgsRes.rows) {
+      const s = extractLeadSignals(row.text || '', productsRes.rows);
+      if (s.score > score) {
+        score = s.score;
+        intentSummary = s.intentSummary || intentSummary;
+        nextAction = s.nextAction || nextAction;
+      } else if (!intentSummary && s.intentSummary) {
+        intentSummary = s.intentSummary;
+        nextAction = s.nextAction || nextAction;
+      }
+      for (const a of s.productAffinity) {
+        const prev = affinityByName.get(a.name);
+        affinityByName.set(a.name, prev ? { ...a, quantity: Math.max(prev.quantity, a.quantity) } : a);
+      }
+    }
+    if (msgsRes.rows.length === 0 && lead.phone && lead.phone.length >= 7) score = Math.max(score, 35);
+    const temperature = score >= 60 ? 'hot' : score >= 35 ? 'warm' : 'cold';
+    const affinity = [...affinityByName.values()];
+    const predictedValueBdt = affinity.reduce((sum, a) => sum + a.priceBdt * a.quantity, 0);
+    const stage = lead.status === 'confirmed' ? 'won' : (score >= 35 ? 'qualified' : 'contacted');
 
     const result = await this.pool.query(
       `UPDATE leads
-       SET score = $1, temperature = $2, stage = $3, intel_updated_at = NOW(), updated_at = NOW()
-       WHERE id = $4 AND client_id = $5
+       SET score = $1, temperature = $2, stage = $3,
+           product_affinity_json = $4, intent_summary = $5,
+           predicted_value_bdt = $6, conversion_probability = $7,
+           next_action = $8, intel_updated_at = NOW(), updated_at = NOW()
+       WHERE id = $9 AND client_id = $10
        RETURNING *`,
-      [score, temp, stage, id, tenantId]
+      [score, temperature, stage, JSON.stringify(affinity), intentSummary,
+       predictedValueBdt, score / 100, nextAction, id, tenantId]
     );
 
     return { ok: true, success: true, lead: result.rows[0] };
@@ -151,12 +193,15 @@ export class LeadsController {
     );
 
     const row = statsResult.rows[0];
-    return {
+    const flat = {
       total: Number(row.total || 0),
       hot: Number(row.hot || 0),
       warm: Number(row.warm || 0),
       cold: Number(row.cold || 0),
       won: Number(row.won || 0),
     };
+    // P15: the frontend summary reads s.byTemperature — return the
+    // nested shape alongside the flat counts so both agree.
+    return { ...flat, byTemperature: { hot: flat.hot, warm: flat.warm, cold: flat.cold } };
   }
 }

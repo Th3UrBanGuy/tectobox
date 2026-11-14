@@ -19,6 +19,7 @@ import {
   GO_AI_TIMEOUT_MS,
   languageDirective,
   parsePaymentClaim,
+  isActualPaymentStatement,
   queryGoAIEngine,
   resetGoAiCircuitBreaker,
 } from '@tectonic/ai-router';
@@ -38,6 +39,7 @@ export {
   GO_AI_TIMEOUT_MS,
   languageDirective,
   parsePaymentClaim,
+  isActualPaymentStatement,
   queryGoAIEngine,
   resetGoAiCircuitBreaker,
 } from '@tectonic/ai-router';

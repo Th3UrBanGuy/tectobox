@@ -204,7 +204,12 @@ function renderLicensesTable(licenses) {
     if (s === 'pending_activation') return `<span class="pill blue">Issued — awaiting activation</span>`;
     return `<span class="pill ${s === 'active' ? 'green' : s === 'paused' ? 'amber' : 'red'}">${esc(s.toUpperCase())}</span>`;
   };
-  $('licenses-body').innerHTML = licenses.map(l => `
+  // P8: expired licences (effective status from the API) are separated
+  // from the active list — the old table mixed them, so an EXPIRED
+  // licence sat among the active ones.
+  const active = (licenses || []).filter((l) => l.status !== 'expired');
+  const expired = (licenses || []).filter((l) => l.status === 'expired');
+  const row = (l) => `
     <tr>
       <td data-label="Code"><b style="color:var(--ink); font-family:monospace;">${esc(l.code)}</b></td>
       <td data-label="Workspace" class="muted">#${l.client_id} · ${esc(l.client_name || '—')}</td>
@@ -218,7 +223,10 @@ function renderLicensesTable(licenses) {
         ${l.kind !== 'time' ? `<button class="btn-soft" data-lictopup="${l.id}">+ Credits</button>` : ''}
         ${['active', 'paused'].includes(l.status) ? `<button class="btn-soft danger" data-liccancel="${l.id}">Cancel</button>` : ''}
       </div></td>
-    </tr>`).join('') || '<tr><td colspan="6" class="tbl-empty">No licenses issued yet.</td></tr>';
+    </tr>`;
+  $('licenses-body').innerHTML = (active.map(row).join('') +
+    (expired.length ? `<tr class="tbl-section"><td colspan="6">Expired — no longer active</td></tr>` + expired.map(row).join('') : '')) ||
+    '<tr><td colspan="6" class="tbl-empty">No licenses issued yet.</td></tr>';
   document.querySelectorAll('[data-licpause]').forEach(b => b.onclick = () => licAction(b.dataset.licpause, 'pause'));
   document.querySelectorAll('[data-licresume]').forEach(b => b.onclick = () => licAction(b.dataset.licresume, 'resume'));
   document.querySelectorAll('[data-licrevoke]').forEach(b => b.onclick = async () => {
@@ -261,21 +269,38 @@ async function loadNotifyTab() {
     $('btn-send-notif').disabled = true;
     try {
       const target = $('nt-target').value;
+      // P12: the payload must match the API — { message, title,
+      // clientIds } — the old shape ({ body, client_id }) was silently
+      // ignored by the stub and nothing was ever recorded.
       const r = await api('/api/admin/notify', { method: 'POST',
-        body: JSON.stringify({ target: target === 'all' ? 'all' : undefined,
-          client_id: target === 'all' ? undefined : +target,
-          title: $('nt-title').value.trim() || 'Tectobox', body }) });
-      $('nt-status').textContent = r && r.ok ? `Sent to ${r.sent} device(s).` : 'Send failed.';
-      if (r && r.ok) $('nt-body').value = '';
+        body: JSON.stringify({ message: body,
+          title: $('nt-title').value.trim() || 'Tectobox',
+          clientIds: target === 'all' ? undefined : [+target] }) });
+      $('nt-status').textContent = r && r.ok ? `Sent to ${r.sent} workspace(s).` : 'Send failed.';
+      if (r && r.ok) { $('nt-body').value = ''; loadNotifyHistory(); }
     } catch (e) { $('nt-status').textContent = 'Send failed: ' + (e.message || ''); }
     $('btn-send-notif').disabled = false;
   };
+  loadNotifyHistory();
+}
+/** P12: the real sent-notifications history — what was actually sent, never invented. */
+async function loadNotifyHistory() {
+  const el = $('nt-history');
+  if (!el) return;
+  let rows = [];
+  try { rows = await api('/api/admin/notifications'); } catch {}
+  el.innerHTML = (rows || []).map(n => `
+    <div class="audit-row">
+      <span class="ev">${esc(n.title || 'Admin notice')}</span>
+      <span class="muted small">${esc(n.workspace ? '#' + n.client_id + ' · ' + n.workspace : 'Workspace #' + n.client_id)} — ${esc(n.message)}</span>
+      <span class="right"><span>${fmtDT(n.created_at)}</span></span>
+    </div>`).join('') || '<div class="tbl-empty">No notifications sent yet.</div>';
 }
 async function loadAdminConfig() {
   const c = await api('/api/admin/config');
   $('cfg-autoreply').checked = !!c.autoReply;
   $('cfg-model').value = c.aiModel || '';
-  $('cfg-modelpool').value = c.aiModelPool || '';
+  $('cfg-modelpool').value = Array.isArray(c.aiModelPool) ? c.aiModelPool.join(', ') : (c.aiModelPool || '');
   $('cfg-baseurl').value = c.aiBaseUrl || '';
   $('cfg-msg').textContent = '';
   let urls = {};

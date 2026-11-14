@@ -346,6 +346,16 @@ CREATE TABLE admin_totp (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Admin notifications history (P12, 2026-11-15) — every admin broadcast is recorded here
+CREATE TABLE admin_notifications (
+    id SERIAL PRIMARY KEY,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT 'Admin notice',
+    message TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_admin_notifications_client ON admin_notifications(client_id, created_at DESC);
+
 -- Sessions
 CREATE TABLE sessions (
     id VARCHAR(255) PRIMARY KEY,

@@ -39,13 +39,20 @@ export class LicensesController {
   @UseGuards(AdminGuard)
   async listLicenses() {
     const result = await this.pool.query(
-      `SELECT l.*, c.name as client_name, p.name as plan_name
+      `SELECT l.*, c.name as client_name, p.name as plan_name,
+              -- P8: a time licence whose ends_at has passed is expired
+              -- even though its stored status still says 'active' — the
+              -- audit's LIC-0BA36B548E78 sat in the active list for this
+              -- reason. The frontend splits on this effective status.
+              CASE WHEN l.status = 'active' AND l.kind = 'time'
+                        AND l.ends_at IS NOT NULL AND l.ends_at <= NOW()
+                   THEN 'expired' ELSE l.status END AS effective_status
        FROM licenses l
        LEFT JOIN clients c ON c.id = l.client_id
        LEFT JOIN plans p ON p.id = l.plan_id
        ORDER BY l.id DESC LIMIT 100`
     );
-    return result.rows;
+    return result.rows.map((r: any) => ({ ...r, status: r.effective_status }));
   }
 
   @Post('admin/licenses')
