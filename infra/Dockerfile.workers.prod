@@ -44,4 +44,9 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup \
 
 USER appuser
 
-CMD ["pnpm", "--filter", "@tectonic/workers", "run", "start"]
+# Run node directly (not via pnpm): the container runs as appuser, whose
+# corepack has no activated pnpm, so `pnpm` resolves to latest (v12) and
+# `pnpm run` dies with ERR_PNPM_VERIFY_DEPS_BEFORE_RUN (it refuses to read
+# the package.json `pnpm` field). start is just `node dist/index.js`.
+WORKDIR /app/services/workers
+CMD ["node", "dist/index.js"]
