@@ -97,3 +97,42 @@ jobs:
           cd services/ingress
           go vet ./...
           go test -v ./...
+
+  security:
+    name: Security Scans (TruffleHog & Dependency Audit)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog Secret Scan
+        uses: trufflesecurity/trufflehog@main
+        continue-on-error: true
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --no-update
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit Dependencies (API & Workers)
+        continue-on-error: true
+        run: |
+          pnpm --filter api audit --audit-level=high || true
+          pnpm --filter @tectonic/workers audit --audit-level=high || true

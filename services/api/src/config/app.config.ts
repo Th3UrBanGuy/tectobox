@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
-const AppConfigSchema = z.object({
+export const AppConfigSchema = z.object({
   port: z.number().int().default(3120),
   nodeEnv: z.enum(['development', 'test', 'production']).default('development'),
-  jwtSecret: z.string().min(16),
+  jwtSecret: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
   databaseUrl: z.string().url().or(z.string().min(1)),
   redisUrl: z.string().url().or(z.string().min(1)),
   rabbitmqUrl: z.string().url().or(z.string().min(1)),
@@ -21,9 +21,8 @@ const AppConfigSchema = z.object({
 
 export type AppConfigType = z.infer<typeof AppConfigSchema>;
 
-export function loadAppConfig(): AppConfigType {
-  const env = process.env;
-  return AppConfigSchema.parse({
+export function loadAppConfig(env: Record<string, string | undefined> = process.env): AppConfigType {
+  const raw = {
     port: env.PORT ? Number(env.PORT) : 3120,
     nodeEnv: (env.NODE_ENV as any) || 'development',
     // C4: JWT secret comes from the environment only. The Zod schema
@@ -43,7 +42,30 @@ export function loadAppConfig(): AppConfigType {
     rateLimitMaxRequests: env.RATE_LIMIT_MAX_REQUESTS ? Number(env.RATE_LIMIT_MAX_REQUESTS) : 300,
     authRateLimitMaxFailures: env.AUTH_MAX_FAILURES ? Number(env.AUTH_MAX_FAILURES) : 10,
     authBlockDurationMs: env.AUTH_BLOCK_DURATION_MS ? Number(env.AUTH_BLOCK_DURATION_MS) : 15 * 60 * 1000,
-  });
+  };
+
+  const parsed = AppConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    const errorDetails = parsed.error.issues
+      .map((issue) => `  - ${issue.path.join('.')}: ${issue.message}`)
+      .join('\n');
+    throw new Error(
+      `[Config Validation Failed] Application failed fast at boot due to missing or invalid environment variables:\n${errorDetails}`
+    );
+  }
+  return parsed.data;
 }
 
-export const AppConfig = loadAppConfig();
+let _cachedConfig: AppConfigType | null = null;
+export const getAppConfig = (): AppConfigType => {
+  if (!_cachedConfig) {
+    _cachedConfig = loadAppConfig();
+  }
+  return _cachedConfig;
+};
+
+export const AppConfig = new Proxy({} as AppConfigType, {
+  get(_target, prop) {
+    return (getAppConfig() as any)[prop];
+  },
+});

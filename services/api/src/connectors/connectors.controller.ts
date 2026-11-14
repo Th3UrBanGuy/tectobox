@@ -317,6 +317,18 @@ export class ConnectorsController {
     return ctrl.deleteConversation(tenantId, clientId, conversationId, req);
   }
 
+  @Post('clients/:clientId/conversations/:conversationId/restore')
+  @UseGuards(TenantGuard)
+  async restoreConversation(
+    @CurrentTenant() tenantId: number,
+    @Param('clientId', ParseIntPipe) clientId: number,
+    @Param('conversationId', ParseIntPipe) conversationId: number,
+    @Req() req: any
+  ) {
+    const ctrl = new ConversationsController(this.pool);
+    return ctrl.restoreConversation(tenantId, clientId, conversationId, req);
+  }
+
   @Post('clients/:clientId/connectors/:channel/ai-pause')
   @UseGuards(TenantGuard)
   async toggleAiPause(

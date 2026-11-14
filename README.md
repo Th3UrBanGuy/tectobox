@@ -4,10 +4,7 @@ Multi-tenant social-commerce SaaS — unified inbox (WhatsApp, Telegram, Messeng
 
 ## Status
 
-**Migrating** from Express/SQLite monolith to scalable microservices architecture.
-
-- Legacy app: `old-code/` (fully functional)
-- New services: `services/` (in development)
+Microservices architecture with NestJS Core API, Go Ingress webhook receiver, Node channel workers, PostgreSQL 16, Redis 7, and RabbitMQ 3. Legacy monolith has been deprecated and archived (`old-code-backup.tar.gz`).
 
 ## Quick Start (Local Development)
 
@@ -15,28 +12,46 @@ Multi-tenant social-commerce SaaS — unified inbox (WhatsApp, Telegram, Messeng
 # 1. Start infrastructure (Postgres, Redis, RabbitMQ)
 cd infra && docker compose -f docker-compose.dev.yml up -d
 
-# 2. Run the legacy app (still works)
-cd old-code && pnpm install && pnpm start
+# 2. Install dependencies & build packages
+pnpm install
+pnpm --filter @tectonic/contracts run build
+pnpm --filter @tectonic/messaging run build
+pnpm --filter @tectonic/coordination run build
+
+# 3. Start Core API
+pnpm --filter api run start:dev
 ```
+
+## Pre-commit Hooks
+
+To enforce code hygiene and prevent committing credentials or malformed files, install pre-commit:
+
+```bash
+pre-commit install
+```
+
+The hooks run on `git commit` to verify YAML syntax, trim trailing whitespace, fix end-of-file newlines, and prevent private key leaks.
 
 ## Repository Layout
 
 | Directory | Purpose |
 |---|---|
-| `old-code/` | Legacy Express/SQLite monolith (reference) |
-| `services/api/` | NestJS core API (planned) |
-| `services/ingress/` | Go webhook ingress (planned) |
-| `services/workers/` | Node channel workers (planned) |
-| `packages/contracts/` | Shared TypeScript event/API schemas (planned) |
-| `infra/` | Docker Compose and infrastructure config |
-| `docs/` | Architecture decisions and guides |
-| `plans/` | Phase-specific implementation plans |
-| `tasks/` | Active task records |
-| `task-completed/` | Completed task records |
+| `services/api/` | NestJS core API (multi-tenant management, auth, inbox, catalog) |
+| `services/ingress/` | Go webhook ingress (Meta HMAC, Telegram secret verification) |
+| `services/workers/` | Node channel workers (WhatsApp/Baileys, Telegram/GramJS, AI worker) |
+| `services/ai/` | Go AI router and engine bridge |
+| `packages/contracts/` | Shared TypeScript event/API schemas (Zod validated) |
+| `packages/messaging/` | RabbitMQ topology, durable exchanges, and queues |
+| `packages/coordination/` | Redis leasing, session fencing, and distributed locking |
+| `infra/` | Docker Compose, Postgres migrations, RabbitMQ definitions, Caddy |
+| `docs/` | Architecture decisions, runbooks, and API documentation |
+| `plans/` | Phase-specific architecture and implementation plans |
+| `tests/` | Playwright E2E and cross-service resilience test suite |
 
 ## Documentation
 
 - [AGENTS.md](./AGENTS.md) — Agent/developer guide
-- [handoff.md](./handoff.md) — Current state and next steps
+- [PRODUCTION_STANDARD.md](./PRODUCTION_STANDARD.md) — Hardening standard and status
+- [handoff.md](./handoff.md) — Current state and architecture notes
 - [TODO.md](./TODO.md) — Task tracker
-- [plans/](./plans/) — Migration phase plans
+- [plans/](./plans/) — Implementation plans

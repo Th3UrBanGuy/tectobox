@@ -2,14 +2,11 @@
 
 ## Overview
 
-Tectobox is being migrated from a monolithic Express/SQLite app to a scalable
-microservices architecture. The legacy code lives in `old-code/`. New services
-are built in `services/`.
+Tectobox has transitioned to a scalable multi-tenant microservices architecture.
+Services live in `services/` and shared libraries in `packages/`.
 
 ## Repository Layout
 
-- `old-code/` — Legacy Express monolith. **Do not modify** unless fixing a
-  production bug. Reference only for migration.
 - `services/api/` — NestJS core API
 - `services/ingress/` — Go webhook ingress
 - `services/workers/` — Node channel workers (WhatsApp/Baileys, Telegram/GramJS, AI)
@@ -52,11 +49,8 @@ are built in `services/`.
 # Start infrastructure (Postgres + Redis + RabbitMQ)
 cd infra && docker compose -f docker-compose.dev.yml up -d
 
-# Run legacy app (for reference/testing)
-cd old-code && pnpm install && pnpm start
-
-# Run NestJS API (when ready)
-cd services/api && pnpm install && pnpm run start:dev
+# Run NestJS API (development)
+cd services/api && pnpm run start:dev
 
 # Run Go ingress (when ready)
 cd services/ingress && go run cmd/ingress/main.go

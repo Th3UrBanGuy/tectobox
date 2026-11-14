@@ -16,44 +16,58 @@ export class LeadsController {
     @Query('stage') stage?: string,
     @Query('temp') temperature?: string,
     @Query('platform') platform?: string,
-    @Query('q') query?: string
+    @Query('q') query?: string,
+    @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string
   ) {
-    let sql = `SELECT id, client_id, platform, platform_user_id, name, phone, email, whatsapp_id,
-                      location, status, stage, score, temperature, product_affinity_json,
-                      intent_summary, predicted_value_bdt, conversion_probability, next_action,
-                      notes, last_intent_at, followup_due_at, created_at, updated_at
-               FROM leads
-               WHERE client_id = $1`;
+    const limit = Math.min(200, Math.max(1, parseInt(limitStr || '', 10) || 50));
+    const offset = Math.max(0, parseInt(offsetStr || '', 10) || 0);
+
+    let whereSql = `WHERE client_id = $1`;
     const params: any[] = [tenantId];
 
     if (status && status !== 'all') {
       params.push(status);
-      sql += ` AND status = $${params.length}`;
+      whereSql += ` AND status = $${params.length}`;
     }
     if (stage && stage !== 'all') {
       params.push(stage);
-      sql += ` AND stage = $${params.length}`;
+      whereSql += ` AND stage = $${params.length}`;
     }
     if (temperature && temperature !== 'all') {
       params.push(temperature);
-      sql += ` AND temperature = $${params.length}`;
+      whereSql += ` AND temperature = $${params.length}`;
     }
     if (platform && platform !== 'all') {
       params.push(platform);
-      sql += ` AND platform = $${params.length}`;
+      whereSql += ` AND platform = $${params.length}`;
     }
     if (query && query.trim()) {
       params.push(`%${query.trim()}%`);
-      sql += ` AND (name ILIKE $${params.length} OR phone ILIKE $${params.length} OR email ILIKE $${params.length})`;
+      whereSql += ` AND (name ILIKE $${params.length} OR phone ILIKE $${params.length} OR email ILIKE $${params.length})`;
     }
 
-    sql += ` ORDER BY updated_at DESC LIMIT 100`;
-    const result = await this.pool.query(sql, params);
+    const countRes = await this.pool.query(`SELECT COUNT(*) AS total FROM leads ${whereSql}`, params);
+    const total = parseInt(countRes.rows[0]?.total || '0', 10);
+
+    const queryParams = [...params, limit, offset];
+    const dataSql = `SELECT id, client_id, platform, platform_user_id, name, phone, email, whatsapp_id,
+                            location, status, stage, score, temperature, product_affinity_json,
+                            intent_summary, predicted_value_bdt, conversion_probability, next_action,
+                            notes, last_intent_at, followup_due_at, created_at, updated_at
+                     FROM leads
+                     ${whereSql}
+                     ORDER BY updated_at DESC
+                     LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`;
+    const result = await this.pool.query(dataSql, queryParams);
 
     const res: any = result.rows;
     res.success = true;
     res.tenantId = tenantId;
     res.leads = result.rows;
+    res.total = total;
+    res.limit = limit;
+    res.offset = offset;
     return res;
   }
 

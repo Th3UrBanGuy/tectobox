@@ -8,8 +8,7 @@
     "test:migration": "node --experimental-strip-types --test scripts/migrate.spec.ts",
     "infra:up": "cd infra && docker compose -f docker-compose.dev.yml up -d",
     "infra:down": "cd infra && docker compose -f docker-compose.dev.yml down",
-    "infra:reset": "cd infra && docker compose -f docker-compose.dev.yml down -v && docker compose -f docker-compose.dev.yml up -d",
-    "legacy": "pnpm --filter old-code run start"
+    "infra:reset": "cd infra && docker compose -f docker-compose.dev.yml down -v && docker compose -f docker-compose.dev.yml up -d"
   },
   "engines": {
     "node": ">=22.5"

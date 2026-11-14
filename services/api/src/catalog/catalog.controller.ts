@@ -12,25 +12,39 @@ export class CatalogController {
   @Get('products')
   async getProducts(
     @CurrentTenant() tenantId: number,
-    @Query('q') query?: string
+    @Query('q') query?: string,
+    @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string
   ) {
-    let sql = `SELECT id, client_id, sku, name, category, price_bdt, stock, image_url
-               FROM products
-               WHERE client_id = $1`;
+    const limit = Math.min(200, Math.max(1, parseInt(limitStr || '', 10) || 50));
+    const offset = Math.max(0, parseInt(offsetStr || '', 10) || 0);
+
+    let whereSql = `WHERE client_id = $1`;
     const params: any[] = [tenantId];
 
     if (query && query.trim()) {
       params.push(`%${query.trim()}%`);
-      sql += ` AND (name ILIKE $2 OR sku ILIKE $2 OR category ILIKE $2)`;
+      whereSql += ` AND (name ILIKE $2 OR sku ILIKE $2 OR category ILIKE $2)`;
     }
 
-    sql += ` ORDER BY id ASC`;
-    const result = await this.pool.query(sql, params);
+    const countRes = await this.pool.query(`SELECT COUNT(*) AS total FROM products ${whereSql}`, params);
+    const total = parseInt(countRes.rows[0]?.total || '0', 10);
+
+    const queryParams = [...params, limit, offset];
+    const dataSql = `SELECT id, client_id, sku, name, category, price_bdt, stock, image_url
+                     FROM products
+                     ${whereSql}
+                     ORDER BY id ASC
+                     LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`;
+    const result = await this.pool.query(dataSql, queryParams);
 
     const res: any = result.rows;
     res.success = true;
     res.tenantId = tenantId;
     res.products = result.rows;
+    res.total = total;
+    res.limit = limit;
+    res.offset = offset;
     return res;
   }
 

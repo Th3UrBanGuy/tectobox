@@ -65,10 +65,26 @@ export class PaymentsController implements OnModuleInit {
     @CurrentTenant() tenantId: number | null,
     @Query('status') status?: string,
     @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string,
     @Query('client_id') queryClientId?: string,
   ) {
-    const limit = Math.min(100, Math.max(1, Number(limitStr) || 50));
+    const limit = Math.min(200, Math.max(1, Number(limitStr) || 50));
+    const offset = Math.max(0, Number(offsetStr) || 0);
     const targetTenantId = tenantId || (queryClientId ? Number(queryClientId) : null);
+
+    let baseWhere = `WHERE 1=1`;
+    const countParams: any[] = [];
+    if (targetTenantId) {
+      countParams.push(targetTenantId);
+      baseWhere += ` AND p.client_id = $${countParams.length}`;
+    }
+    if (status && status !== 'all') {
+      countParams.push(status);
+      baseWhere += ` AND p.status = $${countParams.length}`;
+    }
+
+    const countRes = await this.pool.query(`SELECT COUNT(*) AS total FROM payments p ${baseWhere}`, countParams);
+    const total = parseInt(countRes.rows[0]?.total || '0', 10);
 
     let sql = `
       SELECT p.*,
@@ -81,27 +97,18 @@ export class PaymentsController implements OnModuleInit {
       LEFT JOIN clients c_info ON c_info.id = p.client_id
       LEFT JOIN orders o ON o.id = p.order_id
       LEFT JOIN conversations c ON c.id = p.conversation_id
-      WHERE 1=1
+      ${baseWhere}
     `;
-    const params: any[] = [];
-
-    if (targetTenantId) {
-      params.push(targetTenantId);
-      sql += ` AND p.client_id = $${params.length}`;
-    }
-
-    if (status && status !== 'all') {
-      params.push(status);
-      sql += ` AND p.status = $${params.length}`;
-    }
-
-    params.push(limit);
-    sql += ` ORDER BY p.created_at DESC LIMIT $${params.length}`;
+    const params = [...countParams, limit, offset];
+    sql += ` ORDER BY p.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`;
 
     const result = await this.pool.query(sql, params);
     return {
       ok: true,
       payments: result.rows,
+      total,
+      limit,
+      offset,
       tenantId: targetTenantId,
     };
   }
