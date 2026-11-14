@@ -17,6 +17,7 @@ COPY patches/ ./patches/
 COPY packages/contracts/package.json ./packages/contracts/
 COPY packages/messaging/package.json ./packages/messaging/
 COPY packages/coordination/package.json ./packages/coordination/
+COPY packages/ai-router/package.json ./packages/ai-router/
 COPY services/api/package.json ./services/api/
 COPY services/workers/package.json ./services/workers/
 

@@ -4,6 +4,7 @@
   "description": "Multi-tenant social-commerce SaaS — scalable architecture",
   "scripts": {
     "build": "pnpm -r run build",
+    "generate:go-topology": "node scripts/generate-go-topology.mjs",
     "test": "pnpm -r run test",
     "test:migration": "node --experimental-strip-types --test scripts/migrate.spec.ts",
     "infra:up": "cd infra && docker compose -f docker-compose.dev.yml up -d",

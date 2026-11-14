@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tect0nicofficial/tectobox/services/ingress/internal/publisher"
+	"github.com/tect0nicofficial/tectobox/services/ingress/internal/topology"
 )
 
 type TelegramHandler struct {
@@ -30,19 +31,19 @@ type telegramUpdatePayload struct {
 }
 
 type telegramMessage struct {
-	MessageID int64              `json:"message_id"`
-	From      *telegramUser      `json:"from"`
-	Chat      telegramChat       `json:"chat"`
-	Date      int64              `json:"date"`
-	EditDate  int64              `json:"edit_date,omitempty"`
-	Text      string             `json:"text"`
-	Caption   string             `json:"caption"`
+	MessageID int64               `json:"message_id"`
+	From      *telegramUser       `json:"from"`
+	Chat      telegramChat        `json:"chat"`
+	Date      int64               `json:"date"`
+	EditDate  int64               `json:"edit_date,omitempty"`
+	Text      string              `json:"text"`
+	Caption   string              `json:"caption"`
 	Photo     []telegramPhotoSize `json:"photo,omitempty"`
-	Document  *telegramDocument  `json:"document,omitempty"`
-	Audio     *telegramAudio     `json:"audio,omitempty"`
-	Voice     *telegramVoice     `json:"voice,omitempty"`
-	Video     *telegramVideo     `json:"video,omitempty"`
-	Sticker   *telegramSticker   `json:"sticker,omitempty"`
+	Document  *telegramDocument   `json:"document,omitempty"`
+	Audio     *telegramAudio      `json:"audio,omitempty"`
+	Voice     *telegramVoice      `json:"voice,omitempty"`
+	Video     *telegramVideo      `json:"video,omitempty"`
+	Sticker   *telegramSticker    `json:"sticker,omitempty"`
 }
 
 type telegramPhotoSize struct {
@@ -60,12 +61,12 @@ type telegramDocument struct {
 }
 
 type telegramAudio struct {
-	FileID   string `json:"file_id"`
-	Duration int    `json:"duration"`
+	FileID    string `json:"file_id"`
+	Duration  int    `json:"duration"`
 	Performer string `json:"performer,omitempty"`
-	Title    string `json:"title,omitempty"`
-	MimeType string `json:"mime_type,omitempty"`
-	FileSize int64  `json:"file_size,omitempty"`
+	Title     string `json:"title,omitempty"`
+	MimeType  string `json:"mime_type,omitempty"`
+	FileSize  int64  `json:"file_size,omitempty"`
 }
 
 type telegramVoice struct {
@@ -124,22 +125,9 @@ func (h *TelegramHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		// Match against BotTenantMap
-		var found bool
-		for tokenOrSecret, cid := range h.BotTenantMap {
-			if subtle.ConstantTimeCompare([]byte(secretToken), []byte(tokenOrSecret)) == 1 {
-				clientID = cid
-				found = true
-				break
-			}
-		}
-		if !found && h.DynamicRoute != nil {
-			clientID = h.DynamicRoute(secretToken)
-			if clientID > 0 {
-				found = true
-			}
-		}
-		if !found || clientID <= 0 {
+		// Static map first, then the dynamic resolver. 0 means unknown.
+		clientID = ResolveTenant(h.BotTenantMap, h.DynamicRoute, secretToken)
+		if clientID <= 0 {
 			log.Printf("Telegram bot secret not mapped to any known tenant (fail closed)")
 			http.Error(w, "unknown or unmapped bot token", http.StatusForbidden)
 			return
@@ -171,7 +159,7 @@ func (h *TelegramHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10MB limit
+	r.Body = http.MaxBytesReader(w, r.Body, MaxWebhookBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("Failed to read body: %v", err)
@@ -277,28 +265,18 @@ func (h *TelegramHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 		msgTime = time.Unix(effectiveTimestamp, 0).UTC()
 	}
 
-	envelope := NormalizedInboundEnvelope{
-		EventID:        GenerateUUID(),
+	envelope := NewInboundEnvelope(InboundEnvelopeParams{
 		ClientID:       clientID,
 		Platform:       "telegram",
 		PlatformUserID: platformUserID,
 		CustomerName:   customerName,
 		Text:           textContent,
 		ExternalID:     strconv.FormatInt(msg.MessageID, 10),
-		Timestamp:      msgTime.Format(time.RFC3339),
+		Timestamp:      msgTime,
 		RawJSON:        body,
-	}
+	})
 
-	envelopeBytes, err := json.Marshal(envelope)
-	if err != nil {
-		log.Printf("Failed to marshal normalized envelope: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	routingKey := "message.incoming.telegram"
-	err = h.Publisher.Publish(r.Context(), routingKey, envelopeBytes)
-	if err != nil {
+	if err := PublishEnvelope(r.Context(), h.Publisher, topology.IncomingRoutingKey("telegram"), envelope); err != nil {
 		log.Printf("Failed to publish message: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -306,4 +284,3 @@ func (h *TelegramHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 
 	w.WriteHeader(http.StatusOK)
 }
-

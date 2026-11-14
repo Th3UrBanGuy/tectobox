@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tect0nicofficial/tectobox/services/ingress/internal/publisher"
+	"github.com/tect0nicofficial/tectobox/services/ingress/internal/topology"
 )
 
 type MetaHandler struct {
@@ -22,20 +23,6 @@ type MetaHandler struct {
 	Publisher        publisher.Publisher
 	PageClientRoutes map[string]int // Optional map: PageID -> ClientID
 	DynamicRoute     func(pageID string) int
-}
-
-// NormalizedInboundEnvelope matches @tectonic/contracts InboundMessageEventSchema
-type NormalizedInboundEnvelope struct {
-	EventID        string          `json:"eventId"`
-	ClientID       int             `json:"clientId"`
-	Platform       string          `json:"platform"`
-	PlatformUserID string          `json:"platformUserId"`
-	CustomerName   string          `json:"customerName,omitempty"`
-	CustomerPhone  string          `json:"customerPhone,omitempty"`
-	Text           string          `json:"text"`
-	ExternalID     string          `json:"externalId,omitempty"`
-	Timestamp      string          `json:"timestamp"`
-	RawJSON        json.RawMessage `json:"rawJson,omitempty"`
 }
 
 type metaWebhookPayload struct {
@@ -61,11 +48,11 @@ type metaUserItem struct {
 }
 
 type metaMsgContent struct {
-	MID         string                `json:"mid"`
-	Text        string                `json:"text"`
-	IsEcho      bool                  `json:"is_echo"`
-	QuickReply  *metaQuickReply       `json:"quick_reply,omitempty"`
-	Attachments []metaMsgAttachment   `json:"attachments,omitempty"`
+	MID         string              `json:"mid"`
+	Text        string              `json:"text"`
+	IsEcho      bool                `json:"is_echo"`
+	QuickReply  *metaQuickReply     `json:"quick_reply,omitempty"`
+	Attachments []metaMsgAttachment `json:"attachments,omitempty"`
 }
 
 type metaQuickReply struct {
@@ -73,7 +60,7 @@ type metaQuickReply struct {
 }
 
 type metaMsgAttachment struct {
-	Type    string                 `json:"type"`
+	Type    string                `json:"type"`
 	Payload metaAttachmentPayload `json:"payload"`
 }
 
@@ -108,7 +95,7 @@ func (h *MetaHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10MB limit
+	r.Body = http.MaxBytesReader(w, r.Body, MaxWebhookBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("Failed to read body: %v", err)
@@ -170,17 +157,9 @@ func (h *MetaHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	seenMIDs := make(map[string]struct{})
 
 	for _, entry := range payload.Entry {
-		// Route by entry.id (Page ID / IG User ID) to client ID
-		var clientID int
-		if h.PageClientRoutes != nil {
-			if cid, exists := h.PageClientRoutes[entry.ID]; exists && cid > 0 {
-				clientID = cid
-			}
-		}
-
-		if clientID == 0 && h.DynamicRoute != nil {
-			clientID = h.DynamicRoute(entry.ID)
-		}
+		// Route by entry.id (Page ID / IG User ID) to client ID:
+		// static map first, then the dynamic resolver. 0 means unknown.
+		clientID := ResolveTenant(h.PageClientRoutes, h.DynamicRoute, entry.ID)
 
 		if clientID == 0 {
 			log.Printf("Meta webhook event unroutable: entry ID '%s' has no mapped client (fail closed)", entry.ID)
@@ -237,16 +216,15 @@ func (h *MetaHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 				msgTime = time.UnixMilli(item.Timestamp).UTC()
 			}
 
-			envelope := NormalizedInboundEnvelope{
-				EventID:        GenerateUUID(),
+			envelope := NewInboundEnvelope(InboundEnvelopeParams{
 				ClientID:       clientID,
 				Platform:       "meta",
 				PlatformUserID: item.Sender.ID,
 				Text:           textContent,
 				ExternalID:     mid,
-				Timestamp:      msgTime.Format(time.RFC3339),
+				Timestamp:      msgTime,
 				RawJSON:        body,
-			}
+			})
 
 			envelopeBytes, err := json.Marshal(envelope)
 			if err != nil {
@@ -256,7 +234,7 @@ func (h *MetaHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 			}
 
 			toPublish = append(toPublish, readyEnvelope{
-				routingKey: "message.incoming.meta",
+				routingKey: topology.IncomingRoutingKey("meta"),
 				data:       envelopeBytes,
 			})
 		}

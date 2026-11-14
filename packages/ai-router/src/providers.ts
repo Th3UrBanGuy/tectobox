@@ -1,11 +1,14 @@
 /**
- * LLM provider tiers — split from ai/router.ts in Phase 2 of the modular
- * restructure. Code moved verbatim; no behaviour change.
+ * LLM provider tiers — @tectonic/ai-router (Phase 4 of the modular
+ * restructure). The api and the workers each had their own copy of the
+ * ai router (api/src/ai/router.ts vs workers/src/ai/); this package is
+ * the one implementation both import. Code moved verbatim from the
+ * workers split; no behaviour change.
  */
 
-import type { AIRequestMessage, ProductItem, KnowledgeItem } from './prompts.ts';
-import { detectCustomerLanguage } from './language.ts';
-import { demoResponder } from './demo-responder.ts';
+import type { AIRequestMessage, ProductItem, KnowledgeItem } from './prompts.js';
+import { detectCustomerLanguage } from './language.js';
+import { demoResponder } from './demo-responder.js';
 
 export const CF_MODEL_POOL = [
   '@cf/zai-org/glm-4.7-flash',
@@ -68,9 +71,11 @@ export async function queryGoAIEngine(params: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // NOTE (F1): the Go bridge expects snake_case keys (client_id,
-      // client_name, business_type). Sending camelCase leaves Go's
-      // ClientID nil, so every workspace shared one "<nil>" cache key
-      // and rate-limit bucket — cross-workspace reply leakage.
+      // client_name, business_type). Go takes client_id as a typed
+      // router.ClientID and rejects the request with 400 when it is
+      // missing — a camelCase `clientId` no longer decodes, so sending
+      // camelCase would fail the request instead of serving it under
+      // a shared tenant id.
       body: JSON.stringify({
         ...params,
         client_id: params.clientId,
@@ -139,9 +144,15 @@ export async function queryGoAIEngine(params: {
 
 export async function getAIResponse(messages: AIRequestMessage[], contextKey = 'default'): Promise<string | null> {
   // 1. Try Gemini Web2API (fast, high quality, free)
+  // NOTE — env-var name collision (do NOT rename here; the rename +
+  // compose rollout is Phase 6): GEMINI_WEB2API_URL means this
+  // service's /v1 base URL here (the Go ai service,
+  // http://127.0.0.1:8081/v1), but the same name inside the ai
+  // container means the external web2api proxy URL. Setting it in the
+  // wrong place silently re-routes a tier.
   // NOTE (F1 Knowledge Leak Fix):
   // The gemini-web2api proxy uses a single shared browser session for all requests without
-  // per-workspace session isolation. In multi-tenant environments (worker / workspace traffic),
+  // per-workspace session isolation. In multi-tenant environments (widget / worker / workspace traffic),
   // skip web2api to prevent cross-workspace prompt and policy leakage.
   if (contextKey === 'default' || !contextKey) {
     const geminiWeb2ApiUrl = process.env.GEMINI_WEB2API_URL || 'http://127.0.0.1:8081/v1';

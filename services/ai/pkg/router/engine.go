@@ -1,19 +1,10 @@
 package router
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"regexp"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tect0nicofficial/tectobox/services/ai/pkg/cloudflare"
@@ -21,44 +12,34 @@ import (
 	"github.com/tect0nicofficial/tectobox/services/ai/pkg/gemini"
 )
 
-type ProductItem struct {
-	Name     string      `json:"name"`
-	SKU      string      `json:"sku,omitempty"`
-	PriceBDT interface{} `json:"price_bdt"`
-	Stock    int         `json:"stock,omitempty"`
-	Category string      `json:"category,omitempty"`
-}
+// Tier timeouts and cache TTLs. These were magic literals inside
+// GenerateReply; they are named here so a latency change does not require
+// reading the orchestrator.
+const (
+	// tier1Timeout bounds the Gemini web2api session call.
+	tier1Timeout = 2500 * time.Millisecond
+	// tier2Timeout bounds the Cloudflare Workers AI call.
+	tier2Timeout = 2500 * time.Millisecond
+	// tier3Timeout bounds the direct-API tier (its web2api leg uses the
+	// detached web2apiDetachedTimeout in direct.go instead).
+	tier3Timeout = 2000 * time.Millisecond
+	// tierCacheTTL is how long an LLM-tier reply is cached.
+	tierCacheTTL = 5 * time.Minute
+	// demoCacheTTL is how long a deterministic-template reply is cached.
+	demoCacheTTL = 10 * time.Minute
+	// cacheSweepInterval is how often expired cache entries are dropped.
+	cacheSweepInterval = 2 * time.Minute
+)
 
-type KnowledgeItem struct {
-	Title    string `json:"title"`
-	Content  string `json:"content"`
-	Category string `json:"category,omitempty"`
-}
-
-type PromptContext struct {
-	ClientID     string          `json:"client_id,omitempty"`
-	ClientName   string          `json:"client_name,omitempty"`
-	BusinessType string          `json:"business_type,omitempty"`
-	Products     []ProductItem   `json:"products,omitempty"`
-	Knowledge    []KnowledgeItem `json:"knowledge,omitempty"`
-}
-
-type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type CacheEntry struct {
-	Reply     string
-	ExpiresAt time.Time
-}
-
+// Engine is the AI router: language detect → reply cache → system prompt →
+// Tier 1–4 dispatch → cache-store. The tiers themselves live in direct.go
+// (Tier 3) and responder.go (Tier 4); the prompt builder in prompt.go; the
+// cache and its tenant-isolation key rule in cache.go.
 type Engine struct {
 	geminiClient *gemini.Client
 	cfClient     *cloudflare.Client
 	httpClient   *http.Client
-	cache        map[string]CacheEntry
-	cacheMutex   sync.RWMutex
+	cache        *Cache
 }
 
 func NewEngine() *Engine {
@@ -66,59 +47,13 @@ func NewEngine() *Engine {
 		geminiClient: gemini.NewClient(),
 		cfClient:     cloudflare.NewClient(),
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
-		cache:        make(map[string]CacheEntry),
+		cache:        NewCache(),
 	}
 
 	// Periodic cache cleanup
-	go func() {
-		ticker := time.NewTicker(2 * time.Minute)
-		for range ticker.C {
-			e.cleanExpiredCache()
-		}
-	}()
+	e.cache.StartSweeper(cacheSweepInterval)
 
 	return e
-}
-
-func (e *Engine) cleanExpiredCache() {
-	e.cacheMutex.Lock()
-	defer e.cacheMutex.Unlock()
-	now := time.Now()
-	for k, v := range e.cache {
-		if now.After(v.ExpiresAt) {
-			delete(e.cache, k)
-		}
-	}
-}
-
-func (e *Engine) getCached(key string) (string, bool) {
-	e.cacheMutex.RLock()
-	defer e.cacheMutex.RUnlock()
-	entry, ok := e.cache[key]
-	if !ok || time.Now().After(entry.ExpiresAt) {
-		return "", false
-	}
-	return entry.Reply, true
-}
-
-func (e *Engine) setCache(key, val string, ttl time.Duration) {
-	e.cacheMutex.Lock()
-	defer e.cacheMutex.Unlock()
-	e.cache[key] = CacheEntry{
-		Reply:     val,
-		ExpiresAt: time.Now().Add(ttl),
-	}
-}
-
-func cacheKey(clientID string, lang detector.Language, text string, history []ChatMessage) string {
-	h := sha256.New()
-	historyHash := ""
-	if len(history) > 0 {
-		last := history[len(history)-1]
-		historyHash = last.Role + ":" + strings.ToLower(strings.TrimSpace(last.Content))
-	}
-	h.Write([]byte(clientID + ":" + string(lang) + ":" + historyHash + ":" + strings.ToLower(strings.TrimSpace(text))))
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // GenerateReply is the main high-performance AI entrypoint:
@@ -135,7 +70,7 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 	cKey := cacheKey(pctx.ClientID, lang, cleanMsg, history)
 
 	// Check cache
-	if cached, ok := e.getCached(cKey); ok {
+	if cached, ok := e.cache.Get(cKey); ok {
 		return cached, lang, "cache", true
 	}
 
@@ -168,10 +103,10 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 		model = "gemini-3.6-flash"
 	}
 	if gemini.GetSessionPool().HasSession(pctx.ClientID) {
-		t1Ctx, t1Cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+		t1Ctx, t1Cancel := context.WithTimeout(ctx, tier1Timeout)
 		if reply, err := e.geminiClient.GenerateForWorkspace(t1Ctx, pctx.ClientID, fullPrompt, model); err == nil && len(reply) > 0 {
 			t1Cancel()
-			e.setCache(cKey, reply, 5*time.Minute)
+			e.cache.Set(cKey, reply, tierCacheTTL)
 			return reply, lang, "gemini-web2api:" + model, false
 		}
 		t1Cancel()
@@ -194,370 +129,26 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 		}
 		cfMessages = append(cfMessages, cloudflare.Message{Role: "user", Content: cleanMsg})
 
-		t2Ctx, t2Cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+		t2Ctx, t2Cancel := context.WithTimeout(ctx, tier2Timeout)
 		if reply, err := e.cfClient.Generate(t2Ctx, cfMessages); err == nil && len(reply) > 0 {
 			t2Cancel()
-			e.setCache(cKey, reply, 5*time.Minute)
+			e.cache.Set(cKey, reply, tierCacheTTL)
 			return reply, lang, "cloudflare-pool", false
 		}
 		t2Cancel()
 	}
 
 	// Tier 3: Direct APIs (OpenRouter / OpenAI / Gemini API if configured)
-	t3Ctx, t3Cancel := context.WithTimeout(ctx, 2000*time.Millisecond)
+	t3Ctx, t3Cancel := context.WithTimeout(ctx, tier3Timeout)
 	if reply, modelName, err := e.tryDirectAPIs(t3Ctx, pctx, sysPrompt, cleanMsg); err == nil && len(reply) > 0 {
 		t3Cancel()
-		e.setCache(cKey, reply, 5*time.Minute)
+		e.cache.Set(cKey, reply, tierCacheTTL)
 		return reply, lang, modelName, false
 	}
 	t3Cancel()
 
 	// Tier 4: Catalog-Grounded Deterministic Demo Responder with conversational memory
 	demoReply := DemoResponder(lang, cleanMsg, pctx.Products, pctx.Knowledge, history)
-	e.setCache(cKey, demoReply, 10*time.Minute)
+	e.cache.Set(cKey, demoReply, demoCacheTTL)
 	return demoReply, lang, "deterministic-catalog", false
-}
-
-func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPrompt, userMsg string) (string, string, error) {
-	// 0. Gemini via local gemini-web2api-go (OpenAI-compatible endpoint).
-	// Runs first: it is the configured backend. web2api drives the Gemini
-	// web UI, so first replies take ~5s — the 2s Tier-3 context would
-	// always time out, hence a detached 25s context here.
-	//
-	// NOTE (F1 Knowledge Leak Fix):
-	// The gemini-web2api proxy (GEMINI_WEB2API_URL) uses a single shared browser session
-	// for all requests without per-workspace session isolation. In multi-tenant environments,
-	// routing different workspaces to the same web2api session causes cross-workspace prompt
-	// and knowledge leakage (e.g. Shop 45 return policy leaking to other workspaces).
-	// Because gemini-web2api does not support isolated per-workspace sessions, Tier 3 web2api
-	// is skipped for workspace/widget traffic (pctx.ClientID != ""), safely falling through
-	// to the knowledge-grounded deterministic responder (Tier 4) or isolated direct APIs.
-	if pctx.ClientID == "" {
-		if url := os.Getenv("GEMINI_WEB2API_URL"); url != "" {
-			if key := os.Getenv("GEMINI_WEB2API_KEY"); key != "" {
-				model := os.Getenv("GEMINI_WEB2API_MODEL")
-				if model == "" {
-					model = "gemini-3.6-flash"
-				}
-				t3Timeout := 20 * time.Second
-				if envMs := os.Getenv("GEMINI_WEB2API_TIMEOUT_MS"); envMs != "" {
-					if d, err := strconv.Atoi(envMs); err == nil && d > 0 {
-						t3Timeout = time.Duration(d) * time.Millisecond
-					}
-				} else if envSec := os.Getenv("GEMINI_WEB2API_TIMEOUT_SEC"); envSec != "" {
-					if d, err := strconv.Atoi(envSec); err == nil && d > 0 {
-						t3Timeout = time.Duration(d) * time.Second
-					}
-				}
-				wCtx, wCancel := context.WithTimeout(context.WithoutCancel(ctx), t3Timeout)
-				defer wCancel()
-				if reply, err := e.callOpenAICompatible(wCtx, url, key, model, sysPrompt, userMsg); err == nil && reply != "" {
-					return reply, "gemini-web2api:" + model, nil
-				}
-			}
-		}
-	}
-
-	// 1. OpenRouter
-	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
-		reply, err := e.callOpenAICompatible(ctx, "https://openrouter.ai/api/v1/chat/completions", key, "google/gemini-2.5-flash", sysPrompt, userMsg)
-		if err == nil && reply != "" {
-			return reply, "openrouter:gemini-2.5-flash", nil
-		}
-	}
-
-	// 2. Direct Gemini API
-	if key := os.Getenv("GEMINI_API_KEY"); key != "" {
-		url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-		payload := map[string]interface{}{
-			"contents": []map[string]interface{}{
-				{"role": "user", "parts": []map[string]string{{"text": sysPrompt + "\n\nUser: " + userMsg}}},
-			},
-		}
-		data, _ := json.Marshal(payload)
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
-		if err == nil {
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("x-goog-api-key", key)
-			resp, err := e.httpClient.Do(req)
-			if err == nil {
-				defer resp.Body.Close()
-				body, _ := io.ReadAll(resp.Body)
-				var gRes struct {
-					Candidates []struct {
-						Content struct {
-							Parts []struct {
-								Text string `json:"text"`
-							} `json:"parts"`
-						} `json:"content"`
-					} `json:"candidates"`
-				}
-				if json.Unmarshal(body, &gRes) == nil && len(gRes.Candidates) > 0 && len(gRes.Candidates[0].Content.Parts) > 0 {
-					return strings.TrimSpace(gRes.Candidates[0].Content.Parts[0].Text), "direct-gemini-api", nil
-				}
-			}
-		}
-	}
-
-	// 3. OpenAI
-	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
-		reply, err := e.callOpenAICompatible(ctx, "https://api.openai.com/v1/chat/completions", key, "gpt-4o-mini", sysPrompt, userMsg)
-		if err == nil && reply != "" {
-			return reply, "openai:gpt-4o-mini", nil
-		}
-	}
-
-	return "", "", fmt.Errorf("no direct APIs available or succeeded")
-}
-
-func (e *Engine) callOpenAICompatible(ctx context.Context, endpoint, token, model, sysPrompt, userMsg string) (string, error) {
-	payload := map[string]interface{}{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": sysPrompt},
-			{"role": "user", "content": userMsg},
-		},
-		"temperature": 0.4,
-		"max_tokens":  600,
-	}
-	data, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(data))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil || resp.StatusCode != 200 {
-		return "", fmt.Errorf("status %d", resp.StatusCode)
-	}
-
-	var res struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(body, &res); err == nil && len(res.Choices) > 0 {
-		return strings.TrimSpace(res.Choices[0].Message.Content), nil
-	}
-
-	return "", fmt.Errorf("empty choice from OpenAI compatible endpoint")
-}
-
-// BuildSystemPrompt formats catalog, store policies, and ironclad language directives
-func BuildSystemPrompt(ctx PromptContext, lang detector.Language) string {
-	var sb strings.Builder
-
-	storeName := ctx.ClientName
-	if storeName == "" {
-		storeName = "Our Store"
-	}
-
-	sb.WriteString(fmt.Sprintf("You are the official, intelligent, helpful, and courteous e-commerce sales assistant for \"%s\".\n\n", storeName))
-	sb.WriteString(detector.LanguageDirective(lang))
-	sb.WriteString("\n\n")
-
-	sb.WriteString("=== OPERATIONAL RULES & POLICIES ===\n")
-	sb.WriteString("1. ACCURACY: Only quote products, prices, and policies listed below. NEVER fabricate discounts or unlisted products.\n")
-	sb.WriteString("2. POLITE & HELPFUL: Greet customers warmly and answer inquiries concisely with clear facts.\n")
-	sb.WriteString("3. ORDER ASSISTANCE: When a customer expresses intent to buy, politely request their Full Name, Phone Number, and Full Delivery Address.\n\n")
-
-	if len(ctx.Products) > 0 {
-		sb.WriteString("=== CURRENT PRODUCT CATALOG & INVENTORY ===\n")
-		for _, p := range ctx.Products {
-			stockStr := "In Stock"
-			if p.Stock <= 0 {
-				stockStr = "Out of Stock"
-			}
-			sb.WriteString(fmt.Sprintf("- %s: %s BDT (%s)\n", p.Name, p.PriceBDT, stockStr))
-		}
-		sb.WriteString("\n")
-	}
-
-	if len(ctx.Knowledge) > 0 {
-		sb.WriteString("=== STORE POLICIES & KNOWLEDGE BASE ===\n")
-		for _, k := range ctx.Knowledge {
-			sb.WriteString(fmt.Sprintf("[%s]: %s\n", k.Title, k.Content))
-		}
-		sb.WriteString("\n")
-	} else {
-		sb.WriteString("=== DEFAULT SHIPPING & DELIVERY POLICY ===\n")
-		sb.WriteString("- Inside Dhaka: 60 BDT delivery charge (takes 24-48 hours).\n")
-		sb.WriteString("- Outside Dhaka: 120 BDT delivery charge (takes 2-3 business days).\n")
-		sb.WriteString("- Cash on Delivery (COD) is available nationwide.\n\n")
-	}
-
-	return sb.String()
-}
-
-// DemoResponder provides deterministic, ultra-fast responses grounded in catalog & language
-func DemoResponder(lang detector.Language, text string, products []ProductItem, knowledge []KnowledgeItem, history []ChatMessage) string {
-	// Helper for Unicode-aware word boundary matching
-	matchWord := func(s, word string) bool {
-		if word == "" {
-			return false
-		}
-		pattern := `(?i)(?:^|[^\p{L}\p{M}\p{N}_])` + regexp.QuoteMeta(word) + `(?:[^\p{L}\p{M}\p{N}_]|$)`
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return false
-		}
-		return re.MatchString(s)
-	}
-
-	// 1. Delivery / Shipping intent (checked first; using word boundaries so words like 'চার্জার' or 'charger' don't match)
-	reDelivery := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(delivery|charge|shipping|courier|pathan|kobe|somoy|shomoy|ডেলিভারি|চার্জ|কুরিয়ার|কুরিয়ার|পাঠান|সময়|কবে)(?:[^\p{L}\p{M}\p{N}_]|$)`)
-	if reDelivery.MatchString(text) {
-		// Check knowledge FIRST for delivery / charge / shipping entries
-		if len(knowledge) > 0 {
-			for _, k := range knowledge {
-				combined := strings.ToLower(k.Title + " " + k.Content + " " + k.Category)
-				if strings.Contains(combined, "delivery") || strings.Contains(combined, "charge") ||
-					strings.Contains(combined, "shipping") || strings.Contains(combined, "courier") ||
-					strings.Contains(combined, "ডেলিভারি") || strings.Contains(combined, "চার্জ") ||
-					strings.Contains(combined, "কুরিয়ার") || strings.Contains(combined, "কুরিয়ার") {
-					switch lang {
-					case detector.LangBangla:
-						return fmt.Sprintf("আমাদের ডেলিভারি তথ্য: %s", k.Content)
-					case detector.LangBanglish:
-						return fmt.Sprintf("Amader delivery info: %s", k.Content)
-					default:
-						return fmt.Sprintf("Our delivery policy: %s", k.Content)
-					}
-				}
-			}
-		}
-
-		// Fallback to generic template only when no knowledge entry matches
-		switch lang {
-		case detector.LangBangla:
-			return "আমাদের ডেলিভারি চার্জ ঢাকার ভেতরে ৬০ টাকা (২৪-৪৮ ঘণ্টা) এবং ঢাকার বাইরে ১২০ টাকা (২-৩ দিন)। ক্যাশ অন ডেলিভারি সুবিধা রয়েছে।"
-		case detector.LangBanglish:
-			return "Amader delivery charge Dhaka city-r bhitore 60 taka (24-48 hours) ebong Dhaka-r baire 120 taka (2-3 days). Cash on delivery available ache."
-		default:
-			return "Our delivery charge is 60 BDT inside Dhaka (24-48h) and 120 BDT outside Dhaka (2-3 days). Cash on Delivery is available."
-		}
-	}
-
-	// 2. Order intent (with word boundaries and conversational memory across turns)
-	reOrder := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(order|buy|purchase|kinte|nibo|nebo|lagbe|nite|chai|chaichi|haa|ha|yes|confirm|অর্ডার|কিনব|কিনতে|নিব|চাই|নিতে|চাচ্ছি|হাঁ|হ্যাঁ)(?:[^\p{L}\p{M}\p{N}_]|$)`)
-	if reOrder.MatchString(text) {
-		var referencedProduct *ProductItem
-		for i := len(history) - 1; i >= 0; i-- {
-			hText := strings.ToLower(history[i].Content)
-			for j := range products {
-				pNameLower := strings.ToLower(products[j].Name)
-				if strings.Contains(hText, pNameLower) {
-					referencedProduct = &products[j]
-					break
-				}
-			}
-			if referencedProduct != nil {
-				break
-			}
-		}
-
-		prodNotice := ""
-		if referencedProduct != nil {
-			prodNotice = " (" + referencedProduct.Name + ")"
-		}
-
-		switch lang {
-		case detector.LangBangla:
-			return fmt.Sprintf("আপনার অর্ডারটি%s কনফার্ম করার জন্য অনুগ্রহ করে আপনার নাম, মোবাইল নম্বর এবং সম্পূর্ণ ডেলিভারি ঠিকানাটি এখানে লিখে দিন।", prodNotice)
-		case detector.LangBanglish:
-			return fmt.Sprintf("Apnar order%s confirm korte apnar naam, mobile number ar complete delivery address ta ekhane likhe din please.", prodNotice)
-		default:
-			return fmt.Sprintf("To confirm your order%s, please provide your Full Name, Mobile Number, and complete Delivery Address.", prodNotice)
-		}
-	}
-
-	// 3. Knowledge Base & Policies inquiry (return, refund, exchange, warranty)
-	rePolicy := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(return|refund|exchange|warranty|guarantee|ferot|change|policy|ফেরত|ওয়ারেন্টি|ওয়ারেন্টি|পলিসি)(?:[^\p{L}\p{M}\p{N}_]|$)`)
-	if rePolicy.MatchString(text) && len(knowledge) > 0 {
-		for _, k := range knowledge {
-			combined := strings.ToLower(k.Title + " " + k.Content + " " + k.Category)
-			if strings.Contains(combined, "return") || strings.Contains(combined, "refund") ||
-				strings.Contains(combined, "policy") || strings.Contains(combined, "warranty") ||
-				strings.Contains(combined, "ফেরত") || strings.Contains(combined, "পলিসি") {
-				switch lang {
-				case detector.LangBangla:
-					return fmt.Sprintf("আমাদের পলিসি: %s। বিস্তারিত জানতে আমাদের জানাতে পারেন।", k.Content)
-				case detector.LangBanglish:
-					return fmt.Sprintf("Amader policy: %s. Kono query thakle janate paren.", k.Content)
-				default:
-					return fmt.Sprintf("Our policy: %s.", k.Content)
-				}
-			}
-		}
-	}
-
-	// 4. Price & Product inquiry with intelligent matching
-	rePrice := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(dam|daam|price|cost|koto|rate|দাম|মূল্য|কত)(?:[^\p{L}\p{M}\p{N}_]|$)`)
-	if (rePrice.MatchString(text) || len(products) > 0) && len(products) > 0 {
-		var matchedProduct *ProductItem
-		for i := range products {
-			pNameLower := strings.ToLower(products[i].Name)
-			if matchWord(text, pNameLower) {
-				matchedProduct = &products[i]
-				break
-			}
-			words := strings.Fields(pNameLower)
-			for _, w := range words {
-				if len(w) > 3 && (matchWord(text, w) || (w == "charger" && matchWord(text, "চার্জার")) || (w == "চার্জার" && matchWord(text, "charger"))) {
-					matchedProduct = &products[i]
-					break
-				}
-			}
-			if matchedProduct != nil {
-				break
-			}
-		}
-
-		if matchedProduct != nil || rePrice.MatchString(text) {
-			if matchedProduct == nil {
-				matchedProduct = &products[0]
-			}
-
-			// Out of stock check
-			if matchedProduct.Stock <= 0 {
-				switch lang {
-				case detector.LangBangla:
-					return fmt.Sprintf("দুঃখিত, %s বর্তমানে স্টক আউট (Out of stock) আছে। নতুন স্টক এলে আমরা আপনাকে জানাতে পারব।", matchedProduct.Name)
-				case detector.LangBanglish:
-					return fmt.Sprintf("Dukkhito, %s ekhon stock out ache. Notun stock ashle apnake janate parbo.", matchedProduct.Name)
-				default:
-					return fmt.Sprintf("Sorry, %s is currently out of stock. We will notify you once new stock arrives.", matchedProduct.Name)
-				}
-			}
-
-			switch lang {
-			case detector.LangBangla:
-				return fmt.Sprintf("%s-এর মূল্য %v টাকা। আপনি কি এটি অর্ডার করতে চান?", matchedProduct.Name, matchedProduct.PriceBDT)
-			case detector.LangBanglish:
-				return fmt.Sprintf("%s-er price %v BDT. Apni ki eta order korte chan?", matchedProduct.Name, matchedProduct.PriceBDT)
-			default:
-				return fmt.Sprintf("%s is %v BDT. Would you like to order it?", matchedProduct.Name, matchedProduct.PriceBDT)
-			}
-		}
-	}
-
-	// 5. Greetings & general inquiry
-	switch lang {
-	case detector.LangBangla:
-		return "ধন্যবাদ আমাদের সাথে যোগাযোগ করার জন্য! আমি আপনাকে কীভাবে সাহায্য করতে পারি?"
-	case detector.LangBanglish:
-		return "Message korar jonno dhonnobad! Apnake kivabe shahajjo korte pari?"
-	default:
-		return "Thank you for reaching out to us! How can we assist you today?"
-	}
 }

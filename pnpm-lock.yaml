@@ -32,6 +32,12 @@ importers:
         specifier: ^1.17.0
         version: 1.17.0
 
+  packages/ai-router:
+    devDependencies:
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+
   packages/contracts:
     dependencies:
       zod:
@@ -84,6 +90,9 @@ importers:
       '@nestjs/platform-express':
         specifier: ^12.0.1
         version: 12.1.2(@nestjs/common@12.1.2(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.1.2)
+      '@tectonic/ai-router':
+        specifier: workspace:*
+        version: link:../../packages/ai-router
       '@tectonic/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -190,6 +199,9 @@ importers:
 
   services/workers:
     dependencies:
+      '@tectonic/ai-router':
+        specifier: workspace:*
+        version: link:../../packages/ai-router
       '@tectonic/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

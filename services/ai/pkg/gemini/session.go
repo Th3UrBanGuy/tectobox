@@ -34,7 +34,7 @@ func GetSessionPool() *SessionPool {
 	poolOnce.Do(func() {
 		globalPool = &SessionPool{
 			sessions: make(map[string]*WorkspaceSession),
-			baseBL:   "boq_assistant-bard-web-server_20260716.08_p0",
+			baseBL:   DefaultBL,
 		}
 		// Background cleanup for inactive workspace sessions (30m TTL)
 		go globalPool.evictionLoop()
@@ -131,10 +131,7 @@ func (p *SessionPool) HasSession(workspaceID string) bool {
 func (c *Client) GenerateForWorkspace(ctx context.Context, workspaceID string, prompt string, modelName string) (string, error) {
 	sess := GetSessionPool().GetOrCreateSession(workspaceID)
 
-	model, ok := AvailableModels[modelName]
-	if !ok {
-		model = AvailableModels["gemini-3.6-flash"]
-	}
+	model := ResolveModel(modelName)
 
 	// Execute with workspace session client
 	return c.doStreamGenerateWithClient(ctx, sess.HTTPClient, prompt, model)

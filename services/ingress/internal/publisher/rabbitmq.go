@@ -10,6 +10,8 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+
+	"github.com/tect0nicofficial/tectobox/services/ingress/internal/topology"
 )
 
 // Publisher defines message publishing behavior for ingress handlers
@@ -90,13 +92,13 @@ func (p *RabbitMQPublisher) initChannel() error {
 
 	// Declare exchange
 	err = ch.ExchangeDeclare(
-		"tectobox.events", // name
-		"topic",           // type
-		true,              // durable
-		false,             // auto-deleted
-		false,             // internal
-		false,             // no-wait
-		nil,               // arguments
+		topology.EVENTS_EXCHANGE, // name
+		"topic",                  // type
+		true,                     // durable
+		false,                    // auto-deleted
+		false,                    // internal
+		false,                    // no-wait
+		nil,                      // arguments
 	)
 	if err != nil {
 		ch.Close()
@@ -262,10 +264,10 @@ func (p *RabbitMQPublisher) Publish(ctx context.Context, routingKey string, body
 DRAIN_DONE:
 
 	err := p.channel.PublishWithContext(ctx,
-		"tectobox.events", // exchange
-		routingKey,        // routing key
-		true,              // mandatory: return if unroutable
-		false,             // immediate
+		topology.EVENTS_EXCHANGE, // exchange
+		routingKey,               // routing key
+		true,                     // mandatory: return if unroutable
+		false,                    // immediate
 		amqp.Publishing{
 			ContentType:  "application/json",
 			DeliveryMode: amqp.Persistent,

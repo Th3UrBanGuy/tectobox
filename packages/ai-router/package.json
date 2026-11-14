@@ -1,0 +1,14 @@
+{
+  "description": "Shared AI router for Tectobox (language detection, system prompts, LLM provider tiers, deterministic fallback, payment-claim parsing)",
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "main": "dist/index.js",
+  "name": "@tectonic/ai-router",
+  "scripts": {
+    "build": "tsc"
+  },
+  "type": "module",
+  "types": "dist/index.d.ts",
+  "version": "1.0.0"
+}

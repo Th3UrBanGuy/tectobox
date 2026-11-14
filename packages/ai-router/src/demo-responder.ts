@@ -1,10 +1,13 @@
 /**
- * Deterministic template responder — split from ai/router.ts in Phase 2 of the modular
- * restructure. Code moved verbatim; no behaviour change.
+ * Deterministic template responder — @tectonic/ai-router (Phase 4 of
+ * the modular restructure). The api and the workers each had their own
+ * copy of the ai router (api/src/ai/router.ts vs workers/src/ai/);
+ * this package is the one implementation both import. Code moved
+ * verbatim from the workers split; no behaviour change.
  */
 
-import { detectCustomerLanguage } from './language.ts';
-import type { ProductItem, KnowledgeItem } from './prompts.ts';
+import { detectCustomerLanguage } from './language.js';
+import type { ProductItem, KnowledgeItem } from './prompts.js';
 
 export function demoResponder(
   clientId: string | number,

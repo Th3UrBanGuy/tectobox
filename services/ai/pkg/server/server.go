@@ -169,7 +169,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 }
 
 type InternalChatRequest struct {
-	ClientID     interface{}            `json:"client_id"`
+	// ClientID is a validated tenant id (router.ClientID), not
+	// interface{}: a camelCase `clientId` no longer decodes to nil and
+	// can no longer fall back to the "<nil>" shared cache key. A
+	// missing, empty, zero, or wrong-typed client_id fails the decode
+	// (or the empty check below) and the request is rejected with 400.
+	ClientID     router.ClientID        `json:"client_id"`
 	ClientName   string                 `json:"client_name"`
 	BusinessType string                 `json:"business_type"`
 	Text         string                 `json:"text"`
@@ -191,8 +196,20 @@ func (s *Server) handleInternalAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The client_id field is required. A missing client_id decodes to
+	// "" (UnmarshalJSON never runs for an absent field) — and a
+	// camelCase-only `clientId` leaves it "" too. Reject both with 400
+	// instead of serving the request under a shared tenant id. (The
+	// generic /v1/chat/completions path is unaffected: it never takes
+	// a client_id and calls GenerateReply with an empty PromptContext
+	// directly, which the F1 guard in the router still allows.)
+	if req.ClientID == "" {
+		http.Error(w, "client_id is required: send the workspace id as client_id (snake_case), not clientId", http.StatusBadRequest)
+		return
+	}
+
 	start := time.Now()
-	workspaceID := fmt.Sprintf("%v", req.ClientID)
+	workspaceID := req.ClientID.String()
 	if !router.GetRateLimiterManager().AllowWorkspace(workspaceID) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)

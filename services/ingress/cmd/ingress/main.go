@@ -9,6 +9,7 @@ import (
 	"github.com/tect0nicofficial/tectobox/services/ingress/internal/handler"
 	"github.com/tect0nicofficial/tectobox/services/ingress/internal/publisher"
 	"github.com/tect0nicofficial/tectobox/services/ingress/internal/redis"
+	"github.com/tect0nicofficial/tectobox/services/ingress/internal/topology"
 )
 
 func main() {
@@ -51,14 +52,14 @@ func main() {
 
 	if redisClient != nil {
 		metaHandler.DynamicRoute = func(pageID string) int {
-			cid, err := redisClient.GetInt("meta:page:" + pageID)
+			cid, err := redisClient.GetInt(topology.MetaPageKey(pageID))
 			if err == nil && cid > 0 {
 				return cid
 			}
 			return 0
 		}
 		telegramHandler.DynamicRoute = func(token string) int {
-			cid, err := redisClient.GetInt("telegram:bot:" + token)
+			cid, err := redisClient.GetInt(topology.TelegramBotKey(token))
 			if err == nil && cid > 0 {
 				return cid
 			}

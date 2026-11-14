@@ -1,6 +1,9 @@
 /**
- * Language detection — split from ai/router.ts in Phase 2 of the modular
- * restructure. Code moved verbatim; no behaviour change.
+ * Language detection — @tectonic/ai-router (Phase 4 of the modular
+ * restructure). The api and the workers each had their own copy of the
+ * ai router (api/src/ai/router.ts vs workers/src/ai/); this package is
+ * the one implementation both import. Code moved verbatim from the
+ * workers split; no behaviour change.
  */
 
 const BN_WORDS = new Set(

@@ -60,6 +60,11 @@
  *   Redis 'meta:page:<pageId>'
  *     - written by the api (connectors.controller), read by Go ingress
  *       (services/ingress/cmd/ingress/main.go) to resolve a page to a tenant.
+ *   Redis 'telegram:bot:<token>'
+ *     - read by Go ingress (services/ingress/cmd/ingress/main.go) to
+ *       resolve a bot token to a tenant. Written by the api alongside the
+ *       bot's session (see telegramBotKey); no TS caller uses the builder
+ *       yet — it exists so the Go generator has one source for the key.
  *   Redis 'lease:<sessionKey>'
  *     - fencing leases, owned by @tectonic/coordination (acquire/renew/
  *       validate). The session-key part differs per channel (see
@@ -226,6 +231,10 @@ export const metaTokenKey = (clientId: string | number, channel: string): string
 /** Meta page id -> client id (read by Go ingress to resolve a tenant). */
 export const metaPageKey = (pageId: string | number): string =>
   `meta:page:${pageId}`;
+
+/** Telegram bot token -> client id (read by Go ingress to resolve a tenant). */
+export const telegramBotKey = (token: string): string =>
+  `telegram:bot:${token}`;
 
 /**
  * WhatsApp session-map key AND session directory name. Always carries the

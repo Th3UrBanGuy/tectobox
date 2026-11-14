@@ -177,7 +177,7 @@ export class AiReplyService {
                 businessType: client.business_type,
                 products: prodsRes.rows,
                 knowledge: kbRes.rows,
-              }, langDir);
+              }, langDir, { includeSecurityDirective: true });
 
               const promptMessages: any[] = [
                 { role: 'system', content: sysPrompt },
