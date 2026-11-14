@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, Inject, NotFoundException, B
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
+import { SSE_EVENT_TYPES } from '@tectonic/contracts';
 import { LicensingService } from '../licensing/licensing.service.js';
 import { getAIResponse, demoResponder, detectCustomerLanguage, languageDirective, buildSystemPrompt, queryGoAIEngine, parsePaymentClaim } from '../ai/router.js';
 import { evaluatePromptSafety } from '../ai/guardrails.js';
@@ -94,7 +95,7 @@ export class WidgetController {
     // 4. Broadcast inbound SSE
     if (this.eventsService) {
       await this.eventsService.broadcastTenantEvent(client.id, {
-        type: 'message',
+        type: SSE_EVENT_TYPES.MESSAGE,
         conversation: conv,
         inbound: msg,
       });
@@ -133,7 +134,7 @@ export class WidgetController {
 
       if (this.eventsService) {
         await this.eventsService.broadcastTenantEvent(client.id, {
-          type: 'conversation:flag',
+          type: SSE_EVENT_TYPES.CONVERSATION_FLAG,
           conversationId: conv.id,
           needsHuman: true,
         });
@@ -233,7 +234,7 @@ export class WidgetController {
           // Real-time broadcast to dashboard!
           if (this.eventsService) {
             await this.eventsService.broadcastTenantEvent(client.id, {
-              type: 'payment:received',
+              type: SSE_EVENT_TYPES.PAYMENT_RECEIVED,
               payment: payRes.rows[0],
             });
           }
@@ -324,7 +325,7 @@ export class WidgetController {
 
       if (this.eventsService) {
         await this.eventsService.broadcastTenantEvent(client.id, {
-          type: 'message',
+          type: SSE_EVENT_TYPES.MESSAGE,
           conversation: conv,
           outbound: outMsg.rows[0],
         });

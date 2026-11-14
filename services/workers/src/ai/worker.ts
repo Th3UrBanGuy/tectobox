@@ -1,6 +1,15 @@
 import { RabbitMQClient } from '@tectonic/messaging';
 import { connectBroker } from '../broker/reconnect.ts';
 import {
+  AI_REQUESTS_DLQ_ROUTING_KEY,
+  AI_REQUESTS_QUEUE,
+  AI_REQUEST_ROUTING_KEY_PATTERN,
+  DLX_EXCHANGE,
+  EVENTS_EXCHANGE,
+  AiRequestWireMessageSchema,
+  outgoingRoutingKey,
+} from '@tectonic/contracts';
+import {
   getAIResponse,
   demoResponder,
   detectCustomerLanguage,
@@ -23,7 +32,7 @@ export function getPrefetchLimit(): number {
 export async function startAIWorker() {
   const mq = new RabbitMQClient({
     url: process.env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/',
-    exchange: 'tectobox.events'
+    exchange: EVENTS_EXCHANGE
   });
   await connectBroker(mq);
 
@@ -31,16 +40,16 @@ export async function startAIWorker() {
   if (channel) {
     const prefetch = getPrefetchLimit();
     await channel.prefetch(prefetch);
-    await channel.assertQueue('ai.requests', {
+    await channel.assertQueue(AI_REQUESTS_QUEUE, {
       durable: true,
       arguments: {
-        'x-dead-letter-exchange': 'tectobox.dlx',
-        'x-dead-letter-routing-key': 'ai.requests.dlq'
+        'x-dead-letter-exchange': DLX_EXCHANGE,
+        'x-dead-letter-routing-key': AI_REQUESTS_DLQ_ROUTING_KEY
       }
     });
-    await channel.bindQueue('ai.requests', 'tectobox.events', 'ai.request.#');
-    
-    channel.consume('ai.requests', async (msg) => {
+    await channel.bindQueue(AI_REQUESTS_QUEUE, EVENTS_EXCHANGE, AI_REQUEST_ROUTING_KEY_PATTERN);
+
+    channel.consume(AI_REQUESTS_QUEUE, async (msg) => {
       if (!msg) return;
 
       let payload: any;
@@ -52,12 +61,17 @@ export async function startAIWorker() {
         return;
       }
 
-      const { platform, clientId, slot, to, text, systemPrompt } = payload || {};
-      if (!platform || !clientId || !to || !text) {
+      // AI requests are validated by AiRequestWireMessageSchema, which
+      // encodes exactly the old `!platform || !clientId || !to || !text`
+      // gate. A failed message is nacked to the DLQ, as before.
+      const parsed = AiRequestWireMessageSchema.safeParse(payload);
+      if (!parsed.success) {
         console.warn('[ai-worker] missing required fields, sending to DLQ:', payload);
         channel.nack(msg, false, false);
         return;
       }
+      const { platform, clientId, slot, to, text, systemPrompt } = parsed.data;
+      payload = parsed.data;
 
       try {
         let replyText: string | null = null;
@@ -104,7 +118,7 @@ export async function startAIWorker() {
         const validPlatforms = ['whatsapp', 'telegram', 'meta', 'webchat'];
         const normalizedPlatform = validPlatforms.includes(platform) ? platform : 'whatsapp';
 
-        await mq.publish(`message.outgoing.${normalizedPlatform}`, {
+        await mq.publish(outgoingRoutingKey(normalizedPlatform), {
           clientId,
           slot,
           to,

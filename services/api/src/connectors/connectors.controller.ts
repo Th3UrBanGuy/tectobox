@@ -23,6 +23,7 @@ import { RequireFeature } from '../licensing/feature.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
+import { SSE_EVENT_TYPES, metaPageKey, metaTokenKey } from '@tectonic/contracts';
 import { metaOAuthState } from '../meta/meta.controller.js';
 import { ConversationsController } from '../conversations/conversations.controller.js';
 
@@ -570,8 +571,8 @@ export class ConnectorsController {
     );
 
     // Dynamic Redis routing for Go ingress and outbound worker
-    await this.eventsService.setRedisKey(`meta:page:${page.id}`, clientId.toString());
-    await this.eventsService.setRedisKey(`meta:token:${clientId}:messenger`, page.access_token);
+    await this.eventsService.setRedisKey(metaPageKey(page.id), clientId.toString());
+    await this.eventsService.setRedisKey(metaTokenKey(clientId, 'messenger'), page.access_token);
 
     if (ig) {
       await this.pool.query(
@@ -581,12 +582,12 @@ export class ConnectorsController {
          SET page_id = EXCLUDED.page_id, page_name = EXCLUDED.page_name, page_access_token = EXCLUDED.page_access_token, ig_user_id = EXCLUDED.ig_user_id, ig_username = EXCLUDED.ig_username, status = 'connected', updated_at = NOW()`,
         [clientId, page.id, page.name, page.access_token, ig.id, ig.username]
       );
-      await this.eventsService.setRedisKey(`meta:page:${ig.id}`, clientId.toString());
-      await this.eventsService.setRedisKey(`meta:token:${clientId}:instagram`, page.access_token);
+      await this.eventsService.setRedisKey(metaPageKey(ig.id), clientId.toString());
+      await this.eventsService.setRedisKey(metaTokenKey(clientId, 'instagram'), page.access_token);
     }
 
     // Broadcast connectors update to frontend
-    await this.eventsService.broadcastTenantEvent(clientId, { type: 'connectors', clientId });
+    await this.eventsService.broadcastTenantEvent(clientId, { type: SSE_EVENT_TYPES.CONNECTORS, clientId });
     console.log(`[meta] client ${clientId} connected page "${page.name}"${ig ? ` + IG @${ig.username}` : ''}`);
 
     return { page: page.name, instagram: ig ? ig.username : null };

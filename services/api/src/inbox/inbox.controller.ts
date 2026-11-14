@@ -17,6 +17,7 @@ import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
+import { SSE_EVENT_TYPES } from '@tectonic/contracts';
 
 @Controller('api')
 @UseGuards(TenantGuard)
@@ -143,7 +144,7 @@ export class InboxController {
 
     if (this.eventsService) {
       await this.eventsService.broadcastTenantEvent(tenantId, {
-        type: 'conversation:read',
+        type: SSE_EVENT_TYPES.CONVERSATION_READ,
         conversationId,
       });
     }
@@ -204,12 +205,12 @@ export class InboxController {
 
       // 4. Broadcast SSE
       await this.eventsService.broadcastTenantEvent(tenantId, {
-        type: 'message',
+        type: SSE_EVENT_TYPES.MESSAGE,
         conversation: conv,
         outbound: msg,
       });
       await this.eventsService.broadcastTenantEvent(tenantId, {
-        type: 'conversation:flag',
+        type: SSE_EVENT_TYPES.CONVERSATION_FLAG,
         conversationId,
         needsHuman: false,
       });
@@ -249,7 +250,7 @@ export class InboxController {
 
     if (this.eventsService) {
       await this.eventsService.broadcastTenantEvent(tenantId, {
-        type: 'conversation:flag',
+        type: SSE_EVENT_TYPES.CONVERSATION_FLAG,
         conversationId,
         needsHuman,
       });

@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import { RedisSubscriber } from '@tectonic/coordination';
+import { tenantEventsChannel } from '@tectonic/contracts';
 
 @Controller('api/events')
 export class SseController {
@@ -21,7 +22,7 @@ export class SseController {
     // Initial connected handshake matching old server.js format
     res.write(': connected\n\n');
 
-    const channel = `tenant:${tenantId}:events`;
+    const channel = tenantEventsChannel(tenantId);
     let redisSubscriber: RedisSubscriber | null = null;
 
     try {

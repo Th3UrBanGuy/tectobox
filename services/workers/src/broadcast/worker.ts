@@ -3,6 +3,21 @@ import { RabbitMQClient } from '@tectonic/messaging';
 import { connectBroker } from '../broker/reconnect.ts';
 import { RedisCoordinator } from '@tectonic/coordination';
 import { Redis } from 'ioredis';
+import {
+  BROADCAST_JOBS_DLQ_ROUTING_KEY,
+  BROADCAST_JOBS_QUEUE,
+  BROADCAST_JOB_ROUTING_KEY,
+  DLX_EXCHANGE,
+  EVENTS_EXCHANGE,
+  RETRY_EXCHANGE,
+  RETRY_TTL_MS,
+  SSE_EVENT_TYPES,
+  BroadcastJobWireMessageSchema,
+  dlqQueue,
+  outgoingRoutingKey,
+  retryQueue,
+  tenantEventsChannel,
+} from '@tectonic/contracts';
 
 export interface BroadcastJob {
   broadcastId: number;
@@ -53,7 +68,7 @@ export async function startBroadcastWorker() {
 
   const mq = new RabbitMQClient({
     url: process.env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/',
-    exchange: 'tectobox.events',
+    exchange: EVENTS_EXCHANGE,
   });
   await connectBroker(mq);
 
@@ -72,17 +87,17 @@ export async function startBroadcastWorker() {
   // already exist (infra/rabbitmq/definitions.json); setupRetryTopology
   // re-asserts them idempotently and adds the 'broadcast.job.send' binding
   // the api publishes with, plus retry/DLQ queues.
-  await mq.setupRetryTopology('broadcast.jobs', 'broadcast.job.send', {
-    dlxExchange: 'tectobox.dlx',
-    dlqQueue: 'broadcast.jobs.dlq',
+  await mq.setupRetryTopology(BROADCAST_JOBS_QUEUE, BROADCAST_JOB_ROUTING_KEY, {
+    dlxExchange: DLX_EXCHANGE,
+    dlqQueue: dlqQueue(BROADCAST_JOBS_QUEUE),
     // MUST match infra/rabbitmq/definitions.json exactly: the queue already
     // exists with x-dead-letter-routing-key 'broadcast.jobs.dlq'. The
     // helper's default (routingKey + '.dlq' = 'broadcast.job.send.dlq')
     // mismatches and the broker rejects the declare with 406.
-    dlqRoutingKey: 'broadcast.jobs.dlq',
-    retryExchange: 'tectobox.retry',
-    retryQueue: 'broadcast.jobs.retry',
-    retryTtlMs: 5000,
+    dlqRoutingKey: BROADCAST_JOBS_DLQ_ROUTING_KEY,
+    retryExchange: RETRY_EXCHANGE,
+    retryQueue: retryQueue(BROADCAST_JOBS_QUEUE),
+    retryTtlMs: RETRY_TTL_MS,
   });
 
   const markRecipient = async (
@@ -178,8 +193,8 @@ export async function startBroadcastWorker() {
     );
     await pool.query('UPDATE conversations SET last_message_at = NOW() WHERE id = $1', [conv.id]);
     try {
-      await coordinator.publishEvent(`tenant:${job.clientId}:events`, {
-        type: 'message',
+      await coordinator.publishEvent(tenantEventsChannel(job.clientId), {
+        type: SSE_EVENT_TYPES.MESSAGE,
         conversation: conv,
         outbound: msgRes.rows[0],
       });
@@ -238,7 +253,7 @@ export async function startBroadcastWorker() {
     }
 
     const idempotencyKey = `bc:${job.broadcastId}:${job.recipientId}`;
-    const routingKey = `message.outgoing.${platform}`;
+    const routingKey = outgoingRoutingKey(platform);
     const payload: any = {
       clientId: job.clientId,
       slot: 'default',
@@ -289,7 +304,7 @@ export async function startBroadcastWorker() {
     }
   };
 
-  await channel.consume('broadcast.jobs', async (msg: any) => {
+  await channel.consume(BROADCAST_JOBS_QUEUE, async (msg: any) => {
     if (!msg) return;
 
     let job: BroadcastJob;
@@ -300,19 +315,17 @@ export async function startBroadcastWorker() {
       channel.nack(msg, false, false);
       return;
     }
-    if (
-      !job ||
-      !job.broadcastId ||
-      !job.recipientId ||
-      !job.clientId ||
-      !job.platform ||
-      !job.platformUserId ||
-      !job.text
-    ) {
+    // Broadcast jobs are validated by BroadcastJobWireMessageSchema, which
+    // encodes exactly the old gate (broadcastId / recipientId / clientId /
+    // platform / platformUserId / text must be present). A failed job is
+    // nacked to the DLQ, as before.
+    const parsed = BroadcastJobWireMessageSchema.safeParse(job);
+    if (!parsed.success) {
       console.warn('[broadcast] job missing required fields, routing to DLQ:', job);
       channel.nack(msg, false, false);
       return;
     }
+    job = parsed.data;
 
     try {
       // Idempotency: a redelivered job for an already-sent recipient is a no-op.

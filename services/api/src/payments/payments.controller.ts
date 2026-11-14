@@ -19,6 +19,7 @@ import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
+import { SSE_EVENT_TYPES } from '@tectonic/contracts';
 import { VerifyPaymentDto, RejectPaymentDto } from './dto/payments.dto.js';
 
 @Controller('api')
@@ -225,7 +226,7 @@ export class PaymentsController implements OnModuleInit {
     const stats = await this.getStatsInternal(effectiveTenantId);
     if (this.eventsService) {
       await this.eventsService.broadcastTenantEvent(effectiveTenantId, {
-        type: 'payment:received',
+        type: SSE_EVENT_TYPES.PAYMENT_RECEIVED,
         payment,
         stats,
       });
@@ -300,7 +301,7 @@ export class PaymentsController implements OnModuleInit {
 
       if (this.eventsService) {
         await this.eventsService.broadcastTenantEvent(targetClientId, {
-          type: 'message',
+          type: SSE_EVENT_TYPES.MESSAGE,
           conversationId: payment.conversation_id,
           outbound: outMsg.rows[0],
         });
@@ -311,7 +312,7 @@ export class PaymentsController implements OnModuleInit {
     const stats = await this.getStatsInternal(targetClientId);
     if (this.eventsService) {
       await this.eventsService.broadcastTenantEvent(targetClientId, {
-        type: 'payment:updated',
+        type: SSE_EVENT_TYPES.PAYMENT_UPDATED,
         payment: updatedPayment,
         stats,
       });
@@ -384,7 +385,7 @@ export class PaymentsController implements OnModuleInit {
 
       if (this.eventsService) {
         await this.eventsService.broadcastTenantEvent(targetClientId, {
-          type: 'message',
+          type: SSE_EVENT_TYPES.MESSAGE,
           conversationId: payment.conversation_id,
           outbound: outMsg.rows[0],
         });
@@ -395,7 +396,7 @@ export class PaymentsController implements OnModuleInit {
     const stats = await this.getStatsInternal(targetClientId);
     if (this.eventsService) {
       await this.eventsService.broadcastTenantEvent(targetClientId, {
-        type: 'payment:updated',
+        type: SSE_EVENT_TYPES.PAYMENT_UPDATED,
         payment: updatedPayment,
         stats,
       });

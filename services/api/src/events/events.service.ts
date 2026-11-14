@@ -5,6 +5,31 @@ import { DB_POOL } from '../database/database.module.js';
 import { RedisCoordinator } from '@tectonic/coordination';
 import { RabbitMQClient } from '@tectonic/messaging';
 import { LicensingService } from '../licensing/licensing.service.js';
+import {
+  BROADCAST_JOB_ROUTING_KEY,
+  CHANNEL_STATUS_QUEUE,
+  CHANNEL_STATUS_ROUTING_KEY_PATTERN,
+  ChannelStatusEventSchema,
+  DEFAULT_SLOT,
+  EVENTS_EXCHANGE,
+  INBOUND_QUEUE,
+  INCOMING_ROUTING_KEY_PATTERN,
+  InboundWireMessageSchema,
+  SSE_EVENT_TYPES,
+  aiRequestRoutingKey,
+  connectQueue,
+  connectRoutingKey,
+  disconnectQueue,
+  disconnectRoutingKey,
+  outgoingRoutingKey,
+  signinQueue,
+  signinRoutingKey,
+  tenantEventsChannel,
+  tgCodeSentKey,
+  tgQrKey,
+  waPairingKey,
+  waQrKey,
+} from '@tectonic/contracts';
 
 export interface OutboundPayload {
   conversationId: number;
@@ -103,7 +128,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
         }
         this.mq = new RabbitMQClient({
           url: rabbitUrl,
-          exchange: 'tectobox.events',
+          exchange: EVENTS_EXCHANGE,
         });
         await this.mq.connect();
         this.isConnected = true;
@@ -146,7 +171,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       try {
         this.mq = new RabbitMQClient({
           url: rabbitUrl,
-          exchange: 'tectobox.events',
+          exchange: EVENTS_EXCHANGE,
         });
         await this.mq.connect();
         this.isConnected = true;
@@ -198,7 +223,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
    * Broadcast real-time SSE event to a tenant workspace via Redis Pub/Sub
    */
   async broadcastTenantEvent(tenantId: number, event: any): Promise<void> {
-    const channel = `tenant:${tenantId}:events`;
+    const channel = tenantEventsChannel(tenantId);
     if (this.coordinator) {
       try {
         await this.coordinator.publishEvent(channel, event);
@@ -240,8 +265,8 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   async getQrCode(clientId: number, slot: string, channel: string = 'whatsapp'): Promise<string | null> {
     if (this.redis) {
       try {
-        const prefix = channel === 'telegram' ? 'tg:qr' : 'wa:qr';
-        return await this.redis.get(`${prefix}:${clientId}:${slot}`);
+        const key = channel === 'telegram' ? tgQrKey(clientId, slot) : waQrKey(clientId, slot);
+        return await this.redis.get(key);
       } catch {
         return null;
       }
@@ -253,7 +278,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   async getPairingCode(clientId: number, slot: string): Promise<string | null> {
     if (this.redis) {
       try {
-        return await this.redis.get(`wa:pairing:${clientId}:${slot}`);
+        return await this.redis.get(waPairingKey(clientId, slot));
       } catch {
         return null;
       }
@@ -265,7 +290,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   async getPhoneCodeSent(clientId: number, slot: string): Promise<boolean> {
     if (this.redis) {
       try {
-        return (await this.redis.get(`tg:codesent:${clientId}:${slot}`)) === '1';
+        return (await this.redis.get(tgCodeSentKey(clientId, slot))) === '1';
       } catch {
         return false;
       }
@@ -300,7 +325,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Publish one broadcast job to the broadcast.jobs queue.
-   * Routing key 'broadcast.job.send' matches the pre-declared binding
+   * Routing key {@link BROADCAST_JOB_ROUTING_KEY} matches the pre-declared binding
    * 'broadcast.job.#' in infra/rabbitmq/definitions.json.
    * Returns false when the broker is not connected (caller records the
    * failure on the recipient instead of silently dropping the job).
@@ -311,7 +336,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
     try {
-      await this.mq.publish('broadcast.job.send', job);
+      await this.mq.publish(BROADCAST_JOB_ROUTING_KEY, job);
       return true;
     } catch (err: any) {
       console.warn('[events] Failed to publish broadcast job:', err.message);
@@ -341,11 +366,13 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     }
     try {
       const channel = this.mq.getChannel();
+      const queue = connectQueue('whatsapp');
+      const routingKey = connectRoutingKey('whatsapp');
       if (channel) {
-        await channel.assertQueue('channel.connect.whatsapp', { durable: true });
-        await channel.bindQueue('channel.connect.whatsapp', 'tectobox.events', 'channel.connect.whatsapp');
+        await channel.assertQueue(queue, { durable: true });
+        await channel.bindQueue(queue, EVENTS_EXCHANGE, routingKey);
       }
-      await this.mq.publish('channel.connect.whatsapp', {
+      await this.mq.publish(routingKey, {
         clientId,
         slot,
         method: opts?.method || 'qr',
@@ -378,11 +405,13 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     }
     try {
       const channel = this.mq.getChannel();
+      const queue = connectQueue('telegram');
+      const routingKey = connectRoutingKey('telegram');
       if (channel) {
-        await channel.assertQueue('channel.connect.telegram', { durable: true });
-        await channel.bindQueue('channel.connect.telegram', 'tectobox.events', 'channel.connect.telegram');
+        await channel.assertQueue(queue, { durable: true });
+        await channel.bindQueue(queue, EVENTS_EXCHANGE, routingKey);
       }
-      await this.mq.publish('channel.connect.telegram', {
+      await this.mq.publish(routingKey, {
         clientId,
         slot,
         channelRowId,
@@ -417,11 +446,13 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     }
     try {
       const channel = this.mq.getChannel();
+      const queue = signinQueue('telegram');
+      const routingKey = signinRoutingKey('telegram');
       if (channel) {
-        await channel.assertQueue('channel.signin.telegram', { durable: true });
-        await channel.bindQueue('channel.signin.telegram', 'tectobox.events', 'channel.signin.telegram');
+        await channel.assertQueue(queue, { durable: true });
+        await channel.bindQueue(queue, EVENTS_EXCHANGE, routingKey);
       }
-      await this.mq.publish('channel.signin.telegram', {
+      await this.mq.publish(routingKey, {
         clientId,
         slot,
         phoneCode: code,
@@ -448,11 +479,11 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
     try {
-      const routingKey = `channel.disconnect.${channelName}`;
+      const routingKey = disconnectRoutingKey(channelName);
       const channel = this.mq.getChannel();
       if (channel) {
-        await channel.assertQueue(routingKey, { durable: true });
-        await channel.bindQueue(routingKey, 'tectobox.events', routingKey);
+        await channel.assertQueue(disconnectQueue(channelName), { durable: true });
+        await channel.bindQueue(disconnectQueue(channelName), EVENTS_EXCHANGE, routingKey);
       }
       await this.mq.publish(routingKey, {
         clientId,
@@ -470,7 +501,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
    * Publish an outbound message directly to RabbitMQ & outbox
    */
   async enqueueOutboundMessage(payload: OutboundPayload): Promise<void> {
-    const routingKey = `message.outgoing.${payload.platform}`;
+    const routingKey = outgoingRoutingKey(payload.platform);
 
     // 1. Persist to outbox_events inside transactional database
     await this.pool.query(
@@ -484,7 +515,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       try {
         await this.mq.publish(routingKey, {
           clientId: payload.clientId,
-          slot: payload.slot || 'default',
+          slot: payload.slot || DEFAULT_SLOT,
           to: payload.platformUserId,
           text: payload.text,
         });
@@ -496,35 +527,40 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Inbound consumer listening to message.incoming.*
+   * The payload is validated by InboundWireMessageSchema, which encodes
+   * exactly the coercions this consumer used to do inline (Number() for
+   * clientId, 'whatsapp' platform default, platformUserId || from,
+   * trimmed text). A message that fails the schema is acked and dropped,
+   * exactly as the old `if (!clientId || !platformUserId || !text)` did.
    */
   private async startInboundConsumer(): Promise<void> {
     if (!this.mq) return;
     const channel = this.mq.getChannel();
     if (!channel) return;
 
-    const queueName = 'tectobox.inbound.messages';
+    const queueName = INBOUND_QUEUE;
     await channel.assertQueue(queueName, { durable: true });
-    await channel.bindQueue(queueName, 'tectobox.events', 'message.incoming.#');
+    await channel.bindQueue(queueName, EVENTS_EXCHANGE, INCOMING_ROUTING_KEY_PATTERN);
 
     await channel.consume(queueName, async (msg) => {
       if (!msg) return;
 
       try {
         const rawContent = msg.content.toString();
-        const payload = JSON.parse(rawContent);
-
-        const clientId = Number(payload.clientId);
-        const platform = String(payload.platform || 'whatsapp');
-        const platformUserId = String(payload.platformUserId || payload.from || '');
-        const text = String(payload.text || '').trim();
-        const customerName = payload.customerName || null;
-        const customerPhone = payload.customerPhone || null;
-        const externalId = payload.externalId || null;
-
-        if (!clientId || !platformUserId || !text) {
+        const parsed = InboundWireMessageSchema.safeParse(JSON.parse(rawContent));
+        if (!parsed.success) {
           channel.ack(msg);
           return;
         }
+        const payload = parsed.data;
+
+        const clientId = payload.clientId;
+        const platform = payload.platform;
+        const platformUserId = payload.platformUserId;
+        const text = payload.text;
+        const customerName = payload.customerName ?? null;
+        const customerPhone = payload.customerPhone ?? null;
+        const externalId = payload.externalId ?? null;
 
         // 1. Find or create conversation
         const convRes = await this.pool.query(
@@ -576,7 +612,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
 
         // 4. Broadcast via Redis Pub/Sub for SSE
         await this.broadcastTenantEvent(clientId, {
-          type: 'message',
+          type: SSE_EVENT_TYPES.MESSAGE,
           conversation: conv,
           inbound: msgRow,
         });
@@ -587,7 +623,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
           await this.pool.query('UPDATE conversations SET needs_human = true WHERE id = $1', [conv.id]);
           conv.needs_human = true;
           await this.broadcastTenantEvent(clientId, {
-            type: 'conversation:flag',
+            type: SSE_EVENT_TYPES.CONVERSATION_FLAG,
             conversationId: conv.id,
             needsHuman: true,
           });
@@ -642,10 +678,10 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
               content: r.text,
             }));
 
-            await this.mq.publish(`ai.request.${platform}`, {
+            await this.mq.publish(aiRequestRoutingKey(platform), {
               platform,
               clientId,
-              slot: conv.slot || 'default',
+              slot: conv.slot || DEFAULT_SLOT,
               to: platformUserId,
               conversationId: conv.id,
               text,
@@ -675,35 +711,35 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
    * without this the row stays 'connecting' forever after a scan, the
    * Channels tab never shows the account as connected, and a silent
    * reconnect (saved pairing) looks like a 90s timeout to the frontend.
-   * Always acks — a bad status payload must never poison-loop.
+   * Always acks — a bad status payload must never poison-loop. The
+   * payload is validated by ChannelStatusEventSchema, which encodes the
+   * exact Number()/String() coercions and status-enum check this
+   * consumer used to do inline.
    */
   private async startChannelStatusConsumer(): Promise<void> {
     if (!this.mq) return;
     const channel = this.mq.getChannel();
     if (!channel) return;
 
-    const queueName = 'tectobox.channel.status';
+    const queueName = CHANNEL_STATUS_QUEUE;
     await channel.assertQueue(queueName, { durable: true });
-    await channel.bindQueue(queueName, 'tectobox.events', 'channel.status.#');
+    await channel.bindQueue(queueName, EVENTS_EXCHANGE, CHANNEL_STATUS_ROUTING_KEY_PATTERN);
 
     await channel.consume(queueName, async (msg) => {
       if (!msg) return;
       try {
-        const payload = JSON.parse(msg.content.toString());
-        const clientId = Number(payload.clientId);
-        const ch = String(payload.channel || 'whatsapp');
-        const slot = String(payload.slot || 'default');
-        const status = String(payload.status || '');
-        if (!clientId || !['connected', 'disconnected', 'connecting', 'error'].includes(status)) {
+        const parsed = ChannelStatusEventSchema.safeParse(JSON.parse(msg.content.toString()));
+        if (!parsed.success) {
           return;
         }
+        const { clientId, channel: ch, slot, status } = parsed.data;
         await this.pool.query(
           `UPDATE channel_sessions SET status = $1, updated_at = NOW()
            WHERE client_id = $2 AND channel = $3 AND slot = $4`,
           [status, clientId, ch, slot]
         );
         // Nudge open frontends to re-read /connectors.
-        await this.broadcastTenantEvent(clientId, { type: 'connectors', clientId });
+        await this.broadcastTenantEvent(clientId, { type: SSE_EVENT_TYPES.CONNECTORS, clientId });
       } catch (err: any) {
         console.error('[events] channel status consumer error:', err.message);
       } finally {
@@ -731,11 +767,11 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
 
         for (const event of rows) {
           const payload = typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload;
-          const routingKey = `message.outgoing.${payload.platform || 'whatsapp'}`;
+          const routingKey = outgoingRoutingKey(payload.platform || 'whatsapp');
 
           await this.mq.publish(routingKey, {
             clientId: payload.clientId,
-            slot: payload.slot || 'default',
+            slot: payload.slot || DEFAULT_SLOT,
             to: payload.platformUserId,
             text: payload.text,
           });

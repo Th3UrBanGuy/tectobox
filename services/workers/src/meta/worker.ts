@@ -3,6 +3,20 @@ import { connectBroker } from '../broker/reconnect.ts';
 import { RedisCoordinator } from '@tectonic/coordination';
 import { Redis } from 'ioredis';
 import { fetch } from 'undici';
+import {
+  DLX_EXCHANGE,
+  EVENTS_EXCHANGE,
+  RETRY_EXCHANGE,
+  RETRY_TTL_MS,
+  SEND_ATTEMPT_TTL_SECONDS,
+  OutboundWireMessageSchema,
+  dlqQueue,
+  metaTokenKey,
+  outgoingQueue,
+  outgoingRoutingKey,
+  retryQueue,
+  sendAttemptErrorKey,
+} from '@tectonic/contracts';
 
 export async function handleMetaOutgoingMessage(
   msg: any,
@@ -22,12 +36,17 @@ export async function handleMetaOutgoingMessage(
     return { status: 'failed', error: 'malformed_json' };
   }
 
-  const { clientId, to, text, platform, attempt } = payload || {};
-  if (!clientId || !to || !text) {
+  // Outbound payloads are validated by OutboundWireMessageSchema, which
+  // encodes exactly the old `!clientId || !to || !text` gate. A failed
+  // message is nacked to the DLQ, as before.
+  const parsed = OutboundWireMessageSchema.safeParse(payload);
+  if (!parsed.success) {
     console.warn('[meta] missing required fields, routing to DLQ:', payload);
     channel.nack(msg, false, false);
     return { status: 'failed', error: 'missing_required_fields' };
   }
+
+  const { clientId, to, text, platform, attempt } = parsed.data;
 
   const channelName = platform === 'instagram' ? 'instagram' : 'messenger';
   const headerAttempt = msg.properties?.headers?.['x-retry-count'];
@@ -35,7 +54,7 @@ export async function handleMetaOutgoingMessage(
   const MAX_RETRIES = 3;
 
   const stableIdKey =
-    payload.idempotencyKey ||
+    parsed.data.idempotencyKey ||
     `meta:${clientId}:${channelName}:${to}:${Buffer.from(text).toString('base64').slice(0, 32)}`;
 
   const claimResult = await coordinator.claimSendAttempt(stableIdKey);
@@ -59,7 +78,7 @@ export async function handleMetaOutgoingMessage(
 
   try {
     // Resolve page access token from Redis cache or fallback environment variable
-    let token = await redis.get(`meta:token:${clientId}:${channelName}`);
+    let token = await redis.get(metaTokenKey(clientId, channelName));
     if (!token) {
       token = process.env.META_PAGE_ACCESS_TOKEN || null;
     }
@@ -69,7 +88,7 @@ export async function handleMetaOutgoingMessage(
       console.error(`[meta] no active Meta page token for client ${clientId} (${channelName}); ${errMsg}`);
       await coordinator.recordSendState(stableIdKey, 'failed');
       if (typeof redis.set === 'function') {
-        await redis.set(`send_attempt_error:${stableIdKey}`, errMsg, 'EX', 86400);
+        await redis.set(sendAttemptErrorKey(stableIdKey), errMsg, 'EX', SEND_ATTEMPT_TTL_SECONDS);
       }
       channel.nack(msg, false, false);
       return { status: 'failed', error: errMsg };
@@ -109,12 +128,12 @@ export async function handleMetaOutgoingMessage(
 
     if (currentAttempt < MAX_RETRIES) {
       const nextAttempt = currentAttempt + 1;
-      const nextPayload = { ...payload, attempt: nextAttempt, idempotencyKey: stableIdKey };
+      const nextPayload = { ...parsed.data, attempt: nextAttempt, idempotencyKey: stableIdKey };
       const delayMs = Math.min(1000 * Math.pow(2, currentAttempt - 1), 10000);
 
       try {
-        await mq.publish('message.outgoing.meta', nextPayload, {
-          exchange: 'tectobox.retry',
+        await mq.publish(outgoingRoutingKey('meta'), nextPayload, {
+          exchange: RETRY_EXCHANGE,
           expiration: delayMs,
           headers: { 'x-retry-count': nextAttempt },
           mandatory: true,
@@ -138,7 +157,7 @@ export async function handleMetaOutgoingMessage(
 export async function startMetaWorker() {
   const mq = new RabbitMQClient({
     url: process.env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/',
-    exchange: 'tectobox.events',
+    exchange: EVENTS_EXCHANGE,
   });
   await connectBroker(mq);
 
@@ -150,19 +169,19 @@ export async function startMetaWorker() {
     await channel.prefetch(1);
 
     // Setup durable retry topology for Meta outgoing messages
-    await mq.setupRetryTopology('message.outgoing.meta', 'message.outgoing.meta', {
-      dlxExchange: 'tectobox.dlx',
-      dlqQueue: 'message.outgoing.meta.dlq',
-      retryExchange: 'tectobox.retry',
-      retryQueue: 'message.outgoing.meta.retry',
-      retryTtlMs: 5000,
+    await mq.setupRetryTopology(outgoingQueue('meta'), outgoingRoutingKey('meta'), {
+      dlxExchange: DLX_EXCHANGE,
+      dlqQueue: dlqQueue(outgoingQueue('meta')),
+      retryExchange: RETRY_EXCHANGE,
+      retryQueue: retryQueue(outgoingQueue('meta')),
+      retryTtlMs: RETRY_TTL_MS,
     });
 
     // Also bind messenger and instagram routing keys to the meta queue
-    await channel.bindQueue('message.outgoing.meta', 'tectobox.events', 'message.outgoing.messenger');
-    await channel.bindQueue('message.outgoing.meta', 'tectobox.events', 'message.outgoing.instagram');
+    await channel.bindQueue(outgoingQueue('meta'), EVENTS_EXCHANGE, outgoingRoutingKey('messenger'));
+    await channel.bindQueue(outgoingQueue('meta'), EVENTS_EXCHANGE, outgoingRoutingKey('instagram'));
 
-    await channel.consume('message.outgoing.meta', async (msg) => {
+    await channel.consume(outgoingQueue('meta'), async (msg) => {
       await handleMetaOutgoingMessage(msg, channel, coordinator, redis, mq);
     });
   }
