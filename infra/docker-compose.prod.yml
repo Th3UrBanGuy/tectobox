@@ -220,6 +220,13 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:-tectobox_redis_secret}@redis:6379
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-tectobox}:${RABBITMQ_PASS:-tectobox_rabbit_secret}@rabbitmq:5672/
       SESSION_DIR: /data/sessions
+      # Telegram MTProto (GramJS) needs these — the top-level .env alone does
+      # NOT reach the container (compose only substitutes ${...} here; there
+      # is no env_file). Without them the telegram worker cannot even
+      # construct a client ("API ID or Hash cannot be empty") and no QR
+      # is ever produced. Values live in /opt/tectobox/.env (never in repo).
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
     volumes:
       - infra_sessiondata:/data/sessions
     depends_on:
