@@ -636,6 +636,13 @@ def parse_tool_calls(text: str) -> tuple:
     return clean, tool_calls
 
 
+def check_proxy_secret():
+    secret = os.environ.get("GEMINI_PROXY_SECRET")
+    if not secret:
+        raise RuntimeError("GEMINI_PROXY_SECRET environment variable is unset; refusing to start (fail closed)")
+    return secret
+
+
 # ─── HTTP Handler ────────────────────────────────────────────────────────────
 
 class GeminiHandler(BaseHTTPRequestHandler):
@@ -653,6 +660,13 @@ class GeminiHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _authorized(self):
+        proxy_secret = os.environ.get("GEMINI_PROXY_SECRET")
+        if not proxy_secret:
+            return False
+        header_secret = self.headers.get("X-Proxy-Secret", "")
+        if not header_secret or header_secret != proxy_secret:
+            return False
+
         keys = CONFIG.get("api_keys") or []
         if not keys:
             return True
@@ -664,11 +678,6 @@ class GeminiHandler(BaseHTTPRequestHandler):
         for h in ("x-api-key", "x-goog-api-key"):
             if self.headers.get(h, "") in keys:
                 return True
-        # query param ?key= (Gemini CLI native style)
-        if "?" in self.path:
-            for pair in self.path.split("?", 1)[1].split("&"):
-                if pair.startswith("key=") and pair[4:] in keys:
-                    return True
         return False
 
     def do_OPTIONS(self):
@@ -1054,6 +1063,7 @@ def load_config(path: str):
 
 
 def main():
+    check_proxy_secret()
     parser = argparse.ArgumentParser(description="Gemini Web to OpenAI API")
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--config", type=str, default=None)
@@ -1084,6 +1094,10 @@ def main():
     class ThreadedServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
         allow_reuse_address = True
+
+        def __init__(self, *args, **kwargs):
+            check_proxy_secret()
+            super().__init__(*args, **kwargs)
 
     port = CONFIG["port"]
     server = ThreadedServer((CONFIG["host"], port), GeminiHandler)

@@ -1,4 +1,5 @@
 import { RabbitMQClient } from '@tectonic/messaging';
+import { connectBroker } from '../broker/reconnect.ts';
 import {
   getAIResponse,
   demoResponder,
@@ -13,7 +14,7 @@ export async function startAIWorker() {
     url: process.env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/',
     exchange: 'tectobox.events'
   });
-  await mq.connect();
+  await connectBroker(mq);
 
   const channel = mq.getChannel();
   if (channel) {

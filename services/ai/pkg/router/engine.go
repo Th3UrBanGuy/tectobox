@@ -257,7 +257,7 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 
 	// 2. Direct Gemini API
 	if key := os.Getenv("GEMINI_API_KEY"); key != "" {
-		url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s", key)
+		url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 		payload := map[string]interface{}{
 			"contents": []map[string]interface{}{
 				{"role": "user", "parts": []map[string]string{{"text": sysPrompt + "\n\nUser: " + userMsg}}},
@@ -267,6 +267,7 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
 		if err == nil {
 			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("x-goog-api-key", key)
 			resp, err := e.httpClient.Do(req)
 			if err == nil {
 				defer resp.Body.Close()

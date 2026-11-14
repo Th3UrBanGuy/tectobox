@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func TestConfigLoad_Defaults(t *testing.T) {
@@ -22,6 +23,12 @@ func TestConfigLoad_Defaults(t *testing.T) {
 	}
 	if cfg.RabbitMQURL != "amqp://guest:guest@localhost:5672/" {
 		t.Fatalf("expected default rabbitmq url, got %s", cfg.RabbitMQURL)
+	}
+	if cfg.RabbitMQStartupTimeout != 60*time.Second {
+		t.Fatalf("expected default rabbitmq startup timeout 60s, got %v", cfg.RabbitMQStartupTimeout)
+	}
+	if cfg.RabbitMQReconnectMax != 30*time.Second {
+		t.Fatalf("expected default rabbitmq reconnect max 30s, got %v", cfg.RabbitMQReconnectMax)
 	}
 	if cfg.MetaVerifyToken != "" {
 		t.Fatalf("expected empty meta verify token, got %s", cfg.MetaVerifyToken)

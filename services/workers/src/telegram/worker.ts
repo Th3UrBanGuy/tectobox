@@ -1,4 +1,5 @@
 import { RabbitMQClient } from '@tectonic/messaging';
+import { connectBroker } from '../broker/reconnect.ts';
 import { RedisCoordinator } from '@tectonic/coordination';
 import { Redis } from 'ioredis';
 import { TelegramClient } from 'telegram';
@@ -18,7 +19,7 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
     exchange: 'tectobox.events'
   });
   if (!deps.mq) {
-    await mq.connect();
+    await connectBroker(mq);
   }
 
   const redis = deps.redis || new Redis(process.env.REDIS_URL || 'redis://localhost:6379');

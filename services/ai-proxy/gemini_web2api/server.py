@@ -1,5 +1,6 @@
 """HTTP server: OpenAI-compatible API endpoints."""
 import json
+import os
 import time
 import uuid
 import re
@@ -41,6 +42,13 @@ def _upload_images(images: list) -> list:
         except Exception as e:
             raise RuntimeError(f"image upload failed: {e}") from e
     return file_refs if file_refs else None
+
+
+def check_proxy_secret():
+    secret = os.environ.get("GEMINI_PROXY_SECRET")
+    if not secret:
+        raise RuntimeError("GEMINI_PROXY_SECRET environment variable is unset; refusing to start (fail closed)")
+    return secret
 
 
 class GeminiHandler(BaseHTTPRequestHandler):
@@ -97,6 +105,13 @@ class GeminiHandler(BaseHTTPRequestHandler):
         return self.rfile.read(length) if length else b""
 
     def _authorized(self):
+        proxy_secret = os.environ.get("GEMINI_PROXY_SECRET")
+        if not proxy_secret:
+            return False
+        header_secret = self.headers.get("X-Proxy-Secret", "")
+        if not header_secret or header_secret != proxy_secret:
+            return False
+
         keys = CONFIG.get("api_keys") or []
         if not keys:
             return True
@@ -108,11 +123,6 @@ class GeminiHandler(BaseHTTPRequestHandler):
         for h in ("x-api-key", "x-goog-api-key"):
             if self.headers.get(h, "") in keys:
                 return True
-        # query param ?key= (Gemini CLI native style)
-        if "?" in self.path:
-            for pair in self.path.split("?", 1)[1].split("&"):
-                if pair.startswith("key=") and pair[4:] in keys:
-                    return True
         return False
 
     def do_OPTIONS(self):
@@ -594,3 +604,7 @@ class GeminiHandler(BaseHTTPRequestHandler):
 class ThreadedServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def __init__(self, *args, **kwargs):
+        check_proxy_secret()
+        super().__init__(*args, **kwargs)

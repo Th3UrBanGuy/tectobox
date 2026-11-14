@@ -1,4 +1,5 @@
 import { RabbitMQClient } from '@tectonic/messaging';
+import { connectBroker } from '../broker/reconnect.ts';
 import { RedisCoordinator } from '@tectonic/coordination';
 import { Redis } from 'ioredis';
 import { fetch } from 'undici';
@@ -139,7 +140,7 @@ export async function startMetaWorker() {
     url: process.env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/',
     exchange: 'tectobox.events',
   });
-  await mq.connect();
+  await connectBroker(mq);
 
   const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
   const coordinator = new RedisCoordinator(redis);
