@@ -30,6 +30,15 @@ export type OrderAttemptOutcome =
   | { status: 'error' };
 
 /**
+ * Called once per genuinely created order, after the transaction
+ * commits (item-3, 2026-11-15). The widget controller wires it to
+ * the SSE broadcast (`ORDER_CREATED`); the service itself stays
+ * decoupled from the event bus. Never called for a double confirm
+ * (already_exists), a refusal, or a failure.
+ */
+export type OrderCreatedListener = (order: any) => Promise<void> | void;
+
+/**
  * Widget order creation (W3, 2026-11-15): the order branch of the
  * template responder only ever produced a prompt asking for
  * name/phone/address — no code anywhere inserted an `orders` row
@@ -63,7 +72,10 @@ export type OrderAttemptOutcome =
  *   a concurrent double-confirm cannot race a duplicate in either.
  */
 export class OrderService {
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly onOrderCreated?: OrderCreatedListener
+  ) {}
 
   async tryCreateOrder(ctx: OrderAttemptContext): Promise<OrderAttemptOutcome> {
     const { client, conv, text, products, history } = ctx;
@@ -269,6 +281,16 @@ export class OrderService {
         }
       }
       await db.query('COMMIT');
+      // ORDER_CREATED (item-3): emitted only for a genuinely created
+      // order, after the commit — never for a double confirm.
+      // Best-effort: a failed broadcast must never fail the order.
+      if (this.onOrderCreated) {
+        try {
+          await this.onOrderCreated(order);
+        } catch (err: any) {
+          console.warn('[widget-order] ORDER_CREATED broadcast failed:', err?.message || err);
+        }
+      }
       const lang = detectCustomerLanguage(text);
       const replyText = this.confirmationReply(lang, order, product, quantity, total, false);
       return { status: 'created', order, replyText, modelUsed: 'order:created' };

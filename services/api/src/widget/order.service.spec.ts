@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+import { SSE_EVENT_TYPES } from '@tectonic/contracts';
 import { OrderService } from './order.service.js';
 
 /**
@@ -238,6 +239,60 @@ describe('OrderService.tryCreateOrder — W3/W4', () => {
       expect(result.replyText).toMatch(/only 1 .* in stock/i);
       expect(result.replyText).toMatch(/confirm 1/i);
     }
+  });
+
+  it('ORDER_CREATED exists in contracts as order:created', () => {
+    expect(SSE_EVENT_TYPES.ORDER_CREATED).toBe('order:created');
+  });
+
+  it('emits ORDER_CREATED once per genuinely created order', async () => {
+    const listener = vi.fn();
+    const emitting = new OrderService(pool, listener);
+    const result = await emitting.tryCreateOrder(baseCtx());
+    expect(result.status).toBe('created');
+    expect(listener).toHaveBeenCalledTimes(1);
+    if (result.status === 'created') {
+      expect(listener).toHaveBeenCalledWith(result.order);
+      expect(result.order.id).toBe(1);
+    }
+  });
+
+  it('does NOT emit ORDER_CREATED on a double confirm', async () => {
+    const listener = vi.fn();
+    const emitting = new OrderService(pool, listener);
+    const first = await emitting.tryCreateOrder(baseCtx());
+    expect(first.status).toBe('created');
+    const second = await emitting.tryCreateOrder(baseCtx());
+    expect(second.status).toBe('already_exists');
+    expect(listener).toHaveBeenCalledTimes(1); // only the first, real creation
+  });
+
+  it('does NOT emit ORDER_CREATED when the order is refused (out of stock)', async () => {
+    const listener = vi.fn();
+    const emitting = new OrderService(pool, listener);
+    const result = await emitting.tryCreateOrder(
+      baseCtx({
+        history: [
+          { role: 'user', content: 'I want to order the smart watch' },
+          { role: 'user', content: 'my name is Fahim, phone 01712345678, address Dhanmondi Dhaka' },
+        ],
+      })
+    );
+    expect(result.status).toBe('out_of_stock');
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('does NOT emit ORDER_CREATED when the order insert fails', async () => {
+    const failingPool = {
+      query: vi.fn(async () => {
+        throw new Error('connection terminated');
+      }),
+    };
+    const listener = vi.fn();
+    const failing = new OrderService(failingPool, listener);
+    const result = await failing.tryCreateOrder(baseCtx());
+    expect(result.status).toBe('error');
+    expect(listener).not.toHaveBeenCalled();
   });
 
   it('refuses an out-of-stock product: no row, out-of-stock reply with an in-stock alternative', async () => {

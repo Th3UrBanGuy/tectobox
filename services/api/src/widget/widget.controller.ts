@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, Inject, NotFoundException, B
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
+import { SSE_EVENT_TYPES } from '@tectonic/contracts';
 import { LicensingService } from '../licensing/licensing.service.js';
 import { WidgetIntakeService } from './intake.service.js';
 import { AiReplyService } from './ai-reply.service.js';
@@ -54,7 +55,17 @@ export class WidgetController {
   ) {
     this.intake = new WidgetIntakeService(pool, eventsService, licensing);
     const paymentClaim = new PaymentClaimService(pool, eventsService);
-    const orderService = new OrderService(pool);
+    // ORDER_CREATED (item-3): the order service emits once per
+    // genuinely created order; the widget broadcasts it on the
+    // tenant's SSE channel so the Orders page can refresh live.
+    const orderService = new OrderService(pool, async (order) => {
+      if (eventsService) {
+        await eventsService.broadcastTenantEvent(order.client_id, {
+          type: SSE_EVENT_TYPES.ORDER_CREATED,
+          order,
+        });
+      }
+    });
     this.aiReply = new AiReplyService(pool, eventsService, licensing, paymentClaim, orderService);
   }
 

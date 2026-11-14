@@ -319,6 +319,11 @@ export const SSE_EVENT_TYPES = {
   TG_PASSWORD_NEEDED: 'tg_password_needed',
   /** Admin broadcast notification to a workspace (P12). */
   ADMIN_NOTIFICATION: 'admin:notification',
+  /** A widget order was created (item-3, 2026-11-15) — the Orders
+   * page can refresh live instead of polling. Emitted by the order
+   * service only for genuinely created orders, never for a
+   * double-confirm (already_exists). */
+  ORDER_CREATED: 'order:created',
 } as const;
 
 export type SseEventType = (typeof SSE_EVENT_TYPES)[keyof typeof SSE_EVENT_TYPES];
