@@ -126,7 +126,7 @@ EOF
       console.log('\n--- 5. CHECKING SERVICE HEALTH & STATUS ---');
       await execCommand(conn, `
         sleep 10
-        docker compose -f /opt/tectobox/docker-compose.yml ps
+        docker compose -f /opt/tectobox/infra/docker-compose.prod.yml ps
         echo "\n[deploy] Testing Gateway & Core API response:"
         curl -sI http://127.0.0.1:80/api/healthz || curl -sI http://127.0.0.1:80/ || true
       `);

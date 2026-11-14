@@ -14,6 +14,18 @@ echo " Starting Tectobox Production Docker Deployment"
 echo " Time: $(date -u)"
 echo "=========================================================="
 
+# Resolve IMAGE_TAG: fail loudly or default to git rev-parse HEAD
+if [ -z "${IMAGE_TAG:-}" ]; then
+  if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    IMAGE_TAG="$(git rev-parse HEAD)"
+    echo "[+] IMAGE_TAG was not set in environment; defaulted to current commit SHA: ${IMAGE_TAG}"
+  else
+    echo "[-] ERROR: IMAGE_TAG environment variable must be set to the git commit SHA." >&2
+    exit 1
+  fi
+fi
+export IMAGE_TAG
+
 # 1. Ensure .env exists with cryptographically secure credentials
 if [ ! -f "${DEPLOY_DIR}/.env" ]; then
   echo "[+] Generating initial production .env with secure random credentials..."
@@ -26,7 +38,7 @@ if [ ! -f "${DEPLOY_DIR}/.env" ]; then
 # Tectobox Production Environment Configuration
 NODE_ENV=production
 IMAGE_REPO_OWNER=${IMAGE_REPO_OWNER:-th3urbanguy}
-IMAGE_TAG=${IMAGE_TAG:-latest}
+IMAGE_TAG=${IMAGE_TAG}
 DOMAIN=${DOMAIN:-}
 
 # PostgreSQL Database
@@ -55,13 +67,13 @@ else
   echo "[+] Existing .env file found."
 fi
 
-# 2. Pull latest container images from GitHub Container Registry
-echo "[+] Pulling latest container images..."
-docker compose -f infra/docker-compose.prod.yml pull || true
+# 2. Pull latest container images from GitHub Container Registry (fail-fast, no || true)
+echo "[+] Pulling container images (tag: ${IMAGE_TAG})..."
+docker compose -f infra/docker-compose.prod.yml -p tectobox --project-directory "${DEPLOY_DIR}" pull
 
 # 3. Spin up / update containers in detached mode
 echo "[+] Orchestrating services via Docker Compose..."
-docker compose -f infra/docker-compose.prod.yml up -d --remove-orphans
+docker compose -f infra/docker-compose.prod.yml -p tectobox --project-directory "${DEPLOY_DIR}" up -d --remove-orphans
 
 # 4. Wait for services to achieve healthy state
 echo "[+] Verifying service health..."
@@ -83,9 +95,9 @@ if [ "$HEALTHY" = true ]; then
   echo "=========================================================="
   echo " [✓] Tectobox Successfully Deployed and Healthy!"
   echo "=========================================================="
-  docker compose -f infra/docker-compose.prod.yml ps
+  docker compose -f infra/docker-compose.prod.yml -p tectobox --project-directory "${DEPLOY_DIR}" ps
 else
   echo "[-] WARNING: Health check timeout after 120s. Inspecting container logs:"
-  docker compose -f infra/docker-compose.prod.yml logs --tail=40
+  docker compose -f infra/docker-compose.prod.yml -p tectobox --project-directory "${DEPLOY_DIR}" logs --tail=40
   exit 1
 fi
