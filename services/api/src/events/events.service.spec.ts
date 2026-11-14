@@ -3,7 +3,7 @@ import { EventsService } from './events.service.js';
 import { AuthController } from '../auth/auth.controller.js';
 import { hashPassword } from '../auth/password.util.js';
 import { AdminController } from '../admin/admin.controller.js';
-import { LicensingController } from '../licensing/licensing.controller.js';
+import { LicensesController } from '../licensing/licenses.controller.js';
 import { BackupController } from '../backup/backup.controller.js';
 import { UnauthorizedException } from '@nestjs/common';
 
@@ -146,7 +146,7 @@ describe('Audit Log Write Helper & Endpoints (M2)', () => {
 
     it('writes audit row after license issue', async () => {
       const mockLicensing = { audit: vi.fn() } as any;
-      const licensingController = new LicensingController(mockPool, mockLicensing, eventsService);
+      const licensingController = new LicensesController(mockPool, mockLicensing, eventsService);
 
       const license = { id: 77, code: 'LIC-ABC123XYZ', client_id: 42, status: 'active' };
       mockPool.query

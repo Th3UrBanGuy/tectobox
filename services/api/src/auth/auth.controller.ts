@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
   BadRequestException,
   ForbiddenException,
+  NotFoundException,
   Inject,
   UseGuards,
 } from '@nestjs/common';
@@ -17,19 +18,13 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import jwt from 'jsonwebtoken';
 import pg from 'pg';
-import crypto from 'crypto';
 import { DB_POOL } from '../database/database.module.js';
 import { verifyPassword, hashPassword } from './password.util.js';
-import { generateSecret, verifyTotp, otpauthUrl } from './totp.util.js';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { EventsService } from '../events/events.service.js';
 import { Optional } from '@nestjs/common';
-
-const LoginDto = z.object({
-  username: z.string().min(1),
-  password: z.string().min(1),
-  totp: z.string().optional(),
-});
+import { SessionService } from './session.service.js';
+import { TotpService, TotpError, totpErrorToHttp } from './totp.service.js';
 
 const UpdateCredentialsDto = z.object({
   current_password: z.string().min(1, 'Current password is required'),
@@ -37,15 +32,28 @@ const UpdateCredentialsDto = z.object({
   new_password: z.string().optional(),
 });
 
+/**
+ * Auth controller (Phase 3 of the modular restructure). `login` and
+ * `logout` now delegate to `SessionService`; the 2FA endpoints
+ * delegate to the shared `TotpService` (the same implementation the
+ * admin endpoints use). `me`, `getProfile`, and `updateCredentials`
+ * stay inline, moved verbatim. The constructor signature is unchanged.
+ *
+ * TOTP messages stay the auth endpoints' own Bengali ones: the
+ * controller checks password presence / code format itself, then
+ * maps the service's `TotpError` codes to those messages.
+ */
 @Controller('api')
 export class AuthController {
+  private readonly session: SessionService;
+  private readonly totp: TotpService;
+
   constructor(
     @Inject(DB_POOL) private readonly pool: pg.Pool,
     @Optional() private readonly eventsService?: EventsService
-  ) {}
-
-  private getEvents(): EventsService {
-    return this.eventsService || new EventsService(this.pool, undefined as any);
+  ) {
+    this.session = new SessionService(pool, eventsService);
+    this.totp = new TotpService(pool);
   }
 
   @Post('auth/login')
@@ -55,156 +63,7 @@ export class AuthController {
     @Req() req?: Request,
     @Res({ passthrough: true }) res?: Response
   ) {
-    const ip = (req?.headers?.['x-forwarded-for'] as string) || req?.socket?.remoteAddress || '127.0.0.1';
-    const parsed = LoginDto.safeParse(body);
-    if (!parsed.success) {
-      await this.getEvents().writeAudit(null, null, 'login:failure', { reason: 'invalid_format', ip });
-      throw new UnauthorizedException('Invalid login credentials format');
-    }
-
-    const { username, password, totp } = parsed.data;
-    // C4: JWT secret comes from the environment only — no fallback. If it is
-    // missing the login fails closed instead of signing with a known value.
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) {
-      throw new Error('JWT_SECRET is required but not configured');
-    }
-
-    // Query user in PostgreSQL case-insensitively
-    const userResult = await this.pool.query(
-      'SELECT id, username, role, client_id, password_hash, active, token_version FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1',
-      [username.trim()]
-    );
-
-    if (userResult.rows.length === 0) {
-      await this.getEvents().writeAudit(null, null, 'login:failure', { username, reason: 'user_not_found', ip });
-      throw new UnauthorizedException('Invalid username or password');
-    }
-
-    const dbUser = userResult.rows[0];
-    if (dbUser.active === false) {
-      await this.getEvents().writeAudit(dbUser.id, dbUser.client_id, 'login:failure', { username, reason: 'account_deactivated', ip });
-      throw new UnauthorizedException('Account has been deactivated. Please contact administrator.');
-    }
-
-    // C1: password is verified ONLY against the stored scrypt hash. The
-    // old literal fallback checks for operator/admin/xyz were removed —
-    // anyone reading the public repo could log in with them.
-    const passwordValid = await verifyPassword(password, dbUser.password_hash);
-
-    if (!passwordValid) {
-      await this.getEvents().writeAudit(dbUser.id, dbUser.client_id, 'login:failure', { username, reason: 'invalid_password', ip });
-      throw new UnauthorizedException('ইউজারনেম অথবা পাসওয়ার্ড সঠিক নয়। দয়া করে পুনরায় চেক করুন। (Invalid username or password)');
-    }
-
-    // Suspended workspace: no login, even with a valid password. Platform
-    // admins have no workspace (client_id NULL) and are never blocked here.
-    if (dbUser.client_id != null) {
-      const wsRes = await this.pool.query(
-        'SELECT suspended FROM clients WHERE id = $1 LIMIT 1',
-        [dbUser.client_id]
-      );
-      if (wsRes.rows[0]?.suspended) {
-        await this.getEvents().writeAudit(dbUser.id, dbUser.client_id, 'login:failure', { username, reason: 'workspace_suspended', ip });
-        throw new UnauthorizedException('This workspace has been suspended. Please contact the platform admin.');
-      }
-    }
-
-    // Check if Two-Factor Authentication (2FA) is enabled for this user
-    const totpRes = await this.pool.query(
-      'SELECT enabled, secret_enc FROM admin_totp WHERE user_id = $1 LIMIT 1',
-      [dbUser.id]
-    );
-    const totpRow = totpRes.rows[0];
-    if (totpRow && totpRow.enabled) {
-      const code = String(totp || '').trim();
-      if (!code) {
-        await this.getEvents().writeAudit(dbUser.id, dbUser.client_id, 'login:failure', { username, reason: 'totp_required', ip });
-        if (res && typeof res.status === 'function') {
-          return res.status(HttpStatus.UNAUTHORIZED).json({
-            ok: false,
-            totp_required: true,
-            error: 'Enter your 6-digit two-factor authentication code.',
-          });
-        }
-        throw new UnauthorizedException({
-          totp_required: true,
-          error: 'Enter your 6-digit two-factor authentication code.',
-        });
-      }
-
-      const isTotpValid = verifyTotp(totpRow.secret_enc, code);
-      if (!isTotpValid) {
-        await this.getEvents().writeAudit(dbUser.id, dbUser.client_id, 'login:failure', { username, reason: 'totp_invalid', ip });
-        if (res && typeof res.status === 'function') {
-          return res.status(HttpStatus.UNAUTHORIZED).json({
-            ok: false,
-            totp_required: true,
-            error: 'Invalid two-factor authentication code. Please check your authenticator app.',
-          });
-        }
-        throw new UnauthorizedException({
-          totp_required: true,
-          error: 'Invalid two-factor authentication code. Please check your authenticator app.',
-        });
-      }
-    }
-
-    // Generate session ID for cookie-based authentication
-    const sid = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 7 * 24 * 3600 * 1000); // 7 days
-
-    try {
-      await this.pool.query(
-        `INSERT INTO sessions (id, user_id, expires_at, created_at)
-         VALUES ($1, $2, $3, NOW())`,
-        [sid, dbUser.id, expiresAt]
-      );
-    } catch (err) {
-      console.error('[auth] Failed to persist session:', err);
-    }
-
-    // Set cookie if response object is available (passthrough)
-    if (res && typeof res.setHeader === 'function') {
-      const isHttps = Boolean(
-        req?.secure ||
-        req?.headers?.['x-forwarded-proto'] === 'https' ||
-        (process.env.COOKIE_SECURE === 'true')
-      );
-      res.setHeader(
-        'Set-Cookie',
-        `tb_session=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${isHttps ? '; Secure' : ''}`
-      );
-    }
-
-    // Include strictly necessary claims with explicit expiration and pinned algorithm
-    const token = jwt.sign(
-      {
-        sub: dbUser.id,
-        username: dbUser.username,
-        role: dbUser.role,
-        clientId: dbUser.client_id,
-        token_version: dbUser.token_version ?? 1,
-        tokenVersion: dbUser.token_version ?? 1,
-      },
-      jwtSecret,
-      { expiresIn: '24h', algorithm: 'HS256' }
-    );
-
-    await this.getEvents().writeAudit(dbUser.id, dbUser.client_id, 'login', { username: dbUser.username, ip });
-
-    return {
-      ok: true,
-      success: true,
-      user: {
-        id: dbUser.id,
-        username: dbUser.username,
-        role: dbUser.role,
-        tenantId: dbUser.client_id,
-        clientId: dbUser.client_id,
-      },
-      token,
-    };
+    return this.session.login(body, req, res);
   }
 
   @Get('auth/me')
@@ -387,87 +246,80 @@ export class AuthController {
   }
 
   // ================= 2FA (TOTP) MANAGEMENT =================
+  // Delegates to the shared TotpService (one implementation for the
+  // auth and admin endpoints). This controller keeps its own Bengali
+  // messages: password-presence / code-format checks happen here,
+  // then TotpError codes map to the messages below. The status
+  // endpoint returns only `{enabled: ...}` (the service's fuller
+  // `{enabled, configured}` shape is the admin endpoint's).
 
   @Get('auth/profile/2fa/status')
   @UseGuards(TenantGuard)
   async getTotpStatus(@Req() req: any) {
-    const userId = req.user?.id;
-    const row = await this.pool.query(
-      'SELECT enabled FROM admin_totp WHERE user_id = $1 LIMIT 1',
-      [userId]
-    );
-    return { enabled: row.rows[0]?.enabled || false };
+    try {
+      const { enabled } = await this.totp.getStatus(req.user?.id);
+      return { enabled };
+    } catch (err) {
+      throw totpErrorToHttp(err);
+    }
   }
 
   @Post('auth/profile/2fa/setup')
   @UseGuards(TenantGuard)
   async setupTotp(@Req() req: any, @Body() body: { password?: string }) {
-    const userId = req.user?.id;
     if (!body.password) {
       throw new BadRequestException('পাসওয়ার্ড প্রদান করা আবশ্যক। (Password required to set up 2FA)');
     }
-
-    const uRes = await this.pool.query('SELECT password_hash, username FROM users WHERE id = $1', [userId]);
-    const u = uRes.rows[0];
-    const ok = await verifyPassword(body.password, u.password_hash);
-    if (!ok) {
-      throw new BadRequestException('পাসওয়ার্ড সঠিক নয়। (Incorrect password)');
+    try {
+      const { secret, otpauth_url } = await this.totp.setup(req.user?.id, body.password);
+      return {
+        ok: true,
+        secret,
+        otpauth_url,
+      };
+    } catch (err) {
+      if (err instanceof TotpError && err.code === 'wrong_password') {
+        throw new BadRequestException('পাসওয়ার্ড সঠিক নয়। (Incorrect password)');
+      }
+      throw totpErrorToHttp(err);
     }
-
-    const secret = generateSecret();
-    await this.pool.query(
-      `INSERT INTO admin_totp (user_id, secret_enc, enabled, created_at)
-       VALUES ($1, $2, false, NOW())
-       ON CONFLICT (user_id) DO UPDATE SET secret_enc = excluded.secret_enc, enabled = false`,
-      [userId, secret]
-    );
-
-    const uri = otpauthUrl(secret, u.username, 'Tectobox');
-    return {
-      ok: true,
-      secret,
-      otpauth_url: uri,
-    };
   }
 
   @Post('auth/profile/2fa/verify-enable')
   @UseGuards(TenantGuard)
   async enableTotp(@Req() req: any, @Body() body: { token?: string; code?: string }) {
-    const userId = req.user?.id;
     const token = String(body.token || body.code || '').trim();
     if (!/^\d{6}$/.test(token)) {
       throw new BadRequestException('সঠিক ৬-সংখ্যার কোডটি দিন। (Invalid 6-digit code format)');
     }
-
-    const row = await this.pool.query('SELECT secret_enc FROM admin_totp WHERE user_id = $1 LIMIT 1', [userId]);
-    if (row.rows.length === 0) {
-      throw new BadRequestException('2FA সেটআপ প্রক্রিয়া পুনরায় শুরু করুন। (2FA setup not initiated)');
+    try {
+      await this.totp.enable(req.user?.id, token);
+    } catch (err) {
+      if (err instanceof TotpError && err.code === 'not_configured') {
+        throw new BadRequestException('2FA সেটআপ প্রক্রিয়া পুনরায় শুরু করুন। (2FA setup not initiated)');
+      }
+      if (err instanceof TotpError && err.code === 'invalid_code') {
+        throw new BadRequestException('কোডটি মেলেনি। অনুগ্রহ করে আপনার প্রমাণীকরণ অ্যাপটি পরীক্ষা করুন। (Invalid 2FA code)');
+      }
+      throw totpErrorToHttp(err);
     }
-
-    const valid = verifyTotp(row.rows[0].secret_enc, token);
-    if (!valid) {
-      throw new BadRequestException('কোডটি মেলেনি। অনুগ্রহ করে আপনার প্রমাণীকরণ অ্যাপটি পরীক্ষা করুন। (Invalid 2FA code)');
-    }
-
-    await this.pool.query('UPDATE admin_totp SET enabled = true WHERE user_id = $1', [userId]);
     return { ok: true, success: true, message: 'টু-ফ্যাক্টর অথেন্টিকেশন সফলভাবে সক্রিয় করা হয়েছে। (2FA enabled)' };
   }
 
   @Post('auth/profile/2fa/disable')
   @UseGuards(TenantGuard)
   async disableTotp(@Req() req: any, @Body() body: { password?: string }) {
-    const userId = req.user?.id;
     if (!body.password) {
       throw new BadRequestException('2FA নিষ্ক্রিয় করতে বর্তমান পাসওয়ার্ড দিন। (Password required)');
     }
-
-    const uRes = await this.pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
-    const ok = await verifyPassword(body.password, uRes.rows[0].password_hash);
-    if (!ok) {
-      throw new BadRequestException('পাসওয়ার্ড সঠিক নয়। (Incorrect password)');
+    try {
+      await this.totp.disable(req.user?.id, body.password);
+    } catch (err) {
+      if (err instanceof TotpError && err.code === 'wrong_password') {
+        throw new BadRequestException('পাসওয়ার্ড সঠিক নয়। (Incorrect password)');
+      }
+      throw totpErrorToHttp(err);
     }
-
-    await this.pool.query('DELETE FROM admin_totp WHERE user_id = $1', [userId]);
     return { ok: true, success: true, message: 'টু-ফ্যাক্টর অথেন্টিকেশন নিষ্ক্রিয় করা হয়েছে। (2FA disabled)' };
   }
 
@@ -477,17 +329,6 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res?: Response
   ) {
-    const sid = req.cookies?.tb_session || req.headers?.cookie?.match(/tb_session=([^;]+)/)?.[1];
-    if (sid) {
-      await this.pool.query('DELETE FROM sessions WHERE id = $1', [sid]).catch(() => {});
-    }
-
-    if (res && typeof res.setHeader === 'function') {
-      res.setHeader('Set-Cookie', 'tb_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
-    }
-
-    return { ok: true, success: true };
+    return this.session.logout(req, res);
   }
 }
-
-

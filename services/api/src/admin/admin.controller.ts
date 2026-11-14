@@ -6,8 +6,7 @@ import pg from 'pg';
 import crypto from 'crypto';
 import { DB_POOL } from '../database/database.module.js';
 import { hashPassword, verifyPassword } from '../auth/password.util.js';
-import { generateSecret, verifyTotp, otpauthUrl } from '../auth/totp.util.js';
-import { encrypt, decrypt, isEncrypted } from '../common/crypto.js';
+import { TotpService, totpErrorToHttp } from '../auth/totp.service.js';
 import { LicensingService } from '../licensing/licensing.service.js';
 import { EventsService } from '../events/events.service.js';
 import { CreateUserDto, ResetPasswordDto } from './dto/admin.dto.js';
@@ -15,11 +14,15 @@ import { CreateUserDto, ResetPasswordDto } from './dto/admin.dto.js';
 @Controller('api')
 @UseGuards(TenantGuard, AdminGuard)
 export class AdminController {
+  private readonly totp: TotpService;
+
   constructor(
     @Inject(DB_POOL) private readonly pool: pg.Pool,
     @Inject(LicensingService) private readonly licensing: LicensingService,
     @Optional() private readonly eventsService?: EventsService
-  ) {}
+  ) {
+    this.totp = new TotpService(pool);
+  }
 
   private getEvents(): EventsService {
     return this.eventsService || new EventsService(this.pool, this.licensing);
@@ -488,14 +491,11 @@ export class AdminController {
 
   @Get('admin/totp/status')
   async getTotpStatus(@Req() req: any) {
-    const userId = req?.user?.id;
-    if (!userId) throw new UnauthorizedException('Authentication required');
-    const row = await this.pool.query('SELECT enabled, secret_enc FROM admin_totp WHERE user_id = $1', [userId]);
-    const r = row.rows[0];
-    return {
-      enabled: Boolean(r?.enabled),
-      configured: Boolean(r?.secret_enc),
-    };
+    try {
+      return await this.totp.getStatus(req?.user?.id);
+    } catch (err) {
+      throw totpErrorToHttp(err);
+    }
   }
 
   @Post('admin/totp/setup')
@@ -505,53 +505,20 @@ export class AdminController {
     if (!body?.password) {
       throw new BadRequestException('Password confirmation is required');
     }
-    const uRes = await this.pool.query('SELECT password_hash, username FROM users WHERE id = $1', [userId]);
-    const user = uRes.rows[0];
-    if (!user) throw new NotFoundException('User not found');
-    const valid = await verifyPassword(body.password, user.password_hash);
-    if (!valid) {
-      throw new BadRequestException('Incorrect password');
+    try {
+      return await this.totp.setup(userId, body.password);
+    } catch (err) {
+      throw totpErrorToHttp(err);
     }
-
-    const secret = generateSecret(20);
-    const encryptedSecret = encrypt(secret);
-    await this.pool.query(
-      `INSERT INTO admin_totp (user_id, secret_enc, enabled, created_at)
-       VALUES ($1, $2, false, NOW())
-       ON CONFLICT (user_id) DO UPDATE SET secret_enc = EXCLUDED.secret_enc, enabled = false`,
-      [userId, encryptedSecret]
-    );
-    return {
-      secret,
-      otpauth_url: otpauthUrl(secret, user.username || 'admin@tectobox.com'),
-    };
   }
 
   @Post('admin/totp/enable')
   async enableTotp(@Req() req: any, @Body() body: { token: string }) {
-    const userId = req?.user?.id;
-    if (!userId) throw new UnauthorizedException('Authentication required');
-    const row = await this.pool.query('SELECT secret_enc FROM admin_totp WHERE user_id = $1', [userId]);
-    const r = row.rows[0];
-    if (!r?.secret_enc) throw new BadRequestException('TOTP setup required first');
-
-    const storedSecret = r.secret_enc;
-    const isEnc = isEncrypted(storedSecret);
-    const secret = isEnc ? decrypt(storedSecret) : storedSecret;
-
-    const ok = verifyTotp(secret, body?.token);
-    if (!ok) {
-      throw new BadRequestException('Invalid code — check your authenticator app clock.');
+    try {
+      return await this.totp.enable(req?.user?.id, body?.token);
+    } catch (err) {
+      throw totpErrorToHttp(err);
     }
-
-    // Migrate-on-read: if an existing stored secret is not encrypted (no version prefix), encrypt it on first successful use.
-    if (!isEnc) {
-      const newlyEncrypted = encrypt(secret);
-      await this.pool.query('UPDATE admin_totp SET enabled = true, secret_enc = $1 WHERE user_id = $2', [newlyEncrypted, userId]);
-    } else {
-      await this.pool.query('UPDATE admin_totp SET enabled = true WHERE user_id = $1', [userId]);
-    }
-    return { ok: true, enabled: true };
   }
 
   @Post('admin/totp/disable')
@@ -561,15 +528,10 @@ export class AdminController {
     if (!body?.password) {
       throw new BadRequestException('Password confirmation is required');
     }
-    const uRes = await this.pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
-    const user = uRes.rows[0];
-    if (!user) throw new NotFoundException('User not found');
-    const valid = await verifyPassword(body.password, user.password_hash);
-    if (!valid) {
-      throw new BadRequestException('Incorrect password');
+    try {
+      return await this.totp.disable(userId, body.password);
+    } catch (err) {
+      throw totpErrorToHttp(err);
     }
-
-    await this.pool.query('DELETE FROM admin_totp WHERE user_id = $1', [userId]);
-    return { ok: true, enabled: false };
   }
 }

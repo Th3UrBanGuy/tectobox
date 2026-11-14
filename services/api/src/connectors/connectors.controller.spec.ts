@@ -9,7 +9,10 @@ vi.mock('@tectonic/messaging', () => ({
   RabbitMQClient: class {},
 }));
 
-import { ConnectorsController } from './connectors.controller.js';
+import { ChannelsController } from './channels.controller.js';
+import { ChannelConnectController } from './channel-connect.controller.js';
+import { DeveloperController } from './developer.controller.js';
+import { MetaOAuthController } from '../meta/meta-oauth.controller.js';
 import { metaOAuthState } from '../meta/meta.controller.js';
 
 function fakeReq(host: string, proto?: string) {
@@ -20,8 +23,8 @@ function fakeReq(host: string, proto?: string) {
   } as any;
 }
 
-describe('ConnectorsController.getWebhookUrls', () => {
-  const ctrl = new ConnectorsController({} as any, {} as any);
+describe('DeveloperController.getWebhookUrls', () => {
+  const ctrl = new DeveloperController({} as any);
 
   afterEach(() => {
     delete process.env.BASE_URL;
@@ -59,7 +62,7 @@ describe('ConnectorsController.getWebhookUrls', () => {
   });
 });
 
-describe('ConnectorsController.connectChannel — RC5 & RC6 triggers', () => {
+describe('ChannelConnectController.connectChannel — RC5 & RC6 triggers', () => {
   function fakePool() {
     const queries: { sql: string; params?: any[] }[] = [];
     return {
@@ -77,7 +80,7 @@ describe('ConnectorsController.connectChannel — RC5 & RC6 triggers', () => {
       publishChannelConnect: vi.fn(async () => true),
       publishChannelConnectTelegram: vi.fn(async () => true),
     } as any;
-    const ctrl = new ConnectorsController(pool, events);
+    const ctrl = new ChannelConnectController(pool, events);
     const res: any = await ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'b' });
     expect(res).toEqual({ ok: true, channel: 'whatsapp', slot: 'b', status: 'connecting', method: 'qr' });
     expect(pool.queries.some((q) => q.sql.includes('INSERT INTO channel_sessions'))).toBe(true);
@@ -91,7 +94,7 @@ describe('ConnectorsController.connectChannel — RC5 & RC6 triggers', () => {
       publishChannelConnect: vi.fn(async () => true),
       publishChannelConnectTelegram: vi.fn(async () => true),
     } as any;
-    const ctrl = new ConnectorsController(pool, events);
+    const ctrl = new ChannelConnectController(pool, events);
     const res: any = await ctrl.connectChannel(69, 69, 'telegram', { slot: 'hh', label: 'Primary TG' });
     expect(res).toEqual({ ok: true, channel: 'telegram', slot: 'hh', status: 'connecting', method: 'qr' });
     expect(pool.queries.some((q) => q.sql.includes('INSERT INTO channel_sessions'))).toBe(true);
@@ -105,7 +108,7 @@ describe('ConnectorsController.connectChannel — RC5 & RC6 triggers', () => {
       publishChannelConnect: vi.fn(async () => true),
       publishChannelConnectTelegram: vi.fn(async () => true),
     } as any;
-    const ctrl = new ConnectorsController(pool, events);
+    const ctrl = new ChannelConnectController(pool, events);
     await ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'main', label: 'Shop WA' });
     const insertQuery = pool.queries.find((q) => q.sql.includes('INSERT INTO channel_sessions'));
     expect(insertQuery).toBeDefined();
@@ -117,7 +120,7 @@ describe('ConnectorsController.connectChannel — RC5 & RC6 triggers', () => {
     const events = {
       publishChannelDisconnect: vi.fn(async () => true),
     } as any;
-    const ctrl = new ConnectorsController(pool, events);
+    const ctrl = new ChannelConnectController(pool, events);
 
     const waRes: any = await ctrl.disconnectChannel(69, 69, 'whatsapp', { slot: 'b' });
     expect(waRes).toEqual({ ok: true, channel: 'whatsapp', slot: 'b', status: 'disconnecting' });
@@ -131,7 +134,7 @@ describe('ConnectorsController.connectChannel — RC5 & RC6 triggers', () => {
   it('broker down: still returns ok (row stays connecting; re-tap retries)', async () => {
     const pool = fakePool();
     const events = { publishChannelConnect: vi.fn(async () => false) } as any;
-    const ctrl = new ConnectorsController(pool, events);
+    const ctrl = new ChannelConnectController(pool, events);
     const res: any = await ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'tt' });
     expect(res).toEqual({ ok: true, channel: 'whatsapp', slot: 'tt', status: 'connecting', method: 'qr' });
     expect(events.publishChannelConnect).toHaveBeenCalledTimes(1);
@@ -140,13 +143,13 @@ describe('ConnectorsController.connectChannel — RC5 & RC6 triggers', () => {
   it('defaults to the default slot when none is given', async () => {
     const pool = fakePool();
     const events = { publishChannelConnect: vi.fn(async () => true) } as any;
-    const ctrl = new ConnectorsController(pool, events);
+    const ctrl = new ChannelConnectController(pool, events);
     await ctrl.connectChannel(69, 69, 'whatsapp', {});
     expect(events.publishChannelConnect).toHaveBeenCalledWith(69, 'default', { method: 'qr', phoneNumber: undefined });
   });
 });
 
-describe('ConnectorsController.connectChannel — phone login', () => {
+describe('ChannelConnectController.connectChannel — phone login', () => {
   function fakePool() {
     const queries: { sql: string; params?: any[] }[] = [];
     return {
@@ -164,7 +167,7 @@ describe('ConnectorsController.connectChannel — phone login', () => {
       publishChannelConnect: vi.fn(async () => true),
       publishChannelConnectTelegram: vi.fn(async () => true),
     } as any;
-    const ctrl = new ConnectorsController(pool, events);
+    const ctrl = new ChannelConnectController(pool, events);
     const res: any = await ctrl.connectChannel(69, 69, 'whatsapp', {
       slot: 'b', method: 'phone', phoneNumber: '+880 1712-345678',
     });
@@ -178,7 +181,7 @@ describe('ConnectorsController.connectChannel — phone login', () => {
       publishChannelConnect: vi.fn(async () => true),
       publishChannelConnectTelegram: vi.fn(async () => true),
     } as any;
-    const ctrl = new ConnectorsController(pool, events);
+    const ctrl = new ChannelConnectController(pool, events);
     const res: any = await ctrl.connectChannel(69, 69, 'telegram', {
       slot: 'hh', method: 'phone', phoneNumber: '8801712345678',
     });
@@ -192,7 +195,7 @@ describe('ConnectorsController.connectChannel — phone login', () => {
       publishChannelConnect: vi.fn(async () => true),
       publishChannelConnectTelegram: vi.fn(async () => true),
     } as any;
-    const ctrl = new ConnectorsController(pool, events);
+    const ctrl = new ChannelConnectController(pool, events);
     await expect(ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'b', method: 'phone', phoneNumber: 'abc' }))
       .rejects.toThrow('valid phone number');
     await expect(ctrl.connectChannel(69, 69, 'telegram', { slot: 'hh', method: 'phone' }))
@@ -207,7 +210,7 @@ describe('ConnectorsController.connectChannel — phone login', () => {
       publishChannelConnect: vi.fn(async () => true),
       publishChannelConnectTelegram: vi.fn(async () => true),
     } as any;
-    const ctrl = new ConnectorsController(pool, events);
+    const ctrl = new ChannelConnectController(pool, events);
     // 017... is a local-format number: Baileys would drop the socket and
     // the user would only see "Connection Closed". Reject it here instead.
     await expect(ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'b', method: 'phone', phoneNumber: '01712345678' }))
@@ -219,7 +222,7 @@ describe('ConnectorsController.connectChannel — phone login', () => {
   it('signin: telegram code goes to the worker; other channels and bad codes are rejected', async () => {
     const pool = fakePool();
     const events = { publishTelegramSignIn: vi.fn(async () => true) } as any;
-    const ctrl = new ConnectorsController(pool, events);
+    const ctrl = new ChannelConnectController(pool, events);
     const res: any = await ctrl.signinChannel(69, 69, 'telegram', { slot: 'hh', code: '12345' });
     expect(res).toEqual({ ok: true, channel: 'telegram', slot: 'hh', status: 'verifying' });
     expect(events.publishTelegramSignIn).toHaveBeenCalledWith(69, 'hh', '12345', undefined);
@@ -229,7 +232,7 @@ describe('ConnectorsController.connectChannel — phone login', () => {
       .rejects.toThrow('5-digit code');
   });
 });
-describe('ConnectorsController.getConnectors — honest statuses (no demo data)', () => {
+describe('ChannelsController.getConnectors — honest statuses (no demo data)', () => {
   // Fake pool: answers per table so the endpoint's fallbacks are observable.
   function fakePool(sessions: any[], pages: any[], client: any) {
     return {
@@ -244,7 +247,7 @@ describe('ConnectorsController.getConnectors — honest statuses (no demo data)'
   const events = { getQrCode: async () => null, getPairingCode: async () => null, getPhoneCodeSent: async () => false } as any;
 
   it('empty workspace: no invented Primary accounts, everything disconnected', async () => {
-    const ctrl = new ConnectorsController(
+    const ctrl = new ChannelsController(
       fakePool([], [], { widget_key: 'wk_real123', website_url: null }),
       events,
     );
@@ -263,14 +266,14 @@ describe('ConnectorsController.getConnectors — honest statuses (no demo data)'
   });
 
   it('no widget key: webchat reports disconnected with a null key', async () => {
-    const ctrl = new ConnectorsController(fakePool([], [], { widget_key: null, website_url: null }), events);
+    const ctrl = new ChannelsController(fakePool([], [], { widget_key: null, website_url: null }), events);
     const res: any = await ctrl.getConnectors(1, 1);
     expect(res.webchat.status).toBe('disconnected');
     expect(res.webchat.widgetKey).toBeNull();
   });
 
   it('a real connected WA session is reported as-is', async () => {
-    const ctrl = new ConnectorsController(
+    const ctrl = new ChannelsController(
       fakePool(
         [{ channel: 'whatsapp', slot: 'default', status: 'connected', label: 'Shop WA', ai_paused: false }],
         [],
@@ -286,8 +289,8 @@ describe('ConnectorsController.getConnectors — honest statuses (no demo data)'
   });
 });
 
-describe('ConnectorsController.metaOAuthCallback — 10-minute TTL expiry (M8)', () => {
-  const ctrl = new ConnectorsController({} as any, {} as any);
+describe('MetaOAuthController.metaOAuthCallback — 10-minute TTL expiry (M8)', () => {
+  const ctrl = new MetaOAuthController({} as any, {} as any);
 
   function mockRes() {
     let statusCode = 200;

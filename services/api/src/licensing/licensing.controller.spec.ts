@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ForbiddenException, NotFoundException, BadRequestException, ConflictException, GoneException } from '@nestjs/common';
-import { LicensingController } from './licensing.controller.js';
+import { PlansController } from './plans.controller.js';
+import { LicensesController } from './licenses.controller.js';
+import { AccessController } from './access.controller.js';
 import { AdminGuard } from '../auth/admin.guard.js';
 
 // NOTE: Nest's GUARDS_METADATA constant ('__guards__') is not re-exported
@@ -12,21 +14,27 @@ import { AdminGuard } from '../auth/admin.guard.js';
 // guard is actually wired onto every admin route (and NOT onto the
 // client-facing routes), and (c) that the handlers succeed for an admin.
 
-const ADMIN_ROUTES = [
-  'listPlans',
-  'createPlan',
-  'updatePlan',
-  'deletePlan',
-  'listLicenses',
-  'issueLicense',
-  'pauseLicense',
-  'resumeLicense',
-  'cancelLicense',
-  'topupLicense',
-] as const;
+// The Phase 3 split moved these methods onto three controllers; each
+// entry names the controller that now owns the method.
+const ADMIN_ROUTES: Array<[any, string]> = [
+  [PlansController, 'listPlans'],
+  [PlansController, 'createPlan'],
+  [PlansController, 'updatePlan'],
+  [PlansController, 'deletePlan'],
+  [LicensesController, 'listLicenses'],
+  [LicensesController, 'issueLicense'],
+  [LicensesController, 'pauseLicense'],
+  [LicensesController, 'resumeLicense'],
+  [LicensesController, 'cancelLicense'],
+  [LicensesController, 'topupLicense'],
+];
 
 // activateLicense is tenant-guarded but NOT admin-only (client self-service).
-const CLIENT_ROUTES = ['getFeatures', 'getClientAccess', 'activateLicense'] as const;
+const CLIENT_ROUTES: Array<[any, string]> = [
+  [PlansController, 'getFeatures'],
+  [AccessController, 'getClientAccess'],
+  [LicensesController, 'activateLicense'],
+];
 
 function mockContext(role: string | undefined) {
   return {
@@ -62,35 +70,37 @@ describe('AdminGuard (licensing)', () => {
   });
 });
 
-describe('LicensingController guard wiring (C2)', () => {
-  it.each(ADMIN_ROUTES)('%s carries AdminGuard', (method) => {
-    const guards = Reflect.getMetadata('__guards__', (LicensingController.prototype as any)[method]) as any[];
+describe('Licensing guard wiring (C2)', () => {
+  it.each(ADMIN_ROUTES)('%s carries AdminGuard', (controller, method) => {
+    const guards = Reflect.getMetadata('__guards__', (controller.prototype as any)[method]) as any[];
     expect(guards).toBeDefined();
     expect(guards).toContain(AdminGuard);
   });
 
-  it.each(CLIENT_ROUTES)('%s does NOT carry AdminGuard', (method) => {
-    const guards = Reflect.getMetadata('__guards__', (LicensingController.prototype as any)[method]) as any[];
+  it.each(CLIENT_ROUTES)('%s does NOT carry AdminGuard', (controller, method) => {
+    const guards = Reflect.getMetadata('__guards__', (controller.prototype as any)[method]) as any[];
     expect(guards || []).not.toContain(AdminGuard);
   });
 });
 
-describe('LicensingController admin handlers', () => {
-  let controller: LicensingController;
+describe('Plans/Licenses admin handlers', () => {
+  let plansController: PlansController;
+  let licensesController: LicensesController;
   let mockPool: any;
   let licensing: any;
 
   beforeEach(() => {
     mockPool = { query: vi.fn() };
     licensing = mockLicensing();
-    controller = new LicensingController(mockPool, licensing);
+    plansController = new PlansController(mockPool);
+    licensesController = new LicensesController(mockPool, licensing);
   });
 
   it('admin creating a plan succeeds (201-style row returned)', async () => {
     const plan = { id: 1, name: 'Pro', kind: 'time', billing_period: 'monthly' };
     mockPool.query.mockResolvedValueOnce({ rows: [plan] });
 
-    const res = await controller.createPlan({ name: 'Pro', kind: 'time' });
+    const res = await plansController.createPlan({ name: 'Pro', kind: 'time' });
 
     expect(res).toEqual(plan);
     expect(mockPool.query.mock.calls[0][0]).toMatch(/INSERT INTO plans/);
@@ -103,7 +113,7 @@ describe('LicensingController admin handlers', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [license] });
 
-    const res = await controller.issueLicense({ client_id: 42, days: 30 });
+    const res = await licensesController.issueLicense({ client_id: 42, days: 30 });
 
     expect(res).toEqual(license);
     expect(mockPool.query.mock.calls[0][0]).toMatch(/UPDATE licenses SET status = 'cancelled'/);
@@ -117,7 +127,7 @@ describe('LicensingController admin handlers', () => {
     const license = { id: 10, code: 'LIC-KEYONLY', client_id: 42, status: 'pending_activation', starts_at: null, ends_at: null };
     mockPool.query.mockResolvedValueOnce({ rows: [license] });
 
-    const res = await controller.issueLicense({ client_id: 42, days: 30, deliver: 'key-only' });
+    const res = await licensesController.issueLicense({ client_id: 42, days: 30, deliver: 'key-only' });
 
     expect(res.code).toMatch(/^LIC-/);
     expect(res.license.status).toBe('pending_activation');
@@ -132,21 +142,21 @@ describe('LicensingController admin handlers', () => {
   });
 
   it('issueLicense rejects a missing client_id', async () => {
-    await expect(controller.issueLicense({ days: 30 })).rejects.toThrow(BadRequestException);
+    await expect(licensesController.issueLicense({ days: 30 })).rejects.toThrow(BadRequestException);
   });
 
   it('issueLicense rejects an unknown deliver mode', async () => {
     await expect(
-      controller.issueLicense({ client_id: 42, deliver: 'smoke-signal' })
+      licensesController.issueLicense({ client_id: 42, deliver: 'smoke-signal' })
     ).rejects.toThrow(BadRequestException);
   });
 
   it('issueLicense rejects non-positive fractional days', async () => {
     await expect(
-      controller.issueLicense({ client_id: 42, days: 0 })
+      licensesController.issueLicense({ client_id: 42, days: 0 })
     ).rejects.toThrow(BadRequestException);
     await expect(
-      controller.issueLicense({ client_id: 42, days: -1 })
+      licensesController.issueLicense({ client_id: 42, days: -1 })
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -156,7 +166,7 @@ describe('LicensingController admin handlers', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [license] });
 
-    const res = await controller.issueLicense({ client_id: 42, days: 0.0208 });
+    const res = await licensesController.issueLicense({ client_id: 42, days: 0.0208 });
 
     expect(res).toEqual(license);
     // validity_days is the fractional value, passed through to the INSERT.
@@ -168,7 +178,7 @@ describe('LicensingController admin handlers', () => {
     const license = { id: 9, credits_total: 1500 };
     mockPool.query.mockResolvedValueOnce({ rows: [license] });
 
-    const res = await controller.topupLicense(9, { credits: 500 });
+    const res = await licensesController.topupLicense(9, { credits: 500 });
 
     expect(res).toEqual(license);
     expect(mockPool.query.mock.calls[0][1]).toEqual([500, 9]);
@@ -176,13 +186,13 @@ describe('LicensingController admin handlers', () => {
 
   it('admin listing plans succeeds', async () => {
     mockPool.query.mockResolvedValueOnce({ rows: [{ id: 1 }, { id: 2 }] });
-    const res = await controller.listPlans();
+    const res = await plansController.listPlans();
     expect(res).toHaveLength(2);
   });
 });
 
-describe('LicensingController.getClientAccess — delegation, no auto-provision (§E)', () => {
-  let controller: LicensingController;
+describe('AccessController.getClientAccess — delegation, no auto-provision (§E)', () => {
+  let controller: AccessController;
   let mockPool: any;
   let licensing: any;
 
@@ -207,7 +217,7 @@ describe('LicensingController.getClientAccess — delegation, no auto-provision 
     licensing = mockLicensing({
       resolveAccess: vi.fn().mockResolvedValue(accessPayload),
     });
-    controller = new LicensingController(mockPool, licensing);
+    controller = new AccessController(licensing);
   });
 
   it('delegates to LicensingService and returns the shaped access payload', async () => {
@@ -260,8 +270,8 @@ describe('LicensingController.getClientAccess — delegation, no auto-provision 
   });
 });
 
-describe('LicensingController.activateLicense — client self-service (§E)', () => {
-  let controller: LicensingController;
+describe('LicensesController.activateLicense — client self-service (§E)', () => {
+  let controller: LicensesController;
   let mockPool: any;
   let licensing: any;
   let fakeClient: any;
@@ -290,7 +300,7 @@ describe('LicensingController.activateLicense — client self-service (§E)', ()
     });
     fakeClient = { query: vi.fn(), release: vi.fn() };
     mockPool.connect.mockResolvedValue(fakeClient);
-    controller = new LicensingController(mockPool, licensing);
+    controller = new LicensesController(mockPool, licensing);
   });
 
   function mockLookup(row: any | null) {

@@ -1,236 +1,124 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Inject, Optional } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
 import pg from 'pg';
-import { Redis } from 'ioredis';
 import { DB_POOL } from '../database/database.module.js';
-import { RedisCoordinator } from '@tectonic/coordination';
 import { RabbitMQClient } from '@tectonic/messaging';
 import { LicensingService } from '../licensing/licensing.service.js';
-import {
-  BROADCAST_JOB_ROUTING_KEY,
-  CHANNEL_STATUS_QUEUE,
-  CHANNEL_STATUS_ROUTING_KEY_PATTERN,
-  ChannelStatusEventSchema,
-  DEFAULT_SLOT,
-  EVENTS_EXCHANGE,
-  INBOUND_QUEUE,
-  INCOMING_ROUTING_KEY_PATTERN,
-  InboundWireMessageSchema,
-  SSE_EVENT_TYPES,
-  aiRequestRoutingKey,
-  connectQueue,
-  connectRoutingKey,
-  disconnectQueue,
-  disconnectRoutingKey,
-  outgoingRoutingKey,
-  signinQueue,
-  signinRoutingKey,
-  tenantEventsChannel,
-  tgCodeSentKey,
-  tgQrKey,
-  waPairingKey,
-  waQrKey,
-} from '@tectonic/contracts';
+import { BrokerState } from './broker-state.js';
+import { BrokerConnectionService } from './broker-connection.service.js';
+import { SsePublisherService } from './sse-publisher.service.js';
+import { AuditService } from './audit.service.js';
+import { ChannelCacheService } from './channel-cache.service.js';
+import { ChannelCommandsService } from './channel-commands.service.js';
+import { OutboxService } from './outbox.service.js';
+import { InboundIntakeService } from './inbound-intake.service.js';
+import { ChannelStatusConsumer } from './channel-status.consumer.js';
 
-export interface OutboundPayload {
-  conversationId: number;
-  clientId: number;
-  platform: string;
-  platformUserId: string;
-  slot?: string;
-  text: string;
-  timestamp: string;
-}
+export type { OutboundPayload } from './outbox.service.js';
+export type { BroadcastJobPayload } from './channel-commands.service.js';
+import type { OutboundPayload } from './outbox.service.js';
+import type { BroadcastJobPayload } from './channel-commands.service.js';
 
-export interface BroadcastJobPayload {
-  broadcastId: number;
-  recipientId: number;
-  clientId: number;
-  platform: string;
-  platformUserId: string;
-  customerName?: string | null;
-  text: string;
-}
-
+/**
+ * Events facade (Phase 3 of the modular restructure).
+ *
+ * `EventsService` used to be a 791-line god-object: SSE fan-out, audit
+ * log, Redis QR/pairing cache, RabbitMQ publish/consume, reconnect
+ * logic, outbox polling, inbound-message intake, and AI-gate logic in
+ * one class, injected by 9 controllers/services. It is now a thin
+ * facade: every method delegates to one focused service under
+ * `events/` (broker-connection, sse-publisher, audit, channel-cache,
+ * channel-commands, outbox, inbound-intake, channel-status). The
+ * constructor signature `(pool, licensing)` and the full public method
+ * surface are unchanged, so every existing consumer — and every spec
+ * that constructs `EventsService` directly — keeps working untouched.
+ *
+ * The collaborators are composed internally (not Nest-injected) on
+ * purpose: `AdminController` / `AuthController` / `LicensingController`
+ * / `BackupController` all build a fallback `new EventsService(pool,
+ * licensing)` when DI has no instance, and the specs construct it
+ * directly too. Changing the constructor would break all of those.
+ */
 @Injectable()
 export class EventsService implements OnModuleInit, OnModuleDestroy {
-  private redis: Redis | null = null;
-  private coordinator: RedisCoordinator | null = null;
-  private mq: RabbitMQClient | null = null;
-  private outboxTimer: NodeJS.Timeout | null = null;
-  private isProcessingOutbox = false;
-  private isConnected = false;
-  private isClosing = false;
-  private isReconnecting = false;
-  private reconnectTimer: NodeJS.Timeout | null = null;
+  private readonly state = new BrokerState();
+  private readonly broker: BrokerConnectionService;
+  private readonly ssePublisher: SsePublisherService;
+  private readonly audit: AuditService;
+  private readonly channelCache: ChannelCacheService;
+  private readonly channelCommands: ChannelCommandsService;
+  private readonly outbox: OutboxService;
+  private readonly intake: InboundIntakeService;
+  private readonly channelStatus: ChannelStatusConsumer;
 
   constructor(
     @Inject(DB_POOL) private readonly pool: pg.Pool,
     @Inject(LicensingService) private readonly licensing: LicensingService
-  ) {}
+  ) {
+    this.broker = new BrokerConnectionService(this.state, {
+      onReconnected: async () => {
+        await this.intake.startInboundConsumer();
+        await this.channelStatus.startChannelStatusConsumer();
+      },
+    });
+    this.ssePublisher = new SsePublisherService(this.state);
+    this.audit = new AuditService(pool);
+    this.channelCache = new ChannelCacheService(this.state);
+    this.channelCommands = new ChannelCommandsService(this.state);
+    this.outbox = new OutboxService(pool, this.state);
+    const broadcast = (tenantId: number, event: any) =>
+      this.ssePublisher.broadcastTenantEvent(tenantId, event);
+    this.intake = new InboundIntakeService(pool, licensing, this.state, broadcast);
+    this.channelStatus = new ChannelStatusConsumer(pool, this.state, broadcast);
+  }
 
   getMqClient(): RabbitMQClient | null {
-    return this.mq;
+    return this.broker.getMqClient();
   }
 
   setMqClient(mq: any) {
-    this.mq = mq;
+    this.broker.setMqClient(mq);
   }
 
   getIsConnected(): boolean {
-    return this.isConnected;
+    return this.broker.getIsConnected();
   }
 
   setIsConnected(connected: boolean) {
-    this.isConnected = connected;
+    this.broker.setIsConnected(connected);
   }
 
   attachConnectionLifecycle() {
-    const mqAny = this.mq as any;
-    const conn = mqAny?.conn;
-    const channel = this.mq?.getChannel();
-
-    const handleDisconnect = (reason: string) => {
-      if (this.isClosing) return;
-      if (!this.isConnected && this.isReconnecting) return;
-      console.warn(`[events] RabbitMQ disconnected (${reason}), initiating reconnect...`);
-      this.isConnected = false;
-      this.triggerReconnect().catch((err) => {
-        console.error('[events] Reconnect loop error:', err);
-      });
-    };
-
-    if (conn && typeof conn.on === 'function') {
-      conn.on('close', () => handleDisconnect('connection closed'));
-      conn.on('error', (err: any) => handleDisconnect(`connection error: ${err?.message || err}`));
-    }
-    if (channel && typeof (channel as any).on === 'function') {
-      (channel as any).on('close', () => handleDisconnect('channel closed'));
-      (channel as any).on('error', (err: any) => handleDisconnect(`channel error: ${err?.message || err}`));
-    }
+    this.broker.attachConnectionLifecycle();
   }
 
   async triggerReconnect(): Promise<void> {
-    if (this.isClosing || this.isReconnecting) return;
-    this.isReconnecting = true;
-
-    let delay = Number(process.env.RABBITMQ_RECONNECT_INITIAL_MS) || 1000;
-    const maxDelay = Number(process.env.RABBITMQ_RECONNECT_MAX_MS) || 30000;
-
-    while (!this.isConnected && !this.isClosing) {
-      console.log(`[events] Attempting broker reconnect in ${delay}ms...`);
-      await new Promise((r) => setTimeout(r, delay));
-      if (this.isClosing) break;
-
-      try {
-        const rabbitUrl = process.env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/';
-        if (this.mq) {
-          try { await this.mq.close(); } catch {}
-        }
-        this.mq = new RabbitMQClient({
-          url: rabbitUrl,
-          exchange: EVENTS_EXCHANGE,
-        });
-        await this.mq.connect();
-        this.isConnected = true;
-        this.isReconnecting = false;
-        console.log('[events] Reconnected to RabbitMQ broker successfully');
-        this.attachConnectionLifecycle();
-        await this.startInboundConsumer();
-        await this.startChannelStatusConsumer();
-        return;
-      } catch (err: any) {
-        console.warn(`[events] Reconnect attempt failed: ${err?.message || err}`);
-        delay = Math.min(delay * 2, maxDelay);
-      }
-    }
-    this.isReconnecting = false;
+    return this.broker.triggerReconnect();
   }
 
   async onModuleInit() {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-    try {
-      this.redis = new Redis(redisUrl, {
-        retryStrategy: (times: number) => Math.min(times * 1000, 10000),
-        maxRetriesPerRequest: 1,
-      });
-      this.redis.on('error', (err: any) => {
-        console.warn('[events] Redis connection warning:', err?.message || err);
-      });
-      this.coordinator = new RedisCoordinator(this.redis);
-    } catch (err: any) {
-      console.warn('[events] Redis init warning:', err?.message || err);
-    }
-
-    const rabbitUrl = process.env.RABBITMQ_URL || 'amqp://tectobox:tectobox_dev@localhost:5672/';
-    const startupTimeoutMs = Number(process.env.RABBITMQ_STARTUP_TIMEOUT_MS ?? process.env.BROKER_STARTUP_TIMEOUT_MS) || 60000;
-    const startTime = Date.now();
-    let attempt = 0;
-
-    while (!this.isConnected && !this.isClosing) {
-      attempt++;
-      try {
-        this.mq = new RabbitMQClient({
-          url: rabbitUrl,
-          exchange: EVENTS_EXCHANGE,
-        });
-        await this.mq.connect();
-        this.isConnected = true;
-        console.log('[events] Connected to RabbitMQ & Redis');
-        this.attachConnectionLifecycle();
-        await this.startInboundConsumer();
-        await this.startChannelStatusConsumer();
-        this.startOutboxPolling();
-        return;
-      } catch (err: any) {
-        const elapsed = Date.now() - startTime;
-        if (elapsed >= startupTimeoutMs) {
-          console.error(
-            `[events] Fatal: RabbitMQ broker unreachable after ${elapsed}ms (${attempt} attempts, limit ${startupTimeoutMs}ms): ${err.message}. Exiting non-zero.`
-          );
-          process.exit(1);
-          return;
-        }
-        const backoff = Math.min(500 * Math.pow(1.5, attempt - 1), 3000);
-        const remaining = startupTimeoutMs - elapsed;
-        const waitTime = Math.min(backoff, remaining);
-        console.warn(
-          `[events] RabbitMQ broker connection attempt ${attempt} failed (${err.message}), retrying in ${waitTime}ms (elapsed: ${elapsed}ms, limit: ${startupTimeoutMs}ms)...`
-        );
-        await new Promise((r) => setTimeout(r, waitTime));
-      }
-    }
+    this.broker.initializeRedis();
+    await this.broker.connectWithRetry(async () => {
+      await this.intake.startInboundConsumer();
+      await this.channelStatus.startChannelStatusConsumer();
+      this.outbox.startOutboxPolling();
+    });
   }
 
   async onModuleDestroy() {
-    this.isClosing = true;
-    if (this.outboxTimer) {
-      clearInterval(this.outboxTimer);
-      this.outboxTimer = null;
+    this.state.isClosing = true;
+    this.outbox.stopOutboxPolling();
+    if (this.state.reconnectTimer) {
+      clearTimeout(this.state.reconnectTimer);
+      this.state.reconnectTimer = null;
     }
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    if (this.mq) {
-      await this.mq.close().catch(() => {});
-    }
-    if (this.redis) {
-      await this.redis.quit().catch(() => {});
-    }
+    await this.broker.close();
   }
 
   /**
    * Broadcast real-time SSE event to a tenant workspace via Redis Pub/Sub
    */
   async broadcastTenantEvent(tenantId: number, event: any): Promise<void> {
-    const channel = tenantEventsChannel(tenantId);
-    if (this.coordinator) {
-      try {
-        await this.coordinator.publishEvent(channel, event);
-      } catch (err: any) {
-        console.warn(`[events] Failed to publish SSE event to ${channel}:`, err.message);
-      }
-    }
+    return this.ssePublisher.broadcastTenantEvent(tenantId, event);
   }
 
   /**
@@ -243,84 +131,29 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     action: string,
     details?: any
   ): Promise<void> {
-    try {
-      if (!this.pool) return;
-      const actor = actorId != null ? String(actorId) : 'system';
-      const event = action;
-      const target = clientId != null
-        ? (typeof clientId === 'number' ? `tenant:${clientId}` : String(clientId))
-        : (details?.target ? String(details.target) : (details?.targetUserId ? `user:${details.targetUserId}` : null));
-      const ip = details?.ip ?? (typeof details === 'object' ? JSON.stringify(details) : (details ? String(details) : null));
-
-      await this.pool.query(
-        `INSERT INTO audit_log (actor, event, target, ip, created_at)
-         VALUES ($1, $2, $3, $4, NOW())`,
-        [actor, event, target, ip ? String(ip).slice(0, 255) : null]
-      );
-    } catch (err: any) {
-      console.warn('[events] audit log write failed (non-fatal):', err?.message || err);
-    }
+    return this.audit.writeAudit(actorId, clientId, action, details);
   }
 
   async getQrCode(clientId: number, slot: string, channel: string = 'whatsapp'): Promise<string | null> {
-    if (this.redis) {
-      try {
-        const key = channel === 'telegram' ? tgQrKey(clientId, slot) : waQrKey(clientId, slot);
-        return await this.redis.get(key);
-      } catch {
-        return null;
-      }
-    }
-    return null;
+    return this.channelCache.getQrCode(clientId, slot, channel);
   }
 
   /** WhatsApp pairing code issued by requestPairingCode (phone login). */
   async getPairingCode(clientId: number, slot: string): Promise<string | null> {
-    if (this.redis) {
-      try {
-        return await this.redis.get(waPairingKey(clientId, slot));
-      } catch {
-        return null;
-      }
-    }
-    return null;
+    return this.channelCache.getPairingCode(clientId, slot);
   }
 
   /** True while a Telegram phone-code login is waiting for the user to type the code. */
   async getPhoneCodeSent(clientId: number, slot: string): Promise<boolean> {
-    if (this.redis) {
-      try {
-        return (await this.redis.get(tgCodeSentKey(clientId, slot))) === '1';
-      } catch {
-        return false;
-      }
-    }
-    return false;
+    return this.channelCache.getPhoneCodeSent(clientId, slot);
   }
 
   async setRedisKey(key: string, val: string, ttlSec?: number): Promise<void> {
-    if (this.redis) {
-      try {
-        if (ttlSec) {
-          await this.redis.set(key, val, 'EX', ttlSec);
-        } else {
-          await this.redis.set(key, val);
-        }
-      } catch (err: any) {
-        console.warn(`[events] Redis set error for ${key}:`, err.message);
-      }
-    }
+    return this.channelCache.setRedisKey(key, val, ttlSec);
   }
 
   async getRedisKey(key: string): Promise<string | null> {
-    if (this.redis) {
-      try {
-        return await this.redis.get(key);
-      } catch {
-        return null;
-      }
-    }
-    return null;
+    return this.channelCache.getRedisKey(key);
   }
 
   /**
@@ -331,17 +164,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
    * failure on the recipient instead of silently dropping the job).
    */
   async publishBroadcastJob(job: BroadcastJobPayload): Promise<boolean> {
-    if (!this.isConnected || !this.mq) {
-      console.warn('[events] RabbitMQ not connected, cannot publish broadcast job');
-      return false;
-    }
-    try {
-      await this.mq.publish(BROADCAST_JOB_ROUTING_KEY, job);
-      return true;
-    } catch (err: any) {
-      console.warn('[events] Failed to publish broadcast job:', err.message);
-      return false;
-    }
+    return this.channelCommands.publishBroadcastJob(job);
   }
 
   /**
@@ -360,29 +183,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     slot: string,
     opts?: { method?: string; phoneNumber?: string }
   ): Promise<boolean> {
-    if (!this.isConnected || !this.mq) {
-      console.warn('[events] RabbitMQ not connected, cannot publish WhatsApp connect command');
-      return false;
-    }
-    try {
-      const channel = this.mq.getChannel();
-      const queue = connectQueue('whatsapp');
-      const routingKey = connectRoutingKey('whatsapp');
-      if (channel) {
-        await channel.assertQueue(queue, { durable: true });
-        await channel.bindQueue(queue, EVENTS_EXCHANGE, routingKey);
-      }
-      await this.mq.publish(routingKey, {
-        clientId,
-        slot,
-        method: opts?.method || 'qr',
-        phoneNumber: opts?.phoneNumber || undefined,
-      });
-      return true;
-    } catch (err: any) {
-      console.warn('[events] Failed to publish WhatsApp connect command:', err.message);
-      return false;
-    }
+    return this.channelCommands.publishChannelConnect(clientId, slot, opts);
   }
 
   /**
@@ -399,32 +200,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     label?: string,
     opts?: { method?: string; phoneNumber?: string }
   ): Promise<boolean> {
-    if (!this.isConnected || !this.mq) {
-      console.warn('[events] RabbitMQ not connected, cannot publish Telegram connect command');
-      return false;
-    }
-    try {
-      const channel = this.mq.getChannel();
-      const queue = connectQueue('telegram');
-      const routingKey = connectRoutingKey('telegram');
-      if (channel) {
-        await channel.assertQueue(queue, { durable: true });
-        await channel.bindQueue(queue, EVENTS_EXCHANGE, routingKey);
-      }
-      await this.mq.publish(routingKey, {
-        clientId,
-        slot,
-        channelRowId,
-        id: channelRowId,
-        label,
-        method: opts?.method || 'qr',
-        phoneNumber: opts?.phoneNumber || undefined,
-      });
-      return true;
-    } catch (err: any) {
-      console.warn('[events] Failed to publish Telegram connect command:', err.message);
-      return false;
-    }
+    return this.channelCommands.publishChannelConnectTelegram(clientId, slot, channelRowId, label, opts);
   }
 
   /**
@@ -440,29 +216,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     code: string,
     password?: string
   ): Promise<boolean> {
-    if (!this.isConnected || !this.mq) {
-      console.warn('[events] RabbitMQ not connected, cannot publish Telegram sign-in');
-      return false;
-    }
-    try {
-      const channel = this.mq.getChannel();
-      const queue = signinQueue('telegram');
-      const routingKey = signinRoutingKey('telegram');
-      if (channel) {
-        await channel.assertQueue(queue, { durable: true });
-        await channel.bindQueue(queue, EVENTS_EXCHANGE, routingKey);
-      }
-      await this.mq.publish(routingKey, {
-        clientId,
-        slot,
-        phoneCode: code,
-        password: password || undefined,
-      });
-      return true;
-    } catch (err: any) {
-      console.warn('[events] Failed to publish Telegram sign-in:', err.message);
-      return false;
-    }
+    return this.channelCommands.publishTelegramSignIn(clientId, slot, code, password);
   }
 
   /**
@@ -474,318 +228,13 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     clientId: number,
     slot: string
   ): Promise<boolean> {
-    if (!this.isConnected || !this.mq) {
-      console.warn(`[events] RabbitMQ not connected, cannot publish disconnect for ${channelName}`);
-      return false;
-    }
-    try {
-      const routingKey = disconnectRoutingKey(channelName);
-      const channel = this.mq.getChannel();
-      if (channel) {
-        await channel.assertQueue(disconnectQueue(channelName), { durable: true });
-        await channel.bindQueue(disconnectQueue(channelName), EVENTS_EXCHANGE, routingKey);
-      }
-      await this.mq.publish(routingKey, {
-        clientId,
-        channel: channelName,
-        slot,
-      });
-      return true;
-    } catch (err: any) {
-      console.warn(`[events] Failed to publish disconnect for ${channelName}:`, err.message);
-      return false;
-    }
+    return this.channelCommands.publishChannelDisconnect(channelName, clientId, slot);
   }
 
   /**
    * Publish an outbound message directly to RabbitMQ & outbox
    */
   async enqueueOutboundMessage(payload: OutboundPayload): Promise<void> {
-    const routingKey = outgoingRoutingKey(payload.platform);
-
-    // 1. Persist to outbox_events inside transactional database
-    await this.pool.query(
-      `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, created_at)
-       VALUES ('message', $1, 'outgoing', $2, NOW())`,
-      [payload.conversationId.toString(), JSON.stringify(payload)]
-    );
-
-    // 2. Immediate direct publish if broker connected
-    if (this.isConnected && this.mq) {
-      try {
-        await this.mq.publish(routingKey, {
-          clientId: payload.clientId,
-          slot: payload.slot || DEFAULT_SLOT,
-          to: payload.platformUserId,
-          text: payload.text,
-        });
-      } catch (err: any) {
-        console.warn(`[events] Direct publish to ${routingKey} deferred to outbox worker:`, err.message);
-      }
-    }
-  }
-
-  /**
-   * Inbound consumer listening to message.incoming.*
-   * The payload is validated by InboundWireMessageSchema, which encodes
-   * exactly the coercions this consumer used to do inline (Number() for
-   * clientId, 'whatsapp' platform default, platformUserId || from,
-   * trimmed text). A message that fails the schema is acked and dropped,
-   * exactly as the old `if (!clientId || !platformUserId || !text)` did.
-   */
-  private async startInboundConsumer(): Promise<void> {
-    if (!this.mq) return;
-    const channel = this.mq.getChannel();
-    if (!channel) return;
-
-    const queueName = INBOUND_QUEUE;
-    await channel.assertQueue(queueName, { durable: true });
-    await channel.bindQueue(queueName, EVENTS_EXCHANGE, INCOMING_ROUTING_KEY_PATTERN);
-
-    await channel.consume(queueName, async (msg) => {
-      if (!msg) return;
-
-      try {
-        const rawContent = msg.content.toString();
-        const parsed = InboundWireMessageSchema.safeParse(JSON.parse(rawContent));
-        if (!parsed.success) {
-          channel.ack(msg);
-          return;
-        }
-        const payload = parsed.data;
-
-        const clientId = payload.clientId;
-        const platform = payload.platform;
-        const platformUserId = payload.platformUserId;
-        const text = payload.text;
-        const customerName = payload.customerName ?? null;
-        const customerPhone = payload.customerPhone ?? null;
-        const externalId = payload.externalId ?? null;
-
-        // 1. Find or create conversation
-        const convRes = await this.pool.query(
-          `INSERT INTO conversations (client_id, platform, platform_user_id, slot, customer_name, customer_phone, last_message_at, unread_count, status)
-           VALUES ($1, $2, $3, 'default', $4, $5, NOW(), 1, 'open')
-           ON CONFLICT(client_id, platform, platform_user_id, slot) DO UPDATE
-           SET last_message_at = NOW(),
-               unread_count = conversations.unread_count + 1,
-               customer_name = COALESCE(excluded.customer_name, conversations.customer_name),
-               customer_phone = COALESCE(excluded.customer_phone, conversations.customer_phone)
-           RETURNING id, client_id, platform, platform_user_id, slot, customer_name, customer_phone, last_message_at, unread_count, status`,
-          [clientId, platform, platformUserId, customerName, customerPhone]
-        );
-
-        const conv = convRes.rows[0];
-
-        // 2. Deduplicate message by external_id if present
-        let msgRow = null;
-        if (externalId) {
-          const dupCheck = await this.pool.query(
-            'SELECT id, conversation_id, direction, text, created_at FROM messages WHERE conversation_id = $1 AND external_id = $2 LIMIT 1',
-            [conv.id, externalId]
-          );
-          if (dupCheck.rows.length > 0) {
-            msgRow = dupCheck.rows[0];
-          }
-        }
-
-        if (!msgRow) {
-          const insertMsg = await this.pool.query(
-            `INSERT INTO messages (conversation_id, direction, text, raw_json, external_id, created_at)
-             VALUES ($1, 'in', $2, $3, $4, NOW())
-             RETURNING id, conversation_id, direction, text, created_at`,
-            [conv.id, text, payload.rawJson ? JSON.stringify(payload.rawJson) : null, externalId]
-          );
-          msgRow = insertMsg.rows[0];
-        }
-
-        // 3. Upsert into leads
-        await this.pool.query(
-          `INSERT INTO leads (client_id, platform, platform_user_id, name, phone, status, stage, score, temperature, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, 'lead', 'new', 10, 'warm', NOW(), NOW())
-           ON CONFLICT(client_id, platform, platform_user_id) DO UPDATE
-           SET name = COALESCE(excluded.name, leads.name),
-               phone = COALESCE(excluded.phone, leads.phone),
-               updated_at = NOW()`,
-          [clientId, platform, platformUserId, customerName, customerPhone]
-        ).catch(() => {});
-
-        // 4. Broadcast via Redis Pub/Sub for SSE
-        await this.broadcastTenantEvent(clientId, {
-          type: SSE_EVENT_TYPES.MESSAGE,
-          conversation: conv,
-          inbound: msgRow,
-        });
-
-        // 4b. Check if customer is asking for a human agent
-        const humanRegex = /(human|agent|person|representative|support team|manager|talk to someone|call me|মানুষ|এজেন্ট|প্রতিনিধি|কল দেন|কথা বলব|অপারেটর|manush|kotha bolbo|call den|kew asen|operator)/i;
-        if (humanRegex.test(text)) {
-          await this.pool.query('UPDATE conversations SET needs_human = true WHERE id = $1', [conv.id]);
-          conv.needs_human = true;
-          await this.broadcastTenantEvent(clientId, {
-            type: SSE_EVENT_TYPES.CONVERSATION_FLAG,
-            conversationId: conv.id,
-            needsHuman: true,
-          });
-        }
-
-        // 5. Trigger AI auto-reply if enabled and not paused
-        try {
-          const clientRow = await this.pool.query(
-            'SELECT name, business_type, ai_paused FROM clients WHERE id = $1 LIMIT 1',
-            [clientId]
-          );
-          const client = clientRow.rows[0];
-
-          const autoReplyRow = await this.pool.query(
-            "SELECT value FROM settings WHERE key = 'ai.auto_reply' LIMIT 1"
-          );
-          const isGlobalAutoReply = !autoReplyRow.rows[0] || autoReplyRow.rows[0].value !== '0';
-
-          // Licence gate: the workspace must hold the ai_response feature
-          // with credits left (or an unlimited time licence). Without it
-          // the inbound message is already stored above and a human can
-          // still reply manually — the AI simply stays silent.
-          // consumeAiCredit is the atomic reserve-a-credit step: it returns
-          // false when the last credit was taken by a concurrent reply, in
-          // which case nothing is published. Time licences always pass.
-          let licenseOk = false;
-          if (client && !client.ai_paused && !conv.needs_human) {
-            const access = await this.licensing.resolveAccess(clientId);
-            licenseOk =
-              access.aiAllowed && (await this.licensing.consumeAiCredit(clientId));
-          }
-
-          if (this.mq && client && !client.ai_paused && !conv.needs_human && isGlobalAutoReply && platform !== 'webchat' && licenseOk) {
-            const prodsRes = await this.pool.query(
-              'SELECT name, sku, price_bdt, stock FROM products WHERE client_id = $1 ORDER BY id ASC',
-              [clientId]
-            );
-            const kbRes = await this.pool.query(
-              'SELECT title, content, category FROM knowledge WHERE client_id = $1 ORDER BY id ASC',
-              [clientId]
-            );
-
-            // Fetch past messages for conversational memory
-            const recentHistoryRes = await this.pool.query(
-              `SELECT direction, text FROM messages
-               WHERE conversation_id = $1 AND id < $2
-               ORDER BY id DESC LIMIT 8`,
-              [conv.id, msgRow.id]
-            );
-            const history = recentHistoryRes.rows.reverse().map(r => ({
-              role: r.direction === 'in' ? 'user' : 'assistant',
-              content: r.text,
-            }));
-
-            await this.mq.publish(aiRequestRoutingKey(platform), {
-              platform,
-              clientId,
-              slot: conv.slot || DEFAULT_SLOT,
-              to: platformUserId,
-              conversationId: conv.id,
-              text,
-              history,
-              clientName: client.name,
-              businessType: client.business_type,
-              products: prodsRes.rows,
-              knowledge: kbRes.rows,
-            });
-          }
-        } catch (aiErr: any) {
-          console.warn('[events] Error triggering AI response for inbound:', aiErr.message);
-        }
-
-        channel.ack(msg);
-      } catch (err: any) {
-        console.error('[events] Error handling inbound message event:', err);
-        channel.ack(msg); // Avoid unhandled poison loop
-      }
-    });
-  }
-
-  /**
-   * RC5: consume channel status events published by the workers
-   * (routing key `channel.status.<platform>`) and sync them into
-   * channel_sessions. Nothing else flips a session to 'connected':
-   * without this the row stays 'connecting' forever after a scan, the
-   * Channels tab never shows the account as connected, and a silent
-   * reconnect (saved pairing) looks like a 90s timeout to the frontend.
-   * Always acks — a bad status payload must never poison-loop. The
-   * payload is validated by ChannelStatusEventSchema, which encodes the
-   * exact Number()/String() coercions and status-enum check this
-   * consumer used to do inline.
-   */
-  private async startChannelStatusConsumer(): Promise<void> {
-    if (!this.mq) return;
-    const channel = this.mq.getChannel();
-    if (!channel) return;
-
-    const queueName = CHANNEL_STATUS_QUEUE;
-    await channel.assertQueue(queueName, { durable: true });
-    await channel.bindQueue(queueName, EVENTS_EXCHANGE, CHANNEL_STATUS_ROUTING_KEY_PATTERN);
-
-    await channel.consume(queueName, async (msg) => {
-      if (!msg) return;
-      try {
-        const parsed = ChannelStatusEventSchema.safeParse(JSON.parse(msg.content.toString()));
-        if (!parsed.success) {
-          return;
-        }
-        const { clientId, channel: ch, slot, status } = parsed.data;
-        await this.pool.query(
-          `UPDATE channel_sessions SET status = $1, updated_at = NOW()
-           WHERE client_id = $2 AND channel = $3 AND slot = $4`,
-          [status, clientId, ch, slot]
-        );
-        // Nudge open frontends to re-read /connectors.
-        await this.broadcastTenantEvent(clientId, { type: SSE_EVENT_TYPES.CONNECTORS, clientId });
-      } catch (err: any) {
-        console.error('[events] channel status consumer error:', err.message);
-      } finally {
-        channel.ack(msg);
-      }
-    });
-  }
-
-  /**
-   * Outbox background processor polling unprocessed outbox_events
-   */
-  private startOutboxPolling(): void {
-    this.outboxTimer = setInterval(async () => {
-      if (this.isProcessingOutbox || !this.isConnected || !this.mq) return;
-      this.isProcessingOutbox = true;
-
-      try {
-        const { rows } = await this.pool.query(
-          `SELECT id, aggregate_type, aggregate_id, event_type, payload
-           FROM outbox_events
-           WHERE processed_at IS NULL
-           ORDER BY created_at ASC
-           LIMIT 25`
-        );
-
-        for (const event of rows) {
-          const payload = typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload;
-          const routingKey = outgoingRoutingKey(payload.platform || 'whatsapp');
-
-          await this.mq.publish(routingKey, {
-            clientId: payload.clientId,
-            slot: payload.slot || DEFAULT_SLOT,
-            to: payload.platformUserId,
-            text: payload.text,
-          });
-
-          await this.pool.query(
-            'UPDATE outbox_events SET processed_at = NOW() WHERE id = $1',
-            [event.id]
-          );
-        }
-      } catch (err: any) {
-        console.warn('[events] Outbox processing tick warning:', err.message);
-      } finally {
-        this.isProcessingOutbox = false;
-      }
-    }, 3000);
+    return this.outbox.enqueueOutboundMessage(payload);
   }
 }

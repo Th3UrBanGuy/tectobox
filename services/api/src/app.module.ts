@@ -15,6 +15,7 @@ import { WidgetModule } from './widget/widget.module.js';
 import { LicensingModule } from './licensing/licensing.module.js';
 import { AdminModule } from './admin/admin.module.js';
 import { ConnectorsModule } from './connectors/connectors.module.js';
+import { MetaModule } from './meta/meta.module.js';
 import { SseModule } from './sse/sse.module.js';
 import { CourierModule } from './courier/courier.module.js';
 import { BackupModule } from './backup/backup.module.js';
@@ -36,6 +37,7 @@ import { PaymentsModule } from './payments/payments.module.js';
     LicensingModule,
     AdminModule,
     ConnectorsModule,
+    MetaModule,
     SseModule,
     CourierModule,
     BackupModule,
