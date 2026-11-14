@@ -48,7 +48,7 @@ export class AiReplyService {
     const { client, conv, msg, text, access } = ctx;
 
     // 5. Check if customer is asking for a human agent
-    const humanRegex = /(human|agent|person|representative|support team|manager|talk to someone|call me|মানুষ|এজেন্ট|প্রতিনিধি|কল দেন|কথা বলব|অপারেটর|manush|kotha bolbo|call den|kew asen|operator)/i;
+    const humanRegex = /(human|agent|person|representative|support|real person|customer care|help me talk|help me|manager|talk to someone|call me|মানুষ|এজেন্ট|প্রতিনিধি|কল দেন|কথা বলব|অপারেটর|সাপোর্ট|সাহায্য|manush|kotha bolbo|call den|kew asen|operator|sahajjo|madad|insaan|sahayata)/i;
     const isAskingForHuman = humanRegex.test(text);
 
     let replyText: string | null = null;
