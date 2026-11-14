@@ -9,7 +9,7 @@ RUN go mod download || true
 COPY services/ai/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o ai-service ./cmd/server
 
-FROM alpine:3.19 AS runner
+FROM alpine:3.24 AS runner
 
 WORKDIR /app
 
