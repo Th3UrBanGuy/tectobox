@@ -30,6 +30,8 @@ Services live in `services/` and shared libraries in `packages/`.
   Never trust URL/body tenant IDs without ownership verification.
 - **Idempotent Processing** — Every queue handler must be safe under redelivery.
 - **No Secrets in Source** — Never commit .env, tokens, keys, or credentials.
+- **Modular structure is the law (2026-11-15)** — Every edit/update is done in the modular structure: one segment = one module. A broken segment is fixed in that segment alone, never by touching other code. The canonical map is `~/workspace/vps-audit/modular-audit/MODULE-MAP.json` (+ `MODULE-MAP.md`) — read it before touching a file; update it in the same commit when a module moves or is added.
+- **Permanent fixes only (2026-11-15)** — A fix must be permanent and tested perfectly. The old/broken code is REMOVED, never left beside the fix (leftover old code is what makes an AI hallucinate). No dead code, no duplicate logic, no ambiguous names, no path for hallucination. Every fix is security-reviewed (understand the security issues first, then edit) at a professional level.
 
 ## Frontend deploys — service-worker cache busting (2026-11-12 lesson)
 
