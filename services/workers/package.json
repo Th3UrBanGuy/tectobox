@@ -16,7 +16,7 @@
     "@tectonic/coordination": "workspace:*",
     "@tectonic/messaging": "workspace:*",
     "@whiskeysockets/baileys": "6.7.24",
-    "ioredis": "^5.11.1",
+    "ioredis": "^6.0.0",
     "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "telegram": "^2.26.11",
