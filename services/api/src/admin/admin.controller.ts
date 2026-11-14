@@ -124,7 +124,6 @@ export class AdminController {
     return result.rows[0];
   }
 
-  @Delete('clients/:id')
   @Delete(['clients/:id', 'admin/clients/:id', 'admin/workspaces/:id'])
   async deleteWorkspace(@Param('id', ParseIntPipe) id: number, @Req() req?: any) {
     await this.pool.query('DELETE FROM users WHERE client_id = $1', [id]);
