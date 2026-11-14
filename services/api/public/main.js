@@ -153,6 +153,9 @@ document.addEventListener('DOMContentLoaded', () => {
     try { localStorage.setItem('tectonic-theme', next); } catch {}
     syncThemeIcon();
     var _sw = $('sw-theme'); if (_sw) _sw.checked = (next === 'dark');
+    // Visible feedback: the theme flip itself changes no text, so without
+    // this the toggle looked dead (same for the drawer button).
+    toast(next === 'dark' ? 'Dark mode' : 'Light mode');
   };
   $('btn-theme').onclick = toggleTheme;
   const btnThemeM = $('btn-theme-mobile');
