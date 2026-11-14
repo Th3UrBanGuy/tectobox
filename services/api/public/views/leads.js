@@ -85,7 +85,10 @@ function renderLeads() {
       <td><button class="btn-icon" data-reanalyze="${l.id}" title="Re-analyze with AI">↻</button></td>
     </tr>`;
   }).join('')
-    || '<tr><td colspan="11" class="tbl-empty">No leads yet — they appear here automatically as customers chat.</td></tr>';
+    || leadsEmptyRow();
+  // "Clear filters" lives inside the empty row — wire it after render.
+  const _cf = $('btn-clear-lead-filters');
+  if (_cf) _cf.onclick = clearLeadFilters;
   document.querySelectorAll('#leads-body tr[data-lead]').forEach(tr =>
     tr.onclick = (e) => {
       if (e.target.closest('[data-reanalyze]')) return;
@@ -93,6 +96,38 @@ function renderLeads() {
     });
   document.querySelectorAll('#leads-body [data-reanalyze]').forEach(b =>
     b.onclick = async (e) => { e.stopPropagation(); await reanalyzeLead(Number(b.dataset.reanalyze)); });
+}
+// Empty state names the active filters. The old static "No leads yet"
+// lied when leads existed but the filter excluded them — and switching
+// between two empty filters changed nothing on screen, so the filter
+// buttons looked dead. Distinct text per filter combination + a Clear
+// filters button make every filter visibly do something.
+function leadsEmptyRow() {
+  // Per-segment descriptions: each segment says what it IS, so switching
+  // between two empty filters always changes the text on screen (the old
+  // single "No leads match: <filter>" line was the same length for
+  // "customers" and "potential", so the filter looked dead).
+  const segDesc = {
+    customers: 'No customers yet — a lead becomes a customer after a confirmed order.',
+    potential: 'No potential leads — hot or warm leads, or engaged conversations, will show here.',
+    new: 'No new leads — fresh, unengaged leads will show here.',
+  };
+  const extra = [];
+  if (state.leadTemp !== 'all') extra.push(state.leadTemp);
+  if (state.leadStage !== 'all') extra.push('stage: ' + state.leadStage);
+  if (state.leadQuery) extra.push('matching "' + state.leadQuery + '"');
+  if (state.leadSegment === 'all' && !extra.length) return '<tr><td colspan="11" class="tbl-empty">No leads yet — they appear here automatically as customers chat.</td></tr>';
+  const base = state.leadSegment !== 'all' ? segDesc[state.leadSegment] : 'No leads match the current filters.';
+  const suffix = extra.length ? ' (' + extra.join(' · ') + ')' : '';
+  return '<tr><td colspan="11" class="tbl-empty">' + esc(base + suffix) + ' <button class="btn-soft" id="btn-clear-lead-filters" type="button">Clear filters</button></td></tr>';
+}
+function clearLeadFilters() {
+  state.leadSegment = 'all'; state.leadTemp = 'all'; state.leadStage = 'all'; state.leadQuery = '';
+  const q = $('lead-search'); if (q) q.value = '';
+  const st = $('lead-stage-filter'); if (st) st.value = 'all';
+  document.querySelectorAll('#lead-segment-filters button').forEach(x => x.classList.toggle('active', x.dataset.seg === 'all'));
+  document.querySelectorAll('#lead-temp-filters button').forEach(x => x.classList.toggle('active', x.dataset.lt === 'all'));
+  loadLeads();
 }
 async function reanalyzeLead(id) {
   const btn = document.querySelector(`[data-reanalyze="${id}"]`);
@@ -105,9 +140,13 @@ async function reanalyzeLead(id) {
       state.leads.sort((a, b) => (b.score || 0) - (a.score || 0));
       renderLeads();
       if (state.editingLeadId === id) renderLeadIntel(r.lead);
+      toast(`Lead re-analyzed — score ${r.lead.score ?? '?'}/100, ${r.lead.temperature || 'cold'}`);
+    } else {
+      toast('Lead re-analyzed — no changes');
     }
   } catch (err) {
     console.warn('re-analyze failed', err);
+    toast('Re-analyze failed — check connection and try again', 'err');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '↻'; }
   }
