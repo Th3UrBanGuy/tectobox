@@ -242,7 +242,7 @@ body::before{
   display:block; font-size:12.5px; font-weight:650; color:var(--ink); margin-bottom:6px; letter-spacing:-0.01em;
 }
 .login-card .input-wrap{ position:relative; }
-.login-card .input-wrap svg:first-child{
+.login-card .input-wrap > svg:first-child{
   position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none;
 }
 .login-card .input{
@@ -289,10 +289,20 @@ body::before{
   margin-bottom:6px; letter-spacing:0;
 }
 .input-wrap{position:relative;}
-.input-wrap svg{
+/* Leading icon only: direct child. Was `.input-wrap svg` (any descendant),
+   which also caught the eye icons INSIDE the show/hide button — pulling
+   them out of flow made the button collapse to 12x12 (padding only) and
+   shifted the eye ~13px right, half outside the input box; tapping the
+   visible eye then hit the input (svg is pointer-events:none), so the
+   toggle looked broken. This one selector broke all four password
+   toggles (login + 3 profile fields). */
+.input-wrap > svg{
   position:absolute; left:13px; top:50%; transform:translateY(-50%);
   color:var(--muted); pointer-events:none;
 }
+/* Icons inside the action button must stay in flow (centred in the
+   28x28 button), never be pulled out by a descendant selector. */
+.btn-input-action svg{ position:static; transform:none; pointer-events:none; }
 .input{
   width:100%; height:42px; background:var(--input-bg); border:1px solid var(--input-border);
   border-radius:var(--r-md); padding:0 14px 0 40px; font-size:13.5px; color:var(--ink);
