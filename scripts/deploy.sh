@@ -26,6 +26,14 @@ if [ -z "${IMAGE_TAG:-}" ]; then
 fi
 export IMAGE_TAG
 
+# GHCR image names must be lowercase. github.repository_owner preserves the
+# account's mixed case (Th3UrBanGuy), and `docker compose pull` then fails
+# with "repository name must be lowercase" — the first real auto-deploy
+# (e3d414d) died exactly here. Normalize once so the fresh-install .env
+# below and every compose pull use the lowercase owner.
+IMAGE_REPO_OWNER=$(printf '%s' "${IMAGE_REPO_OWNER:-th3urbanguy}" | tr '[:upper:]' '[:lower:]')
+export IMAGE_REPO_OWNER
+
 # 1. Ensure .env exists with cryptographically secure credentials
 if [ ! -f "${DEPLOY_DIR}/.env" ]; then
   echo "[+] Generating initial production .env with secure random credentials..."
