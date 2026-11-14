@@ -231,6 +231,10 @@ services:
 networks:
   default:
     name: tectobox_internal-net
+    # external: the network already exists (created by the pre-BP4 stack,
+    # label internal-net). Without this, compose refuses to reuse it:
+    # "was found but has incorrect label ... expected: default".
+    external: true
 
 volumes:
   tectobox_pgdata:
