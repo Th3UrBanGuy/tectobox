@@ -20,6 +20,7 @@ import {
   languageDirective,
   parsePaymentClaim,
   queryGoAIEngine,
+  resetGoAiCircuitBreaker,
 } from '@tectonic/ai-router';
 import type {
   AIRequestMessage,
@@ -38,6 +39,7 @@ export {
   languageDirective,
   parsePaymentClaim,
   queryGoAIEngine,
+  resetGoAiCircuitBreaker,
 } from '@tectonic/ai-router';
 
 export const demoResponder = demoResponderImpl;

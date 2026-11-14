@@ -74,6 +74,78 @@ function requireEnv(name: string): string {
 
 export const GO_AI_TIMEOUT_MS = 25000;
 
+// Circuit breaker for the Go AI engine (Seg-D reliability, W1/S1/T1/SC1).
+// Profiling (2026-11-15) proved the Go engine itself is fast — direct
+// probes from inside the api container answer in 10-90ms even at 10
+// concurrent — but when the ai service is unreachable a hung/blackholed
+// connection burns the full 25s fetch timeout on EVERY widget request
+// before the deterministic fallback runs. After
+// GO_AI_BREAKER_TRIP_FAILURES consecutive failures the breaker opens for
+// GO_AI_BREAKER_COOLDOWN_MS and queryGoAIEngine answers from the
+// deterministic responder immediately (no fetch at all). Any success
+// closes it again. State is module-level on purpose: the api process is
+// long-lived and the breaker must survive across requests.
+const GO_AI_BREAKER_TRIP_FAILURES = 3;
+const GO_AI_BREAKER_COOLDOWN_MS = 30_000;
+let goAiConsecutiveFailures = 0;
+let goAiBreakerOpenedAt = 0;
+
+/** Test hook: reset the Go-engine circuit breaker to closed. */
+export function resetGoAiCircuitBreaker(): void {
+  goAiConsecutiveFailures = 0;
+  goAiBreakerOpenedAt = 0;
+}
+
+function goAiBreakerOpen(): boolean {
+  if (goAiBreakerOpenedAt === 0) return false;
+  if (Date.now() - goAiBreakerOpenedAt >= GO_AI_BREAKER_COOLDOWN_MS) {
+    goAiBreakerOpenedAt = 0;
+    goAiConsecutiveFailures = 0;
+    return false;
+  }
+  return true;
+}
+
+function recordGoAiSuccess(): void {
+  goAiConsecutiveFailures = 0;
+  goAiBreakerOpenedAt = 0;
+}
+
+function recordGoAiFailure(): void {
+  goAiConsecutiveFailures += 1;
+  if (goAiConsecutiveFailures >= GO_AI_BREAKER_TRIP_FAILURES) {
+    goAiBreakerOpenedAt = Date.now();
+    console.warn(
+      `[ai-router] Go AI engine circuit breaker OPEN after ${goAiConsecutiveFailures} consecutive failures; ` +
+        `answering from the deterministic responder for ${GO_AI_BREAKER_COOLDOWN_MS / 1000}s.`,
+    );
+  }
+}
+
+/** Knowledge-grounded deterministic reply (the Tier-4 fallback). */
+function deterministicGoFallback(params: {
+  clientId?: string | number;
+  text: string;
+  history?: Array<{ role: string; content: string }>;
+  products?: ProductItem[];
+  knowledge?: KnowledgeItem[];
+}, model: string): { reply: string; language: string; model: string; cached: boolean } {
+  const templateReply = demoResponder(
+    params.clientId || 'default',
+    params.text,
+    params.products || [],
+    params.history || [],
+    params.knowledge || [],
+  );
+  const lang = detectCustomerLanguage(params.text);
+  return {
+    reply: templateReply,
+    language: lang,
+    model,
+    cached: false,
+  };
+}
+
 /**
  * High-performance Go AI Engine client
  */
@@ -87,7 +159,24 @@ export async function queryGoAIEngine(params: {
   knowledge?: KnowledgeItem[];
   model?: string;
 }): Promise<{ reply: string; language: string; model: string; cached: boolean } | null> {
-  const goUrl = requireEnv('GO_AI_URL');
+  // A missing backend URL must NEVER throw out of the widget path
+  // (Seg-D): the old requireEnv throw escaped generateReply and dropped
+  // the customer's reply entirely (NestJS 500, no reply). Return null so
+  // the caller falls through to the deterministic responder instead.
+  let goUrl: string;
+  try {
+    goUrl = requireEnv('GO_AI_URL');
+  } catch {
+    console.warn('[ai-router] GO_AI_URL is not set: answering from the deterministic responder.');
+    return null;
+  }
+
+  // Circuit breaker open: the engine is down — answer immediately from
+  // the deterministic responder instead of burning the 25s timeout.
+  if (goAiBreakerOpen()) {
+    return deterministicGoFallback(params, 'circuit-open:deterministic');
+  }
+
   try {
     const res = await fetch(goUrl, {
       method: 'POST',
@@ -113,44 +202,25 @@ export async function queryGoAIEngine(params: {
     if (res.ok) {
       const data = await res.json() as any;
       if (data && data.reply) {
+        recordGoAiSuccess();
         return data;
       }
+      // 200 without a reply: the engine is misbehaving — count it.
+      recordGoAiFailure();
     } else if (res.status === 504) {
-      const templateReply = demoResponder(
-        params.clientId || 'default',
-        params.text,
-        params.products || [],
-        params.history || [],
-        params.knowledge || []
-      );
-      const lang = detectCustomerLanguage(params.text);
-      return {
-        reply: templateReply,
-        language: lang,
-        model: 'timeout-fallback:deterministic',
-        cached: false,
-      };
+      recordGoAiFailure();
+      return deterministicGoFallback(params, 'timeout-fallback:deterministic');
+    } else {
+      recordGoAiFailure();
     }
   } catch (err: any) {
+    recordGoAiFailure();
     if (
       err?.name === 'TimeoutError' ||
       err?.name === 'AbortError' ||
       (err && String(err).toLowerCase().includes('timeout'))
     ) {
-      const templateReply = demoResponder(
-        params.clientId || 'default',
-        params.text,
-        params.products || [],
-        params.history || [],
-        params.knowledge || []
-      );
-      const lang = detectCustomerLanguage(params.text);
-      return {
-        reply: templateReply,
-        language: lang,
-        model: 'timeout-fallback:deterministic',
-        cached: false,
-      };
+      return deterministicGoFallback(params, 'timeout-fallback:deterministic');
     }
   }
   return null;

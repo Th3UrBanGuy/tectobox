@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, Inject, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Inject, NotFoundException, BadRequestException, HttpException, ServiceUnavailableException, Optional } from '@nestjs/common';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
@@ -6,6 +6,28 @@ import { LicensingService } from '../licensing/licensing.service.js';
 import { WidgetIntakeService } from './intake.service.js';
 import { AiReplyService } from './ai-reply.service.js';
 import { PaymentClaimService } from './payment-claim.service.js';
+
+/**
+ * Overall widget-request budget (Seg-D, W1). The Go-engine fetch is
+ * bounded at 25s (GO_AI_TIMEOUT_MS) and the widget comment in
+ * providers.ts promises a 30s abort — this race is that abort: no
+ * widget request may hang past 30s. Below Cloudflare's 100s origin
+ * timeout, so a slow request surfaces here as a structured 503 with a
+ * graceful reply instead of a dropped connection at the edge.
+ */
+export const WIDGET_REQUEST_TIMEOUT_MS = 30_000;
+
+/** Graceful reply returned with the 503 when the widget path fails outright. */
+export const WIDGET_UNAVAILABLE_REPLY =
+  "Sorry, we're having trouble replying right now. Please try again in a moment — your message has been received.";
+
+function withTimeout<T>(promise: Promise<T>, ms: number, stage: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`widget request timed out at ${stage} after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 /**
  * Public webchat widget controller (Phase 3 of the modular
@@ -39,15 +61,62 @@ export class WidgetController {
     @Param('widgetKey') widgetKey: string,
     @Body() body: any
   ) {
+    // Seg-D (W1): the widget endpoint must NEVER fail silently. Client
+    // errors (unknown widget / suspended / no webchat licence / bad
+    // input) propagate with their own status; anything else — a DB
+    // failure, a hung AI call, an unexpected throw — becomes a
+    // structured 503 carrying a graceful reply, never a dropped
+    // connection or a bare 500 with no reply.
+    const started = Date.now();
+    try {
+      const result = await withTimeout(
+        this.handleWidgetMessageInner(widgetKey, body),
+        WIDGET_REQUEST_TIMEOUT_MS,
+        'widget-message',
+      );
+      const intakeTimings = result.intakeTimings;
+      const aiTimings = result.aiTimings;
+      console.log(
+        `[widget] client=${result.clientId} intake_ms=${intakeTimings?.totalMs ?? -1} ` +
+          `(licence_ms=${intakeTimings?.licenceMs ?? -1} db_ms=${intakeTimings?.dbMs ?? -1}) ` +
+          `ai_ms=${aiTimings ? aiTimings.dbMs + aiTimings.goMs + aiTimings.fallbackMs + aiTimings.outDbMs : -1} ` +
+          `(go_ms=${aiTimings?.goMs ?? -1} fallback_ms=${aiTimings?.fallbackMs ?? -1} out_db_ms=${aiTimings?.outDbMs ?? -1}) ` +
+          `model=${result.modelUsed} total_ms=${Date.now() - started}`,
+      );
+      return result.response;
+    } catch (err: any) {
+      if (err instanceof HttpException) throw err;
+      console.warn('[widget] handleWidgetMessage failed:', err?.message || err);
+      throw new ServiceUnavailableException({
+        error: 'widget_temporarily_unavailable',
+        reply: WIDGET_UNAVAILABLE_REPLY,
+        reply_id: null,
+        conversation_id: null,
+        message_id: null,
+        needs_human: false,
+      });
+    }
+  }
+
+  private async handleWidgetMessageInner(
+    widgetKey: string,
+    body: any
+  ) {
     const ctx = await this.intake.intake(widgetKey, body);
-    const { replyText, replyId } = await this.aiReply.generateReply(ctx);
+    const { replyText, replyId, modelUsed, timings } = await this.aiReply.generateReply(ctx);
 
     return {
-      reply: replyText,
-      reply_id: replyId,
-      conversation_id: ctx.conv.id,
-      message_id: ctx.msg.id,
-      needs_human: ctx.conv.needs_human || false,
+      clientId: ctx.client.id,
+      intakeTimings: ctx.timings,
+      aiTimings: timings,
+      modelUsed,
+      response: {
+        reply: replyText,
+        reply_id: replyId,
+        conversation_id: ctx.conv.id,
+        message_id: ctx.msg.id,
+        needs_human: ctx.conv.needs_human || false,
+      },
     };
   }
 
