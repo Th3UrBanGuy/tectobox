@@ -1,0 +1,29 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ---- Lead Intelligence sheet ---- */
+.intel-tbl th, .intel-tbl td{vertical-align:middle;}
+.score-wrap{display:flex; align-items:center; gap:8px; min-width:110px;}
+.score-bar{flex:1; height:8px; border-radius:99px; background:rgba(100,116,139,.18); overflow:hidden;}
+.score-bar i{display:block; height:100%; border-radius:99px; transition:width .5s ease;}
+.score-bar.hot i{background:linear-gradient(90deg,#f43f5e,#fb923c); box-shadow:0 0 8px rgba(244,63,94,.5);}
+.score-bar.warm i{background:linear-gradient(90deg,#f59e0b,#fbbf24); box-shadow:0 0 8px rgba(245,158,11,.45);}
+.score-bar.cold i{background:linear-gradient(90deg,#52525b,#a1a1aa); box-shadow:0 0 8px rgba(var(--accent-rgb),.4);}
+.score-num{font-size:12.5px; font-weight:800; color:var(--ink); min-width:22px; text-align:right;}
+.chip{display:inline-block; font-size:11px; font-weight:600; padding:3px 10px; border-radius:99px;
+  background:rgba(var(--accent-rgb),.12); color:var(--accent); border:1px solid rgba(var(--accent-rgb),.28); margin:1px 2px; white-space:nowrap;}
+[data-theme="dark"] .chip{color:var(--accent);}
+.btn-icon{display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px;
+  border-radius:10px; border:1px solid var(--line); background:var(--glass); color:var(--accent);
+  font-size:15px; cursor:pointer; transition:all .15s ease;}
+.btn-icon:hover{box-shadow:var(--glow); transform:translateY(-1px);}
+.btn-icon:disabled{opacity:.5; cursor:wait; transform:none;}
+.intel-panel{margin-top:14px; padding:14px 16px; border-radius:var(--r-lg); border:1px solid var(--line);
+  background:linear-gradient(135deg, rgba(var(--accent-rgb),.07), rgba(var(--accent-rgb),.03));}
+.intel-grid{display:grid; grid-template-columns:repeat(3, 1fr); gap:10px 14px; margin-bottom:10px;}
+.intel-grid .k, .intel-row .k{display:block; font-size:10.5px; font-weight:700; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--muted); margin-bottom:3px;}
+.intel-row{padding:7px 0; border-top:1px dashed var(--line); font-size:13px; color:var(--body);}
+.intel-row:first-of-type{border-top:none;}
+@media (max-width:1100px){ .intel-tbl{font-size:12.5px;} .score-wrap{min-width:90px;} }
+

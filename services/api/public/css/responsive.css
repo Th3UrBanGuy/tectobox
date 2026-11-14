@@ -1,0 +1,241 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ═══ responsive ═══ */
+@media(max-width:1100px){
+  .inbox{grid-template-columns:280px minmax(0,1fr); height:calc(100vh - 135px);}
+  .inbox .pane.side-pane{display:none;}
+  .inbox.detail-open{grid-template-columns:minmax(0,1fr) 320px;}
+  .inbox.detail-open .pane.list-pane{display:none;}
+  .inbox.detail-open .pane.side-pane{display:flex;}
+}
+@media(max-width:900px){
+  .cfg-grid{grid-template-columns:1fr;}
+  .topnav{padding:0 14px;}
+  .nav-links{
+    display:none; position:absolute; top:62px; left:10px; right:10px;
+    background:var(--card-solid); border:1px solid var(--line); border-radius:16px;
+    flex-direction:column; align-items:stretch; padding:8px; gap:2px; box-shadow:var(--shadow);
+  }
+  .nav-links.open{display:flex; animation:modal-in .25s var(--ease);}
+  .nav-link{justify-content:flex-start; padding:12px 16px;}
+  .brand-sub{display:none;}
+  .page{padding:18px 15px 70px;}
+  .inbox{grid-template-columns:1fr; height:auto;}
+  .inbox .pane{margin-bottom:12px;}
+  .inbox .pane.list-pane{max-height:46vh;}
+  .inbox .pane.chat-pane{min-height:62vh;}
+  .inbox.detail-open{grid-template-columns:1fr;}
+  .inbox.detail-open .pane.side-pane{display:flex;}
+  .bubble{max-width:87%;}
+  .stat-grid{grid-template-columns:repeat(2,1fr);}
+  .chan-grid{grid-template-columns:1fr;}
+  .prod-grid{grid-template-columns:repeat(auto-fill,minmax(165px,1fr));}
+  .search .input{width:100%;}
+  .search{flex:1;}
+  .modal{padding:24px; border-radius:18px;}
+  .qr-box img{width:200px; height:200px;}
+  table.tbl{display:block; overflow-x:auto; -webkit-overflow-scrolling:touch;}
+}
+@media(max-width:480px){
+  .stat-grid{grid-template-columns:1fr 1fr; gap:10px;}
+  .stat-card .num{font-size:24px;}
+  .page-head h2{font-size:19px;}
+  .btn-primary{padding:11px 19px; font-size:13.5px;}
+  .login-card{padding:32px 26px 26px;}
+  .user-chip span:last-child{max-width:76px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+}
+
+/* ═══ reduced motion — accessibility ═══ */
+@media(prefers-reduced-motion:reduce){
+  body::before,.login-logo,.login-logo::after,.empty-state .ic{animation:none;}
+  *{transition-duration:.01ms!important;}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MOBILE-FIRST UX LAYER — native app experience
+   bottom tabs · chat navigation · card tables · bottom sheets
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── bottom tab bar (mobile primary nav) ── */
+.bottom-tabs{display:none;}
+.m-back,.m-info,.m-detail-close{display:none;}
+
+/* ── desktop refinements ── */
+@media(min-width:901px){
+  .inbox{height:calc(100vh - 140px);}
+}
+
+@media(max-width:900px){
+  /* ── floating dock tab bar ── */
+  .bottom-tabs{
+    display:flex; position:fixed; z-index:50;
+    left:50%; transform:translateX(-50%);
+    bottom:calc(10px + env(safe-area-inset-bottom));
+    width:max-content; max-width:calc(100vw - 24px);
+    background:color-mix(in srgb, var(--card-solid) 80%, transparent);
+    backdrop-filter:blur(26px) saturate(1.5); -webkit-backdrop-filter:blur(26px) saturate(1.5);
+    border:1px solid var(--line-hi);
+    border-radius:28px; padding:6px;
+    box-shadow:var(--shadow), 0 12px 40px rgba(0,0,0,.28);
+  }
+  .btab{
+    border:none; background:transparent; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    padding:9px 13px; border-radius:21px; color:var(--muted);
+    font-size:10px; font-weight:700; letter-spacing:.02em;
+    min-height:54px; min-width:58px;
+    transition:background .25s var(--ease), color .25s, transform .15s;
+  }
+  .btab svg{width:22px; height:22px; transition:transform .25s var(--ease);}
+  .btab.active{background:var(--active); color:var(--accent);}
+  [data-theme="dark"] .btab.active{color:var(--accent);}
+  .btab.active svg{transform:scale(1.12);}
+  .btab:active{transform:scale(.9);}
+
+  /* page clearance for floating dock */
+  .page{padding:16px 14px calc(108px + env(safe-area-inset-bottom));}
+  #cview-inbox.page{padding-left:10px; padding-right:10px;}
+
+  /* topnav: compact */
+  .topnav{height:58px; padding:0 12px;}
+  .nav-links{display:none!important;}
+  .brand-name{font-size:14.5px;}
+  .user-chip{padding:3px 10px 3px 3px; font-size:12px;}
+  .user-chip .avatar{width:26px; height:26px;}
+  #btn-signout span{display:none;}
+  #btn-signout{padding:9px;}
+  #btn-refresh{display:none!important;}
+
+  /* ── page headers stack ── */
+  .page-head{margin-bottom:16px;}
+  .page-head h2{font-size:19px;}
+  .page-head .spacer{display:none;}
+  .page-head .btn-primary,.page-head .btn-soft{width:100%; justify-content:center; margin-top:4px;}
+
+  /* ── stats: 2-col compact ── */
+  .stat-grid{grid-template-columns:repeat(2,1fr); gap:10px;}
+  .stat-card{padding:14px; gap:11px;}
+  .stat-ic{width:38px; height:38px; border-radius:12px;}
+  .stat-card .num{font-size:22px;}
+
+  /* ── toolbar ── */
+  .toolbar{gap:8px;}
+  .search{flex:1 1 100%;}
+  .search .input{width:100%; min-height:44px;}
+
+  /* ── INBOX: native list → chat → detail flow ── */
+  .inbox{display:block; height:auto; min-height:0;}
+  .inbox .pane{margin-bottom:0; border-radius:16px;}
+  /* default: show list only */
+  .inbox .pane.chat-pane{display:none;}
+  .inbox.m-chat-open .pane.list-pane{display:none;}
+  .inbox.m-chat-open .pane.chat-pane{display:flex; height:calc(100dvh - 58px - 76px - env(safe-area-inset-bottom)); min-height:420px;}
+  .m-back{display:flex;}
+  .m-info{display:flex;}
+  .chat-head{padding:10px 12px; gap:10px;}
+  .conv-item{padding:13px 12px; min-height:64px;}
+  .conv-list{max-height:calc(100dvh - 320px); min-height:300px;}
+  /* detail as slide-over sheet */
+  .inbox .pane.side-pane{display:none;}
+  .inbox.m-detail-open .pane.side-pane{
+    display:flex; position:fixed; top:0; right:0; bottom:0; z-index:70;
+    width:min(380px, 92vw); border-radius:0; border-left:1px solid var(--line);
+    animation:sheet-in .28s var(--ease);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  @keyframes sheet-in{from{transform:translateX(100%);} to{transform:none;}}
+  .m-detail-close{display:flex; margin-left:auto;}
+  .inbox.m-detail-open::after{
+    content:""; position:fixed; inset:0; z-index:65; background:rgba(0,0,0,.45);
+    animation:fadeIn .2s;
+  }
+  #messages{padding:14px 12px;}
+  .bubble{max-width:85%; font-size:14px;}
+  .composer{padding:10px 12px calc(10px + env(safe-area-inset-bottom));}
+  .send-row .input{min-height:46px; font-size:15px;}
+  .send-row .btn-primary{padding:12px 22px; min-height:46px;}
+  .quick button{padding:8px 15px; font-size:13px;}
+
+  /* ── tables → cards ── */
+  table.tbl thead{display:none;}
+  table.tbl, table.tbl tbody{display:block;}
+  table.tbl tr{
+    display:block; margin:0 0 10px; border-radius:14px; padding:6px 4px;
+    background:linear-gradient(var(--card),var(--card)) padding-box, var(--card-border) border-box;
+    border:1.5px solid transparent;
+  }
+  table.tbl tr.rowlink:active{transform:scale(.985);}
+  table.tbl td{
+    display:flex; justify-content:space-between; align-items:center; gap:14px;
+    border-bottom:1px dashed var(--line); padding:10px 16px; text-align:right;
+  }
+  table.tbl td:last-child{border-bottom:none;}
+  table.tbl td::before{
+    content:attr(data-label); font-size:11px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.06em; color:var(--muted); flex-shrink:0;
+  }
+  table.tbl td.tbl-empty{display:block; text-align:center;}
+  table.tbl td.tbl-empty::before{display:none;}
+  .tbl-card{background:transparent; border:none; box-shadow:none; backdrop-filter:none; padding:0;}
+  .tbl-card table.tbl tr{
+    background:linear-gradient(var(--card),var(--card)) padding-box, var(--card-border) border-box;
+    border:1.5px solid transparent; box-shadow:var(--shadow);
+  }
+
+  /* ── modals → bottom sheets ── */
+  .modal-bg{align-items:flex-end; padding:0;}
+  .modal{
+    width:100%!important; max-width:100%; border-radius:22px 22px 0 0;
+    max-height:92dvh; padding:22px 20px calc(22px + env(safe-area-inset-bottom));
+    animation:sheet-up .32s var(--ease);
+    border-bottom:none;
+  }
+  @keyframes sheet-up{from{transform:translateY(60px); opacity:0;} to{transform:none; opacity:1;}}
+  .modal::before{
+    content:""; display:block; width:42px; height:4.5px; border-radius:3px;
+    background:var(--input-border); margin:0 auto 16px;
+  }
+  .modal-foot .btn-ghost,.modal-foot .btn-primary{flex:1; justify-content:center; min-height:48px;}
+
+  /* ── forms & touch targets ── */
+  .input{min-height:46px; font-size:15px;}
+  .btn-primary{min-height:46px;}
+  .btn-soft,.btn-danger-soft,.btn-ghost{min-height:44px;}
+  .fchip{padding:9px 16px; font-size:13px; min-height:40px;}
+  .seg{width:100%;}
+  .seg button{flex:1; padding:10px 8px; font-size:12.5px;}
+  .icon-btn{width:38px; height:38px;}
+  .mini-btn{padding:9px 16px; font-size:13px;}
+  .side-tab{padding:12px 14px; font-size:13.5px;}
+
+  /* ── cards & grids ── */
+  .chan-grid{grid-template-columns:1fr;}
+  .prod-grid{grid-template-columns:repeat(2,1fr); gap:10px;}
+  .prod-card{padding:16px;}
+  .user-grid{grid-template-columns:1fr;}
+  .cfg-grid{grid-template-columns:1fr;}
+  .acct-row{padding:12px;}
+  .doc-card{padding:18px;}
+  .empty-state{padding:44px 22px; margin:24px auto;}
+  .qr-box img{width:min(240px,70vw); height:min(240px,70vw);}
+  .login-card{padding:34px 24px 26px;}
+  .login-card h1{font-size:27px;}
+}
+
+/* small phones */
+@media(max-width:480px){
+  .stat-grid{grid-template-columns:repeat(2,1fr); gap:8px;}
+  .stat-card{padding:12px 10px; gap:9px;}
+  .stat-card .num{font-size:20px;}
+  .stat-ic{width:34px; height:34px;}
+  .prod-grid{grid-template-columns:repeat(2,1fr); gap:8px;}
+  .page-head h2{font-size:17.5px;}
+  .brand-sub{display:none;}
+  .btab{font-size:10px;}
+  .btab svg{width:20px; height:20px;}
+}
+
+/* login page floating theme toggle */
+.login-theme-toggle{position:static; z-index:80;}
+

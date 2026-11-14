@@ -1,0 +1,64 @@
+/* Phase 5 (modular restructure): shared motion layer.
+   Most per-view animation already existed in the split files (conv-in,
+   pane-slide, msg-in, modal-in, toast-in, page-in, view-enter, stat-grid
+   stagger, cmdkIn, sheet-in/up — 25 keyframes total). This file adds only
+   the gaps and unifies the easing: transform-and-opacity-only motion,
+   fast hover with slow overshoot scene changes, no abrupt pops.
+   Loaded LAST so it can reference any keyframe defined in earlier files.
+   It changes no layout, spacing, or colour — animation only. */
+
+/* ---- shared keyframes (spring overshoot, matches --ease) ---- */
+@keyframes motion-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes motion-scale-in {
+  from { opacity: 0; transform: scale(.97); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ---- settings rows: staggered fade-up on view enter ---- */
+.mrow { animation: motion-fade-up .3s var(--ease-spring) backwards; }
+.mrow:nth-child(2) { animation-delay: 30ms; }
+.mrow:nth-child(3) { animation-delay: 60ms; }
+.mrow:nth-child(4) { animation-delay: 90ms; }
+.mrow:nth-child(5) { animation-delay: 120ms; }
+.mrow:nth-child(6) { animation-delay: 150ms; }
+.mrow:nth-child(n+7) { animation-delay: 180ms; }
+
+/* ---- admin: audit rows + hero fade-up on view enter ---- */
+.audit-row { animation: motion-fade-up .3s var(--ease-spring) backwards; }
+.audit-row:nth-child(2) { animation-delay: 30ms; }
+.audit-row:nth-child(3) { animation-delay: 60ms; }
+.audit-row:nth-child(n+4) { animation-delay: 90ms; }
+.admin-hero { animation: motion-fade-up .34s var(--ease-spring) backwards; }
+
+/* ---- channels / products cards: fast hover lift (transform only) ---- */
+.chan-card, .prod-card {
+  transition: transform 140ms var(--ease-out), box-shadow 140ms var(--ease-out);
+}
+.chan-card:hover, .prod-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .10);
+}
+
+/* ---- connect modal: spring overshoot entrance (uses existing modal-in) ---- */
+.modal { animation: modal-in .32s var(--ease-spring); }
+
+/* ---- sidebar / dock: nav links glide on hover (transform only).
+   Both already have a transform transition (theme-apple / press-feedback),
+   so only the hover transform is added here — no existing timing touched. ---- */
+.nav-link:hover { transform: translateX(2px); }
+.btab:hover { transform: translateY(-1px); }
+
+/* ---- snackbars: toast already animates (toast-in); keep it on the spring ---- */
+.toast { animation: toast-in .3s var(--ease-spring); }
+
+/* ---- reduced motion: honour the OS preference (global guard) ---- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

@@ -1,0 +1,677 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ═══ MODERN SIDEBAR ARCHITECTURE (Auto-migrated) ═══ */
+.app-layout {
+  display: flex;
+  flex-direction: row;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bg);
+}
+.app-layout.hidden {
+  display: none !important;
+}
+
+.app-sidebar {
+  --sidebar-width: 250px;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  max-width: var(--sidebar-width);
+  height: 100vh;
+  background: var(--card);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  user-select: none;
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.02);
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              max-width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.app-sidebar.is-resizing {
+  transition: none !important;
+}
+
+/* Sidebar Resizer Handle */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 60;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.sidebar-resizer:hover,
+.sidebar-resizer.active {
+  background: var(--accent);
+}
+
+/* Brand Area - Clean, No Capsule */
+.sidebar-brand-wrap {
+  padding: 14px 14px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sidebar-brand-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  cursor: pointer;
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-brand-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  object-fit: cover;
+}
+
+.sidebar-brand-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sidebar-brand-title {
+  font-size: 15.5px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.sidebar-brand-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1.2;
+  margin-top: 1px;
+}
+
+.sidebar-toggle-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+/* COLLAPSED STATE */
+.app-sidebar.collapsed {
+  --sidebar-width: 68px !important;
+  width: 68px !important;
+  min-width: 68px !important;
+  max-width: 68px !important;
+}
+
+.app-sidebar.collapsed .sidebar-brand-wrap {
+  padding: 12px 6px 10px;
+  justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-sidebar.collapsed .sidebar-brand-info {
+  display: none !important;
+}
+
+.app-sidebar.collapsed .sidebar-group-header {
+  padding: 8px 0;
+  justify-content: center;
+}
+
+.app-sidebar.collapsed .sidebar-group-header span,
+.app-sidebar.collapsed .cat-dot {
+  display: none !important;
+}
+
+.app-sidebar.collapsed .sidebar-group-header::after {
+  content: "";
+  display: block;
+  width: 22px;
+  height: 1px;
+  background: var(--line);
+}
+
+.app-sidebar.collapsed .nav-link {
+  padding: 0;
+  justify-content: center;
+  align-items: center;
+  width: 44px;
+  height: 44px;
+  margin: 4px auto;
+  border-radius: 14px;
+}
+
+.app-sidebar.collapsed .nav-link .nav-text,
+.app-sidebar.collapsed .nav-link .nav-active-bar {
+  display: none !important;
+}
+
+.app-sidebar.collapsed .nav-link .nav-icon-badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+}
+
+.app-sidebar.collapsed .nav-link.active {
+  background: linear-gradient(135deg, #1e293b, #0f172a) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  border-radius: 14px;
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 0 14px 10px;
+}
+
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 10px 14px;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+
+.sidebar-group {
+  margin-bottom: 12px;
+}
+
+.sidebar-group-header {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  text-transform: uppercase;
+  padding: 8px 10px 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cat-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.nav-icon-badge {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+}
+
+.nav-icon-badge svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+}
+
+.app-sidebar .nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #334155;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  text-align: left;
+  outline: none;
+  font-family: inherit;
+  margin: 2px 0;
+}
+
+[data-theme="dark"] .app-sidebar .nav-link {
+  color: #cbd5e1;
+}
+
+.app-sidebar .nav-link:hover {
+  background: var(--hover);
+  color: var(--ink);
+  transform: translateX(2px);
+}
+
+.app-sidebar .nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+  text-align: left;
+  outline: none;
+  font-family: inherit;
+  margin: 1px 0;
+}
+
+.app-sidebar .nav-link:hover {
+  background: var(--hover);
+  color: var(--ink);
+  transform: none;
+}
+
+.app-sidebar .nav-icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: inherit !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  flex-shrink: 0;
+}
+
+.app-sidebar .nav-icon-badge svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor !important;
+}
+
+.app-sidebar .nav-active-bar {
+  display: none !important;
+}
+
+/* Active item - Clean Architectural Focus */
+.app-sidebar .nav-link.active {
+  background: var(--hover) !important;
+  color: var(--ink) !important;
+  font-weight: 600;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+
+/* REDESIGNED MODERN BOTTOM FOOTER */
+.sidebar-footer {
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+  z-index: 70;
+}
+
+/* Labeled Log out button — the footer user-card only had a tiny unlabeled
+   icon, so on the phone drawer nobody could find it. Full-width row,
+   delegates to the existing #btn-signout handler. */
+.sidebar-logout-btn{
+  display:flex; align-items:center; gap:9px;
+  width:100%; padding:9px 12px;
+  border:1px solid var(--line); border-radius:var(--r-md);
+  background:transparent; color:var(--ink);
+  font:inherit; font-size:13.5px; font-weight:600;
+  cursor:pointer; text-align:left;
+  transition:all .15s ease;
+}
+.sidebar-logout-btn svg{flex-shrink:0;}
+.sidebar-logout-btn:hover{
+  border-color:var(--danger, #f43f5e);
+  color:var(--danger, #f43f5e);
+  background:var(--hover);
+}
+
+.sidebar-user-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card2);
+  box-shadow: none;
+  transition: all 0.15s ease;
+}
+
+.sidebar-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--hover);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: none;
+  position: relative;
+}
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+  position: relative;
+}
+
+.sidebar-user-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-user-name {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-user-status {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  display: inline-block;
+}
+
+/* ═══ MODERN DOCKED SIDEBAR & CLEAN USER FOOTER ═══ */
+.app-layout {
+  display: flex !important;
+  flex-direction: row !important;
+  height: 100vh !important;
+  width: 100vw !important;
+  overflow: hidden !important;
+  background: var(--bg) !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  gap: 0 !important;
+}
+
+.app-sidebar {
+  --sidebar-width: 250px;
+  width: var(--sidebar-width) !important;
+  min-width: var(--sidebar-width) !important;
+  max-width: var(--sidebar-width) !important;
+  height: 100vh !important;
+  background: var(--card) !important;
+  border-right: 1px solid var(--line) !important;
+  border-radius: 0 !important;
+  box-shadow: 1px 0 0 0 var(--line) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  position: relative !important;
+  user-select: none !important;
+  flex-shrink: 0 !important;
+  z-index: 30 !important;
+}
+
+/* Semi-rounded modern navigation items */
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sidebar-nav .nav-link {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
+.sidebar-nav .nav-link:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.sidebar-nav .nav-link.active {
+  background: var(--hover) !important;
+  color: var(--ink) !important;
+  font-weight: 700;
+  border-color: var(--line) !important;
+}
+
+/* Sleek Minimal User Footer Card */
+.sidebar-footer {
+  padding: 12px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebar-user-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  background: var(--card2);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sidebar-user-card:hover {
+  border-color: #71717a;
+  background: var(--hover);
+}
+
+.sidebar-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--ink);
+  color: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.sidebar-user-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.sidebar-user-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-user-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.sidebar-user-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.user-action-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.user-action-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+}
+
+.user-action-btn:hover {
+  background: var(--bg);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.user-action-btn.signout-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Collapsed footer */
+.app-sidebar.collapsed .sidebar-footer {
+  padding: 10px 4px 12px;
+  align-items: center;
+}
+
+.app-sidebar.collapsed .sidebar-user-card {
+  padding: 4px;
+  justify-content: center;
+  border: none;
+  background: transparent;
+}
+
+.app-sidebar.collapsed .sidebar-user-info,
+.app-sidebar.collapsed .sidebar-user-actions {
+  display: none !important;
+}
+
+.app-main {
+  flex: 1;
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  position: relative;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.app-main #view-client,
+.app-main #view-admin {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-main .page {
+  padding: 24px 32px;
+  max-width: 1380px;
+  width: 100%;
+  box-sizing: border-box;
+}
+

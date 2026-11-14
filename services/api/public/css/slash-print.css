@@ -1,0 +1,66 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ═══ Slash command autocomplete popup ═══ */
+.composer{position:relative;}
+.slash-popup{
+  position:absolute; bottom:calc(100% + 8px); left:12px; right:12px;
+  background:var(--card-solid); border:1.5px solid var(--line);
+  border-radius:14px; box-shadow:0 12px 36px rgba(0,0,0,.25);
+  padding:6px; z-index:50; max-height:260px; overflow-y:auto;
+  animation:modal-in .18s var(--ease);
+}
+.slash-item{
+  display:flex; align-items:center; gap:10px; padding:9px 12px;
+  border-radius:10px; cursor:pointer; transition:all .12s; border:none;
+  background:transparent; width:100%; text-align:left; color:var(--ink);
+}
+.slash-item:hover, .slash-item.sel{background:var(--active); color:var(--accent);}
+.slash-cmd{
+  font-family:ui-monospace,monospace; font-weight:700; font-size:13px;
+  padding:2px 7px; border-radius:6px; background:var(--hover);
+  color:var(--accent); min-width:68px; text-align:center;
+}
+.slash-desc{flex:1; min-width:0; font-size:12.5px; color:var(--body); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.slash-snippet{font-size:11px; color:var(--muted); font-style:italic;}
+
+/* ═══ 4x6" Thermal Shipping Label ═══ */
+.thermal-sheet{
+  width:100%; max-width:420px; margin:0 auto; background:#fff; color:#000;
+  padding:16px; border:2px dashed #333; border-radius:10px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  box-shadow:0 10px 30px rgba(0,0,0,.15);
+}
+.ts-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #000; padding-bottom:10px; margin-bottom:12px;}
+.ts-store{font-size:18px; font-weight:900; text-transform:uppercase; letter-spacing:-.02em;}
+.ts-courier{text-align:right;}
+.ts-courier .ts-cname{font-weight:900; font-size:15px; color:#000;}
+.ts-barcode{
+  margin:12px 0; text-align:center; background:#f4f4f4; padding:10px; border-radius:6px;
+  border:1px solid #ddd;
+}
+.ts-code{font-family:ui-monospace,monospace; font-size:20px; font-weight:900; letter-spacing:4px;}
+.ts-recipient{border-bottom:2px solid #000; padding-bottom:12px; margin-bottom:12px;}
+.ts-recipient .ts-lbl{font-size:10px; text-transform:uppercase; font-weight:800; color:#555;}
+.ts-recipient .ts-name{font-size:16px; font-weight:800;}
+.ts-recipient .ts-phone{font-size:15px; font-weight:900; margin:2px 0;}
+.ts-recipient .ts-addr{font-size:13.5px; line-height:1.4;}
+.ts-cod-box{
+  background:#000; color:#fff; padding:10px 14px; border-radius:6px; margin:12px 0;
+  display:flex; justify-content:space-between; align-items:center;
+}
+.ts-cod-box .ts-cod-title{font-size:12px; font-weight:800; letter-spacing:1px; text-transform:uppercase;}
+.ts-cod-box .ts-cod-amt{font-size:22px; font-weight:900;}
+.ts-items{font-size:12px; line-height:1.5; border-bottom:1px dashed #777; padding-bottom:8px; margin-bottom:8px;}
+.ts-foot{display:flex; justify-content:space-between; font-size:10px; color:#444;}
+
+@media print {
+  body * { visibility: hidden !important; }
+  #thermal-print-area, #thermal-print-area * { visibility: visible !important; }
+  #thermal-print-area {
+    position: fixed; left: 0; top: 0; width: 100mm; max-width: 100mm;
+    margin: 0; padding: 4mm; background: #fff !important; color: #000 !important;
+  }
+  .thermal-sheet { border: 1px solid #000 !important; box-shadow: none !important; width: 100% !important; max-width: 100% !important; }
+  @page { size: 100mm 150mm; margin: 2mm; }
+}
+

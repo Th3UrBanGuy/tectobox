@@ -1,0 +1,138 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ═════════════════════════════════════════════════════════
+   WELCOME UNIFY · 2026-11-12 · branch fix/welcome-unify
+   Rebuilds the app shell (login + dashboard) in welcome.html's
+   design language: indigo brand, neo hard shadows, pill buttons,
+   dot-grid surfaces. welcome.html is the READ-ONLY reference.
+   Additive overrides only, appended AFTER every existing
+   responsive block so equal-specificity rules win.
+   ═════════════════════════════════════════════════════════ */
+
+/* ── Brand focus ring (welcome indigo) ── */
+:focus-visible{outline:2px solid var(--brand); outline-offset:2px;}
+
+/* ── Neo utility ── */
+.neo-card{border:2px solid var(--line); border-radius:18px; box-shadow:var(--neo-sm);}
+
+/* ── LOGIN · welcome hero language ── */
+.login-bg{
+  background-image:radial-gradient(circle, rgba(100,116,139,.22) 1px, transparent 1px);
+  background-size:24px 24px;
+}
+.login-card{box-shadow:var(--neo);}
+[data-theme="light"] .login-card{box-shadow:5px 5px 0px #09090b;}
+.login-badge-pill{color:var(--brand); border-color:var(--brand-ring); background:var(--brand-soft);}
+.login-card h1{
+  color:var(--ink);
+  background:linear-gradient(135deg, var(--brand), var(--purple-w));
+  -webkit-background-clip:text; background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+.login-card .input:focus{border-color:var(--brand); box-shadow:0 0 0 3px var(--brand-soft);}
+.login-btn-neo{
+  background:var(--brand); border:2px solid rgba(15,23,42,.6); color:#fff;
+  box-shadow:var(--neo-sm);
+}
+[data-theme="dark"] .login-btn-neo{border-color:rgba(0,0,0,.6);}
+[data-theme="light"] .login-btn-neo{box-shadow:var(--neo-sm);}
+.login-btn-neo:hover:not(:disabled){transform:translate(-2px,-2px); box-shadow:var(--neo); background:var(--brand-hover);}
+.login-btn-neo:active:not(:disabled){transform:translate(2px,2px); box-shadow:none;}
+.login-welcome-link:hover{color:var(--brand);}
+.login-status-pill{border-color:var(--brand-ring);}
+
+/* ── PRIMARY ACTIONS · welcome indigo pill buttons ── */
+.btn-primary{
+  background:var(--brand); color:#fff; border:2px solid rgba(15,23,42,.6);
+  box-shadow:var(--neo-sm);
+  transition:background-color .15s ease, transform .12s ease, box-shadow .12s ease;
+}
+[data-theme="dark"] .btn-primary{border-color:rgba(0,0,0,.6);}
+.btn-primary:hover{background:var(--brand-hover); transform:translate(-2px,-2px); box-shadow:var(--neo);}
+.btn-primary:active{transform:translate(2px,2px); box-shadow:none;}
+.btn-primary:disabled{transform:none; box-shadow:var(--neo-sm);}
+
+/* ── MODAL · neo border + hard shadow (mobile bottom sheet keeps it too) ── */
+.modal{border:2px solid var(--line); box-shadow:var(--top-hi), var(--neo);}
+
+/* ── SEGMENTED CONTROLS & TABS · welcome indigo active ── */
+.seg button.active{background:var(--brand); color:#fff; box-shadow:var(--neo-sm);}
+.side-tab.active{color:var(--brand);}
+.side-tab.active::after{background:var(--brand); box-shadow:0 0 10px var(--brand-ring);}
+
+/* ── INPUTS · indigo focus ── */
+.input:focus{border-color:var(--brand); box-shadow:0 0 0 3px var(--brand-soft); background:var(--card-solid);}
+
+/* ── SIDEBAR · welcome brand ── */
+.sidebar-brand-badge{
+  color:var(--brand); border:1.5px solid var(--brand-ring); background:var(--brand-soft);
+  font-family:var(--font-mono);
+}
+.app-sidebar .nav-link.active{
+  background:var(--brand-soft) !important;
+  color:var(--brand) !important;
+  border-color:var(--brand-ring) !important;
+  box-shadow:var(--neo-sm) !important;
+}
+.app-sidebar .nav-link.active .nav-icon-badge{background:var(--brand) !important; color:#fff !important; box-shadow:none !important;}
+
+/* ── ADMIN HERO · welcome neo card ── */
+.admin-hero{border:2px solid var(--line); box-shadow:var(--neo);}
+.admin-kicker{color:var(--brand);}
+
+/* ── BOTTOM DOCK · welcome indigo active ── */
+.btab.active{color:var(--brand);}
+[data-theme="dark"] .btab.active{color:var(--brand);}
+.btab.active svg{color:var(--brand);}
+
+/* ── DESKTOP-ONLY neo cards (mobile keeps its own borderless card treatment) ── */
+@media (min-width:901px){
+  .card{border:2px solid var(--line); box-shadow:var(--top-hi), var(--neo-sm);}
+  .pane{border:2px solid var(--line); box-shadow:var(--top-hi), var(--neo-sm);}
+  .stat-card{border:2px solid var(--line); box-shadow:var(--neo-sm);}
+}
+
+/* ═══ MOBILE DRAWER (≤900px) · hamburger opens the full sidebar ═══
+   Before this, ≤768px hid the sidebar entirely (no way to reach
+   Settings / Channels / Teach the AI / Admin / theme / sign-out on
+   phones) and 769–900px showed both the 250px sidebar AND the dock.
+   Now ≤900px: sidebar is an off-canvas drawer, opened by the
+   bottom-dock "Menu" tab, closed by scrim / close button / any
+   navigation / Escape / resize to desktop. ─── */
+.sidebar-scrim{
+  display:none; position:fixed; inset:0; z-index:85;
+  background:rgba(3,6,12,.5); backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px);
+}
+body.sidebar-open .sidebar-scrim{display:block;}
+.btn-sidebar-close{
+  display:none; width:36px; height:36px; align-items:center; justify-content:center;
+  border-radius:10px; border:1.5px solid var(--line); background:var(--card2); color:var(--ink);
+  cursor:pointer; flex-shrink:0;
+}
+@media (max-width:900px){
+  .app-sidebar{
+    position:fixed !important; top:0; left:0; bottom:0; height:100dvh !important;
+    width:min(300px,84vw) !important; min-width:0 !important; max-width:min(300px,84vw) !important;
+    transform:translateX(-105%); z-index:90 !important;
+    box-shadow:var(--neo) !important;
+    transition:transform .28s var(--ease) !important;
+    display:flex !important;
+  }
+  body.sidebar-open .app-sidebar{transform:none;}
+  .btn-sidebar-close{display:inline-flex;}
+  #btn-sidebar-collapse, #sidebar-resizer{display:none !important;}
+  /* Tap targets ≥44px (was 38px) */
+  .icon-btn{min-width:44px; min-height:44px;}
+}
+@media (max-width:480px){
+  /* Six dock tabs (Menu + five) fit a 360px screen */
+  .bottom-tabs{overflow-x:auto; scrollbar-width:none;}
+  .bottom-tabs::-webkit-scrollbar{display:none;}
+  .btab{min-width:52px; padding:9px 10px; flex-shrink:0;}
+}
+
+
+
+
+

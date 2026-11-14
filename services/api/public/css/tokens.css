@@ -1,0 +1,146 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ══════════════════════════════════════════════════════════════
+   TECTOBOX — Figma-Grade Enterprise Social Commerce Design System
+   Refined monochrome & cobalt accent · Dual-surface depth · Tactile controls
+   ══════════════════════════════════════════════════════════════ */
+:root{
+  --font:-apple-system,BlinkMacSystemFont,"Plus Jakarta Sans","Geist","SF Pro Text",ui-sans-serif,system-ui,"Segoe UI",Inter,Roboto,"Noto Sans Bengali","Hind Siliguri",sans-serif;
+  --font-display:-apple-system,BlinkMacSystemFont,"Plus Jakarta Sans","Geist","SF Pro Display",ui-sans-serif,system-ui,"Segoe UI",Inter,Roboto,sans-serif;
+  --font-mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Monaco,Consolas,monospace;
+  --r-lg:12px; --r-md:8px; --r-pill:999px;
+  --ease:cubic-bezier(.16,1,.3,1);
+  --ease-spring:cubic-bezier(.16,1,.3,1);
+  --ease-out:cubic-bezier(.22,.9,.28,1);
+  --ease-in-out:cubic-bezier(.77,0,.175,1);
+}
+
+/* ── Global Defensive Image Reset ── */
+img {
+  max-width: 100%;
+}
+.sidebar-brand-icon,
+.sidebar-logo-img {
+  width: 32px !important;
+  height: 32px !important;
+  max-width: 32px !important;
+  max-height: 32px !important;
+  object-fit: cover !important;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.login-card .brand-pill {
+  max-width: 140px !important;
+  max-height: 52px !important;
+  height: 52px !important;
+  width: auto !important;
+  object-fit: contain !important;
+}
+.preloader-logo {
+  max-width: 80px !important;
+  max-height: 80px !important;
+}
+
+/* ── Fallbacks & DARK THEME · Enterprise Monochrome Zinc / Obsidian ── */
+:root, [data-theme="dark"]{
+  --bg:#09090b;
+  --canvas:#000000;
+  --card:#121214;
+  --card-solid:#121214;
+  --card2:#18181b;
+  --ink:#fafafa;
+  --body:#d4d4d8;
+  --muted:#71717a;
+  --line:#27272a;
+  --line-hi:#3f3f46;
+  --input-bg:#09090b;
+  --input-border:#27272a;
+  --hover:#1c1c1f;
+  --accent:#fafafa;
+  --accent2:#f4f4f5;
+  --accent3:#e4e4e7;
+  --accent-rgb:250,250,250;
+  --on-accent:#09090b;
+  --accent-grad:linear-gradient(180deg,#ffffff,#f4f4f5);
+  --active:#27272a;
+  --shadow:0 4px 20px -2px rgba(0,0,0,.6), 0 2px 6px -1px rgba(0,0,0,.4);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+  --card-border:#27272a;
+  --top-hi:inset 0 1px 0 rgba(255,255,255,.05);
+  --glow:0 0 0 2px rgba(255,255,255,.15);
+  --txt-grad:none;
+  --green:#22c55e;
+  --red:#ef4444;
+  --amber:#f59e0b;
+  --gray:#71717a;
+  /* Welcome (welcome.html) brand tokens — indigo/amber/rose/purple, neo hard shadows */
+  --brand:#6366f1;
+  --brand-hover:#818cf8;
+  --brand-soft:rgba(99,102,241,.14);
+  --brand-ring:rgba(99,102,241,.45);
+  --purple-w:#c084fc;
+  --amber-w:#fbbf24;
+  --rose-w:#fb7185;
+  --emerald-w:#34d399;
+  --neo:4px 4px 0 rgba(0,0,0,.85);
+  --neo-sm:2px 2px 0 rgba(0,0,0,.85);
+  --neo-lg:6px 6px 0 rgba(0,0,0,.85);
+  color-scheme:dark;
+}
+
+/* ─────────────── LIGHT · Pure Stark Architectural Monochrome ─────────────── */
+[data-theme="light"]{
+  --bg:#ffffff;
+  --canvas:#f9fafb;
+  --card:#ffffff;
+  --card-solid:#ffffff;
+  --card2:#f4f4f5;
+  --ink:#09090b;
+  --body:#27272a;
+  --muted:#71717a;
+  --line:#e4e4e7;
+  --line-hi:#d4d4d8;
+  --input-bg:#ffffff;
+  --input-border:#e4e4e7;
+  --hover:#f4f4f5;
+  --active:#f4f4f5;
+  --accent:#09090b;
+  --accent2:#18181b;
+  --accent3:#27272a;
+  --accent-rgb:9,9,11;
+  --on-accent:#ffffff;
+  --accent-grad:linear-gradient(180deg,#18181b,#09090b);
+  --shadow:0 4px 16px -2px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.04);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04);
+  --card-border:#e4e4e7;
+  --top-hi:inset 0 1px 0 rgba(255,255,255,.8);
+  --glow:0 0 0 2px rgba(9,9,11,.1);
+  --txt-grad:none;
+  --green:#16a34a;
+  --red:#dc2626;
+  --amber:#d97706;
+  --gray:#71717a;
+  /* Welcome (welcome.html) brand tokens — indigo/amber/rose/purple, neo hard shadows */
+  --brand:#4f46e5;
+  --brand-hover:#4338ca;
+  --brand-soft:rgba(79,70,229,.10);
+  --brand-ring:rgba(79,70,229,.45);
+  --purple-w:#a855f7;
+  --amber-w:#f59e0b;
+  --rose-w:#f43f5e;
+  --emerald-w:#059669;
+  --neo:4px 4px 0 rgba(15,23,42,.9);
+  --neo-sm:2px 2px 0 rgba(15,23,42,.9);
+  --neo-lg:6px 6px 0 rgba(15,23,42,.9);
+  color-scheme:light;
+}
+
+*{box-sizing:border-box; margin:0; padding:0;}
+html,body{height:100%;}
+body{
+  font-family:var(--font); background:var(--bg); color:var(--body);
+  font-size:14px; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  transition:background .2s ease,color .2s ease; overflow-x:hidden;
+}
+

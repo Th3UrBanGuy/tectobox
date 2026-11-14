@@ -1,0 +1,125 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ═══════════════ NATIVE LAYER · floating dock · settings · chat ═══════════════ */
+
+/* ── More / Settings (native iOS-style) ── */
+.more-wrap{max-width:560px; margin:0 auto;}
+.more-acct{display:flex; align-items:center; gap:14px; padding:18px;}
+.more-group-title{font-size:12px; font-weight:600; letter-spacing:0; color:var(--muted); margin:22px 6px 8px;}
+.more-group{padding:0; overflow:hidden;}
+.mrow{
+  display:flex; align-items:center; gap:13px; width:100%;
+  padding:14px 16px; background:transparent; border:none; color:var(--ink);
+  font:inherit; text-align:left;
+}
+.mrow + .mrow{border-top:1px solid var(--line);}
+.mrow-ic{
+  width:34px; height:34px; border-radius:10px; flex:none;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--active); color:var(--accent);
+}
+[data-theme="dark"] .mrow-ic{color:var(--accent);}
+.mrow-tx{flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;}
+.mrow-tx b{font-size:14.5px; font-weight:700;}
+.mrow-tx small{color:var(--muted); font-size:12px;}
+.mrow.danger .mrow-tx b{color:#f87171; font-size:15px;}
+.mrow.danger:active{background:rgba(248,113,113,.08);}
+/* iOS toggle switch */
+.switch{position:relative; display:inline-block; width:51px; height:31px; flex:none;}
+.switch input{opacity:0; width:0; height:0; position:absolute;}
+.switch .knob{
+  position:absolute; inset:0; border-radius:31px; cursor:pointer;
+  background:color-mix(in srgb, var(--muted) 35%, transparent);
+  transition:background .25s var(--ease);
+}
+.switch .knob::before{
+  content:""; position:absolute; width:27px; height:27px; border-radius:50%;
+  left:2px; top:2px; background:#fff;
+  box-shadow:0 2px 6px rgba(0,0,0,.3);
+  transition:transform .25s var(--ease);
+}
+.switch input:checked + .knob{background:#34c759;}
+.switch input:checked + .knob::before{transform:translateX(20px);}
+.switch input:focus-visible + .knob{box-shadow:var(--glow);}
+
+/* ── native chat header ── */
+.chat-avatar{
+  width:42px; height:42px; border-radius:50%; flex:none;
+  display:flex; align-items:center; justify-content:center;
+  font-weight:800; font-size:17px; color:var(--on-accent); background:var(--accent-grad);
+  box-shadow:0 3px 10px rgba(var(--accent-rgb),.4);
+}
+.chat-head .nm{font-size:15.5px;}
+.chat-head .sub{display:flex; align-items:center; gap:5px;}
+.chat-head .plat-badge{flex:none;}
+
+/* ── native composer ── */
+.composer .send-row{display:flex; gap:8px; align-items:center;}
+.composer .send-row .input{
+  flex:1; border-radius:24px; padding:12px 18px; min-height:46px;
+}
+#btn-send{
+  flex:none; width:46px; height:46px; padding:0!important; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  font-size:0;
+}
+#btn-send::after{
+  content:""; width:18px; height:18px;
+  background:#fff;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M5 12l7-7 7 7'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M5 12l7-7 7 7'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+
+@media(max-width:900px){
+  /* topnav: sign out lives in More now */
+  #btn-signout{display:none!important;}
+  /* native chat shell */
+  #cview-inbox.page{padding:0;}
+  .inbox .pane{border-radius:0; border-left:none; border-right:none;}
+  .inbox .pane.list-pane{border-radius:0;}
+  .chat-head{
+    position:sticky; top:0; z-index:5;
+    padding:10px 12px;
+    background:color-mix(in srgb, var(--card-solid) 88%, transparent);
+    backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    border-bottom:1px solid var(--line);
+  }
+  .m-back{margin-left:-6px;}
+  .composer{
+    position:sticky; bottom:0; z-index:5;
+    background:color-mix(in srgb, var(--card-solid) 88%, transparent);
+    backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    border-top:1px solid var(--line);
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    border-radius:0;
+  }
+  #messages{padding:14px 12px;}
+  /* message bubbles: tighter native grouping */
+  .msg-row .bubble{max-width:80%;}
+  /* more view breathing room */
+  #cview-more.page{padding-left:16px; padding-right:16px;}
+}
+
+/* ═══ FB comment automation panel (Connectors tab) ═══ */
+.comment-auto{margin-top:16px; padding:16px; border-radius:18px;
+  background:color-mix(in srgb, var(--card) 82%, transparent);
+  border:1px solid var(--input-border); box-shadow:var(--card-shadow);}
+.ca-head{font-weight:700; font-size:14px; margin-bottom:10px;}
+.ca-sub{font-weight:500; font-size:11.5px; color:var(--muted); margin-left:6px;}
+.ca-toggles{display:flex; flex-direction:column; gap:8px; margin-bottom:12px;}
+.ca-toggles .toggle-row{justify-content:flex-start;}
+.ca-label{font-size:12.5px; font-weight:700; color:var(--body); margin-bottom:6px;}
+.ca-hint{font-weight:500; color:var(--muted); font-size:11.5px;}
+.comment-auto textarea{width:100%; border-radius:12px; border:1px solid var(--input-border);
+  background:var(--input-bg); color:var(--body); padding:10px 12px; font-size:13px;
+  font-family:inherit; resize:vertical;}
+.ca-activity{display:flex; flex-direction:column; gap:8px; max-height:280px; overflow-y:auto;}
+.ca-item{padding:10px 12px; border-radius:12px; background:rgba(127,127,160,.08);
+  border:1px solid var(--input-border); font-size:12.5px; line-height:1.5;}
+.ca-c{color:var(--body);}
+.ca-r{color:var(--muted); margin-top:4px;}
+.ca-r.ca-skip{font-style:italic;}
+.ca-dm{color:var(--accent); font-weight:700;}
+.ca-empty{color:var(--muted); font-size:12.5px; text-align:center; padding:14px;}
+

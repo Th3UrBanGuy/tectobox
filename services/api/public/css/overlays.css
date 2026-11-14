@@ -1,0 +1,68 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ═══ Command palette (Cmd+K) ═══ */
+.cmdk{
+  width:620px; max-width:calc(100vw - 40px);
+  background:var(--card); border:1px solid var(--line-hi);
+  border-radius:20px; overflow:hidden;
+  box-shadow:var(--shadow-lg), 0 24px 80px rgba(0,0,0,.35);
+  animation:cmdkIn .22s var(--ease-spring);
+}
+@keyframes cmdkIn{from{opacity:0; transform:translateY(-12px) scale(.98);}to{opacity:1; transform:none;}}
+.cmdk-input-wrap{
+  display:flex; align-items:center; gap:12px; padding:18px 20px;
+  border-bottom:1px solid var(--line); color:var(--muted);
+}
+.cmdk-input-wrap input{
+  flex:1; border:none; background:none; outline:none;
+  font-size:16px; color:var(--ink); font-family:var(--font);
+}
+.cmdk-input-wrap input::placeholder{color:var(--muted);}
+.cmdk-input-wrap kbd, .cmdk-foot kbd{
+  font-family:var(--font); font-size:11px; font-weight:600; color:var(--muted);
+  background:var(--hover); border:1px solid var(--line); border-bottom-width:2px;
+  padding:2px 7px; border-radius:6px;
+}
+.cmdk-list{max-height:340px; overflow-y:auto; padding:8px;}
+.cmdk-item{
+  display:flex; align-items:center; gap:13px; padding:11px 13px;
+  border-radius:12px; cursor:pointer; font-size:14px; color:var(--body);
+  transition:background .12s var(--ease);
+}
+.cmdk-item .ci-ic{
+  width:34px; height:34px; border-radius:10px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--hover); border:1px solid var(--line); color:var(--muted);
+}
+.cmdk-item .ci-tx b{display:block; font-weight:600; color:var(--ink); font-size:13.5px;}
+.cmdk-item .ci-tx span{font-size:12px; color:var(--muted);}
+.cmdk-item.sel{background:var(--active);}
+.cmdk-item.sel .ci-ic{background:var(--accent-grad); border-color:transparent; color:var(--on-accent);}
+.cmdk-foot{
+  display:flex; align-items:center; gap:16px; padding:12px 20px;
+  border-top:1px solid var(--line); font-size:12px; color:var(--muted);
+}
+.cmdk-empty{padding:32px; text-align:center; color:var(--muted); font-size:13.5px;}
+
+/* ═══ Lead detail drawer ═══ */
+.modal.lead-drawer{width:640px; max-width:calc(100vw - 40px); padding:0; overflow:hidden;}
+.lead-hero{
+  display:flex; align-items:center; gap:18px; padding:26px 28px;
+  background:linear-gradient(135deg, var(--hover), transparent);
+  border-bottom:1px solid var(--line);
+}
+.lead-hero .lh-avatar{
+  width:64px; height:64px; border-radius:22px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:22px; font-weight:800; color:#fff;
+  box-shadow:0 8px 24px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.35);
+}
+.lead-hero .lh-name{font-size:20px; font-weight:800; letter-spacing:-.02em; color:var(--ink);}
+.lead-hero .lh-sub{font-size:12.5px; color:var(--muted); margin-top:3px;}
+.lead-hero .lh-pills{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;}
+.lead-hero .lh-score{margin-left:auto; text-align:center; flex-shrink:0;}
+#lead-modal .seg{margin:18px 28px 0;}
+#lm-tab-intel, #lm-tab-details{padding:18px 28px; max-height:50vh; overflow-y:auto;}
+#lead-modal .modal-foot{padding:18px 28px; border-top:1px solid var(--line); margin:0;}
+

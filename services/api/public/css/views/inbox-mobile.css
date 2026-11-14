@@ -1,0 +1,152 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ═════════════════════════════════════════════════════════
+   MOBILE VIEW (Phones ≤ 768px Viewport)
+   ═════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .app-layout {
+    flex-direction: column !important;
+  }
+
+  .app-sidebar {
+    display: none !important;
+  }
+
+  .app-main {
+    height: 100dvh !important;
+  }
+
+  .inbox {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    grid-template-columns: none !important;
+    gap: 0 !important;
+  }
+
+  .inbox .pane.list-pane {
+    flex: 1 1 auto;
+    height: 100% !important;
+    display: flex !important;
+    border-radius: 0 !important;
+    border: none !important;
+    padding-bottom: 78px;
+    box-shadow: none !important;
+  }
+
+  .inbox .pane.chat-pane {
+    display: none !important;
+  }
+
+  .inbox .pane.side-pane {
+    display: none !important;
+  }
+
+  /* Single-Pane Mobile Conversation Drawer */
+  .inbox.m-chat-open .pane.list-pane {
+    display: none !important;
+  }
+
+  .inbox.m-chat-open .pane.chat-pane {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .inbox.m-chat-open .chat-head {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: 10px 14px;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .inbox.m-chat-open .m-back {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card2);
+    color: var(--ink);
+    cursor: pointer;
+  }
+
+  .inbox.m-chat-open .messages {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 14px 12px;
+  }
+
+  .inbox.m-chat-open .composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background: var(--card);
+    border-top: 1px solid var(--line);
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom)) !important;
+    border-radius: 0 !important;
+  }
+
+  /* Hide bottom dock when chatting so user has 100% space */
+  body:has(.inbox.m-chat-open) .bottom-tabs {
+    display: none !important;
+  }
+}
+    height: 36px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card2);
+    color: var(--ink);
+    cursor: pointer;
+  }
+
+  .inbox.m-chat-open .messages {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 14px 12px;
+  }
+
+  .inbox.m-chat-open .composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background: var(--card);
+    border-top: 1px solid var(--line);
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom)) !important;
+    border-radius: 0 !important;
+  }
+
+  /* Hide bottom dock when chatting so user has 100% space */
+  body:has(.inbox.m-chat-open) .bottom-tabs {
+    display: none !important;
+  }
+
+  /* Touch targets >= 44px */
+  .conv-item {
+    min-height: 60px;
+    padding: 12px 14px;
+  }
+
+  .fchip {
+    min-height: 40px;
+    padding: 8px 14px;
+  }
+
+  .icon-btn {
+    min-width: 38px;
+    min-height: 38px;
+  }
+}
+

@@ -1,0 +1,57 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ═══ Admin panel — Apple premium ═══ */
+#view-admin .page-head h2{font-size:32px;}
+#view-admin .stat-card{
+  border-radius:20px; padding:22px;
+  transition:transform .25s var(--ease), box-shadow .25s var(--ease);
+}
+#view-admin .stat-card:hover{transform:translateY(-3px); box-shadow:var(--shadow-lg);}
+#view-admin .stat-card .num{font-size:32px; font-weight:800;}
+.stat-ic{position:relative; overflow:hidden;}
+.stat-ic::after{content:""; position:absolute; inset:0; border-radius:inherit;
+  background:linear-gradient(180deg,rgba(255,255,255,.35),transparent 55%);}
+/* per-stat accent washes */
+#view-admin .stat-card:nth-child(1) .stat-ic{background:linear-gradient(135deg,#3f3f46,#09090b);}
+#view-admin .stat-card:nth-child(2) .stat-ic{background:linear-gradient(135deg,#a1a1aa,#52525b);}
+#view-admin .stat-card:nth-child(3) .stat-ic{background:linear-gradient(135deg,#71717a,#3f3f46);}
+#view-admin .stat-card:nth-child(4) .stat-ic{background:linear-gradient(135deg,#10b981,#059669);}
+#view-admin .stat-card:nth-child(5) .stat-ic{background:linear-gradient(135deg,#f59e0b,#ef4444);}
+
+/* user cards → identity cards with avatar */
+#view-admin .user-card{border-radius:20px; padding:22px; position:relative; overflow:hidden;
+  transition:transform .25s var(--ease), box-shadow .25s var(--ease);}
+#view-admin .user-card:hover{transform:translateY(-2px); box-shadow:var(--shadow-lg);}
+#view-admin .user-card .nm{font-size:16px;}
+.admin-avatar{
+  width:44px; height:44px; border-radius:50%; flex-shrink:0;
+  display:inline-flex; align-items:center; justify-content:center;
+  font-size:16px; font-weight:800; color:#fff; letter-spacing:.02em;
+  box-shadow:0 4px 12px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.35);
+}
+#view-admin .user-card .top{display:flex; align-items:center; gap:13px; margin-bottom:4px;}
+
+/* resources table */
+#view-admin .tbl-card{border-radius:20px;}
+#view-admin table.tbl th{padding:14px 22px; font-size:10px; letter-spacing:.09em;}
+#view-admin table.tbl td{padding:15px 22px;}
+#view-admin table.tbl tbody tr{transition:background .15s var(--ease);}
+#view-admin table.tbl tbody tr:hover td{background:var(--hover);}
+
+/* audit log */
+#view-admin #audit-list{border-radius:20px; overflow:hidden;}
+#view-admin .audit-row{padding:14px 24px;}
+#view-admin .audit-row .ev{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px;
+  background:var(--hover); border:1px solid var(--line);
+  padding:3px 10px; border-radius:8px;
+}
+
+/* config cards */
+#view-admin .cfg-grid .card{border-radius:20px; padding:26px;}
+#view-admin .cfg-grid .card > div:first-child{font-size:17px !important; letter-spacing:-.01em;}
+
+/* admin segmented tabs — floating control */
+#view-admin #admin-tabs{margin-bottom:22px;}
+

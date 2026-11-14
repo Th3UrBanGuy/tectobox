@@ -1,0 +1,36 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ═══ Clean Micro-Grid Architectural Canvas ═══ */
+body::before{
+  content:""; position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background-image:radial-gradient(var(--line) 1px, transparent 1px);
+  background-size:28px 28px;
+  opacity:.65;
+}
+
+::selection{background:rgba(var(--accent-rgb),.25); color:var(--ink);}
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-thumb{background:var(--muted); border-radius:6px; opacity:.4;}
+::-webkit-scrollbar-thumb:hover{background:var(--accent);}
+::-webkit-scrollbar-track{background:transparent;}
+.hidden{display:none!important;}
+/* Specificity guard: `.inbox` carries `display:flex !important` inside the
+   ≤768px media query, which beats plain `.hidden` (same specificity, later
+   source order) — so on phones `#inbox-panes.hidden` stayed visible next to
+   the "No channels connected yet" banner (2026-11-13). Same pattern as the
+   existing `.app-layout.hidden` rule below. */
+.inbox.hidden{display:none!important;}
+
+/* ═══ Clean Figma-Crafted Cards ═══ */
+.card{
+  position:relative; border-radius:var(--r-lg); padding:22px;
+  background:var(--card);
+  border:1px solid var(--line);
+  box-shadow:var(--top-hi), var(--shadow);
+  transition:background .2s, border-color .2s, box-shadow .2s;
+}
+
+/* ═══ typography helpers ═══ */
+.grad-text{color:var(--ink); font-weight:750;}
+

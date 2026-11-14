@@ -1,0 +1,45 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ═══ admin ═══ */
+.res-icon{width:36px; height:36px; border-radius:11px; display:inline-flex; align-items:center; justify-content:center; color:#fff; font-size:12px; font-weight:800; flex-shrink:0; box-shadow:0 4px 12px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.3);}
+.user-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(310px,1fr)); gap:14px;}
+.user-card{padding:22px;}
+.user-card .nm{font-size:15px; font-weight:800; color:var(--ink); display:flex; align-items:center; gap:10px; letter-spacing:-.01em;}
+.user-card .sub{font-size:12.5px; color:var(--muted); margin:7px 0 16px;}
+.user-card .row{display:flex; align-items:center; gap:10px;}
+.audit-row{display:flex; align-items:center; gap:12px; padding:13px 22px; border-bottom:1px solid var(--line); font-size:13.5px; transition:background .15s;}
+.audit-row:hover{background:var(--hover);}
+.audit-row:last-child{border-bottom:none;}
+.audit-row .ev{font-family:ui-monospace,monospace; font-size:12.5px; color:var(--accent); font-weight:600;}
+[data-theme="dark"] .audit-row .ev{color:var(--accent);}
+.audit-row .right{margin-left:auto; display:flex; gap:14px; color:var(--muted); font-size:12.5px; flex-shrink:0;}
+.cfg-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+
+/* ═══ toggle switch ═══ */
+.switch{position:relative; width:46px; height:25px; flex-shrink:0; cursor:pointer;}
+.switch input{opacity:0; width:0; height:0;}
+.switch .sl{position:absolute; inset:0; background:var(--input-border); border-radius:999px; transition:.2s;}
+.switch .sl::before{content:""; position:absolute; width:19px; height:19px; border-radius:50%; background:#fff; top:3px; left:3px; transition:.2s var(--ease); box-shadow:0 2px 8px rgba(0,0,0,.3);}
+.switch input:checked + .sl{background:var(--accent-grad); box-shadow:0 2px 12px rgba(var(--accent-rgb),.45);}
+.switch input:checked + .sl::before{transform:translateX(21px);}
+
+.modal-bg{position:fixed; inset:0; background:rgba(3,6,12,.55); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); display:flex; align-items:center; justify-content:center; z-index:100; padding:20px; animation:fadeIn .2s ease;}
+#thermal-label-modal{z-index:200;}
+#qr-modal{z-index:250;}
+#confirm-modal{z-index:300;}
+.modal{
+  border-radius:20px; padding:28px; width:490px; max-width:94vw; max-height:88vh; overflow-y:auto;
+  background:linear-gradient(var(--card-solid),var(--card-solid)) padding-box, var(--card-border) border-box;
+  border:1.5px solid transparent; box-shadow:var(--top-hi), 0 24px 70px rgba(0,0,0,.5);
+  animation:modal-in .28s var(--ease);
+}
+@keyframes modal-in{from{opacity:0; transform:translateY(14px) scale(.97);} to{opacity:1; transform:none;}}
+.modal h3{font-size:17px; font-weight:800; color:var(--ink); margin-bottom:5px; letter-spacing:-.015em;}
+.modal .msub{font-size:13px; color:var(--muted); margin-bottom:20px; line-height:1.55;}
+.modal .frow{margin-bottom:15px;}
+.modal .frow label{display:block; font-size:11.5px; font-weight:700; color:var(--muted); margin-bottom:7px; text-transform:uppercase; letter-spacing:.06em;}
+.modal .frow .input{padding-left:14px;}
+.modal-foot{display:flex; justify-content:flex-end; gap:10px; margin-top:22px;}
+.qr-box{position:relative; background:#fff; border-radius:15px; padding:15px; display:inline-block; margin:6px 0 14px; box-shadow:0 8px 30px rgba(var(--accent-rgb),.3);}
+.qr-box img{width:220px; height:220px; display:block; border-radius:8px; opacity:0; transform:scale(.96); transition:opacity .45s ease, transform .45s cubic-bezier(.22,1,.36,1);}

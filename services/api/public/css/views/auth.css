@@ -1,0 +1,162 @@
+/* Phase 5 (modular restructure): CSS module split from styles.css.
+   Contiguous slice of the original — loaded in original order, so the
+   cascade is unchanged. Do not reorder these files. */
+/* ========================================================
+   LOGIN & PROFILE ENHANCEMENTS: BILINGUAL, 2FA & SECURITY
+   ======================================================== */
+
+/* Password Eye Button inside .input-wrap */
+.input-wrap.has-action .input {
+  padding-right: 44px;
+}
+.btn-input-action {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color .15s ease, background-color .15s ease;
+}
+.btn-input-action:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+
+/* Profile Modal & Security UI */
+.profile-modal-card {
+  border-radius: 20px;
+  padding: 26px 28px;
+}
+.profile-modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+.profile-header-user {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.profile-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--accent-grad);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 800;
+  box-shadow: 0 6px 18px rgba(var(--accent-rgb), .35);
+  flex-shrink: 0;
+}
+.profile-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.field-rule-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+  margin-left: 8px;
+  text-transform: none;
+}
+.field-rule-tag.locked {
+  background: rgba(244, 63, 94, 0.12);
+  color: #f43f5e;
+  border: 1px solid rgba(244, 63, 94, 0.25);
+}
+.field-rule-tag.admin {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.field-help-text {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 5px;
+  line-height: 1.4;
+}
+.alert-success {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #10b981;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+/* 2FA UI */
+.twofa-status-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  margin-bottom: 14px;
+}
+.twofa-icon-shield {
+  font-size: 26px;
+  line-height: 1;
+}
+.twofa-flow-box {
+  background: var(--active);
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  padding: 16px;
+}
+.twofa-qr-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+.twofa-qr-code {
+  width: 130px;
+  height: 130px;
+  background: #fff;
+  border-radius: 10px;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  flex-shrink: 0;
+}
+.twofa-qr-code img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.twofa-secret-code {
+  display: block;
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--card-solid);
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  letter-spacing: 1px;
+  word-break: break-all;
+  user-select: all;
+  margin-top: 4px;
+}
+
