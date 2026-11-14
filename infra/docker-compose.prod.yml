@@ -16,6 +16,11 @@
 #
 # Note: All services attach to tectobox_internal-net automatically by default;
 # no manual network attach (docker network connect) is required afterwards.
+# Reliability (Round 2, coordinator-applied from seg-07 notes): every service
+# has a healthcheck + memory limit. Replicas stay 1 everywhere: container_name
+# is set (replicas > 1 would collide) and workers share SESSION_DIR files +
+# one Baileys socket per account, so a second replica risks session
+# corruption. See STATE-20261114-R2.md.
 # ==============================================================================
 
 name: tectobox
@@ -26,6 +31,19 @@ services:
     image: caddy:2-alpine
     container_name: tectobox-prod-gateway
     restart: unless-stopped
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 100M
+    # Caddy admin API is off (admin off in Caddyfile), so probe :80 instead:
+    # :80 serves plain HTTP with no redirect; a 200 proves Caddy is up.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     ports:
       - "80:80"
       - "443:443"
@@ -96,6 +114,11 @@ services:
       dockerfile: infra/Dockerfile.ai.prod
     container_name: tectobox-prod-ai
     restart: unless-stopped
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 350M
     environment:
       PORT: 8081
     healthcheck:
@@ -111,6 +134,17 @@ services:
       dockerfile: infra/Dockerfile.ingress.prod
     container_name: tectobox-prod-ingress
     restart: unless-stopped
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 150M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     environment:
       PORT: 8080
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-tectobox}:${RABBITMQ_PASS:-tectobox_rabbit_secret}@rabbitmq:5672/
@@ -128,6 +162,11 @@ services:
       dockerfile: infra/Dockerfile.api.prod
     container_name: tectobox-prod-api
     restart: unless-stopped
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 400M
     environment:
       PORT: 3120
       DATABASE_URL: postgres://${POSTGRES_USER:-tectobox}:${POSTGRES_PASSWORD:-tectobox_prod_secret}@postgres:5432/${POSTGRES_DB:-tectobox}
@@ -162,6 +201,20 @@ services:
       dockerfile: infra/Dockerfile.workers.prod
     container_name: tectobox-prod-workers
     restart: unless-stopped
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 300M
+    # Workers write a ms timestamp to /tmp/tectobox-workers-heartbeat every
+    # 5s (see services/workers/src/index.ts startHeartbeat). The check fails
+    # when the file is missing or older than 30s.
+    healthcheck:
+      test: ["CMD", "node", "-e", "const fs=require('fs'); try { const t=parseInt(fs.readFileSync('/tmp/tectobox-workers-heartbeat','utf8')); if(Date.now()-t > 30000) process.exit(1); } catch { process.exit(1); }"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-tectobox}:${POSTGRES_PASSWORD:-tectobox_prod_secret}@postgres:5432/${POSTGRES_DB:-tectobox}
       REDIS_URL: redis://:${REDIS_PASSWORD:-tectobox_redis_secret}@redis:6379
