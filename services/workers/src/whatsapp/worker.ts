@@ -105,7 +105,15 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
 
     sock = makeWASocket({
       auth: state,
-      printQRInTerminal: true
+      printQRInTerminal: true,
+      // WhatsApp's server (since Apr 2026) rejects the pairing-code stanza
+      // unless companion_platform_display is a canonical label (Baileys
+      // #2560 / PR #2559). Baileys builds it as `${browser[1]} (${browser[0]})`,
+      // so the default ['Baileys','Chrome',...] sends 'Chrome (Baileys)' and
+      // the server answers 400 bad-request — the code looks issued but was
+      // never registered server-side. 'Chrome (Mac OS)' is on the allow-list
+      // (verified live: server returns the pairing ref in ~0.5s).
+      browser: ['Mac OS', 'Chrome', '14.4.1'],
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -358,7 +366,7 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
               if (typeof entry.sock.requestPairingCode !== 'function') {
                 throw new Error('This WhatsApp version does not support pairing codes');
               }
-              // Baileys 6.6 requestPairingCode sends the pairing stanza
+              // Baileys requestPairingCode sends the pairing stanza
               // immediately — it does NOT wait for the Noise handshake.
               // Called right after makeWASocket, it corrupts the handshake
               // and the server drops the connection ("Connection Failure"

@@ -21,7 +21,10 @@
       "protobufjs",
       "ssh2",
       "utf-8-validate"
-    ]
+    ],
+    "patchedDependencies": {
+      "@whiskeysockets/baileys@6.7.24": "patches/@whiskeysockets__baileys@6.7.24.patch"
+    }
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

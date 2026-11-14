@@ -6,6 +6,7 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY patches/ ./patches/
 COPY packages/ ./packages/
 COPY services/workers/ ./services/workers/
 
@@ -23,6 +24,7 @@ ENV NODE_ENV=production
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY patches/ ./patches/
 COPY packages/ ./packages/
 COPY services/workers/ ./services/workers/
 

@@ -1,0 +1,19 @@
+diff --git a/lib/Socket/socket.js b/lib/Socket/socket.js
+index c81974592cffcb203a3e6470589a6ac99d4baed0..c0c87e9d31b5ed0b2985c41e1729d58bc12ba3ea 100644
+--- a/lib/Socket/socket.js
++++ b/lib/Socket/socket.js
+@@ -359,7 +359,13 @@ export const makeSocket = (config) => {
+             name: '~'
+         };
+         ev.emit('creds.update', authState.creds);
+-        await sendNode({
++        // Patched (tectobox): await the server's IQ response instead of
++        // fire-and-forget sendNode(). query() throws (via assertNodeErrorFree)
++        // on an error node, so a rejected code (e.g. 400 bad-request for a
++        // non-canonical platform label, or 429 throttling) surfaces to the
++        // caller instead of returning a plausible code that was never
++        // registered server-side (Baileys #2560 / PR #2559).
++        await query({
+             tag: 'iq',
+             attrs: {
+                 to: S_WHATSAPP_NET,
