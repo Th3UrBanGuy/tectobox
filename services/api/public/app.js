@@ -3769,7 +3769,12 @@ function startPhoneConnect(channel, slot = 'default', label = null, phoneNumber 
     $('pairing-wrap').classList.remove('code-ready');
     $('pairing-wrap').classList.remove('pairing-error');
     $('pairing-code').textContent = '';
-    $('pairing-steps').textContent = 'WhatsApp → ⋮ menu → Linked devices → Link with phone number instead, then enter this code.';
+    // Show the number this code was issued for, right under the code: the
+    // code is bound to that number, so if it is not the number of the
+    // WhatsApp the user is typing it into, WhatsApp rejects it with
+    // "Couldn't link device" every time. Seeing the number here lets the
+    // user spot the mismatch instead of guessing.
+    $('pairing-steps').textContent = 'This code is for +' + phoneNumber + ' — enter it in the WhatsApp on that number: WhatsApp → ⋮ menu → Linked devices → Link with phone number instead.';
     $('btn-pairing-refresh').style.display = 'none';
     $('btn-pairing-change-number').style.display = 'none';
     $('qr-status').textContent = 'Requesting your pairing code…';
