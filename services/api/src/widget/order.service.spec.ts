@@ -33,38 +33,85 @@ describe('OrderService.tryCreateOrder — W3/W4', () => {
 
   function makePool() {
     const s = new Map<string, any>();
+    // Mock product stock (id -> stock), mirroring the fixtures above.
+    const stock = new Map<number, number>([
+      [1, 25], // earbuds
+      [2, 0], // watch
+      [3, 1], // tshirt
+      [4, 10], // bottle
+    ]);
     let nextId = 1;
-    const p = {
-      store: s,
-      query: vi.fn(async (sql: string, params: any[]) => {
-        const q = sql.toLowerCase();
-        if (q.includes('insert into orders')) {
-          const key = params[9];
-          if (s.has(key)) return { rows: [] }; // ON CONFLICT DO NOTHING
-          const row = {
-            id: nextId++,
-            client_id: params[0],
-            conversation_id: params[1],
-            items_json: params[2],
-            subtotal_bdt: params[3],
-            delivery_charge_bdt: params[4],
-            total_bdt: params[5],
-            customer_name: params[6],
-            customer_phone: params[7],
-            customer_address: params[8],
-            payment_status: 'pending',
-            status: 'confirmed',
-            idempotency_key: key,
-          };
-          s.set(key, row);
-          return { rows: [row] };
-        }
-        if (q.includes('from orders')) {
-          const row = s.get(params[1]);
-          return { rows: row ? [row] : [] };
+    // Transaction snapshot: BEGIN saves the maps, ROLLBACK restores
+    // them, COMMIT drops the snapshot — so a rolled-back order truly
+    // disappears from the mock, like a real database.
+    let snapshot: { store: Map<string, any>; stock: Map<number, number> } | null = null;
+    const query = vi.fn(async (sql: string, params: any[]) => {
+      const q = sql.toLowerCase().trim();
+      if (q === 'begin') {
+        snapshot = { store: new Map(s), stock: new Map(stock) };
+        return { rows: [] };
+      }
+      if (q === 'rollback') {
+        if (snapshot) {
+          s.clear();
+          for (const [k, v] of snapshot.store) s.set(k, v);
+          stock.clear();
+          for (const [k, v] of snapshot.stock) stock.set(k, v);
+          snapshot = null;
         }
         return { rows: [] };
-      }),
+      }
+      if (q === 'commit') {
+        snapshot = null;
+        return { rows: [] };
+      }
+      if (q.includes('insert into orders')) {
+        const key = params[9];
+        if (s.has(key)) return { rows: [] }; // ON CONFLICT DO NOTHING
+        const row = {
+          id: nextId++,
+          client_id: params[0],
+          conversation_id: params[1],
+          items_json: params[2],
+          subtotal_bdt: params[3],
+          delivery_charge_bdt: params[4],
+          total_bdt: params[5],
+          customer_name: params[6],
+          customer_phone: params[7],
+          customer_address: params[8],
+          payment_status: 'pending',
+          status: 'confirmed',
+          idempotency_key: key,
+        };
+        s.set(key, row);
+        return { rows: [row] };
+      }
+      if (q.includes('from orders')) {
+        const row = s.get(params[1]);
+        return { rows: row ? [row] : [] };
+      }
+      if (q.includes('update products')) {
+        const qty = params[0];
+        const id = params[1];
+        const cur = stock.get(id) ?? 0;
+        if (cur >= qty) {
+          stock.set(id, cur - qty);
+          return { rows: [{ stock: cur - qty }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 }; // guarded: not enough stock left
+      }
+      if (q.includes('select stock from products')) {
+        const cur = stock.get(params[0]);
+        return { rows: cur === undefined ? [] : [{ stock: cur }] };
+      }
+      return { rows: [] };
+    });
+    const client = { query, release: vi.fn() };
+    const p = {
+      store: s,
+      stock,
+      query,
+      connect: vi.fn(async () => client),
     };
     return p;
   }
@@ -132,6 +179,64 @@ describe('OrderService.tryCreateOrder — W3/W4', () => {
       expect(second.replyText).toMatch(/order #1/i);
       expect(second.replyText).toMatch(/1560/);
       expect(second.modelUsed).toBe('order:already-exists');
+    }
+  });
+
+  it('decrements stock by the ordered quantity when an order is created', async () => {
+    const result = await service.tryCreateOrder(baseCtx());
+    expect(result.status).toBe('created');
+    expect(pool.stock.get(1)).toBe(24); // 25 - 1
+  });
+
+  it('decrements by 2 on a 2-piece order', async () => {
+    const result = await service.tryCreateOrder(
+      baseCtx({
+        text: 'I want to buy 2 earbuds, my name is Fahim, phone 01712345678, address Dhanmondi Dhaka',
+        history: [],
+      })
+    );
+    expect(result.status).toBe('created');
+    expect(pool.stock.get(1)).toBe(23); // 25 - 2
+  });
+
+  it('does NOT decrement stock twice on a double confirm', async () => {
+    const first = await service.tryCreateOrder(baseCtx());
+    expect(first.status).toBe('created');
+    expect(pool.stock.get(1)).toBe(24);
+    const second = await service.tryCreateOrder(baseCtx());
+    expect(second.status).toBe('already_exists');
+    expect(pool.stock.get(1)).toBe(24); // the first order already took it
+    expect(store.size).toBe(1);
+  });
+
+  it('rolls back the order when a concurrent order took the stock', async () => {
+    // The catalog snapshot still says 25, but the DB row is already
+    // 0 — a concurrent order took it between load and insert.
+    pool.stock.set(1, 0);
+    const result = await service.tryCreateOrder(baseCtx());
+    expect(result.status).toBe('out_of_stock');
+    expect(store.size).toBe(0); // the rolled-back insert left no row
+    expect(pool.stock.get(1)).toBe(0);
+    if (result.status === 'out_of_stock') {
+      expect(result.replyText).toMatch(/out of stock/i);
+      expect(result.replyText).not.toMatch(/order #\d/i);
+      expect(result.modelUsed).toBe('order:out-of-stock');
+    }
+  });
+
+  it('rolls back and reports the real remaining stock when only part is left', async () => {
+    pool.stock.set(1, 1);
+    const result = await service.tryCreateOrder(
+      baseCtx({
+        text: 'I want to buy 2 earbuds, my name is Fahim, phone 01712345678, address Dhanmondi Dhaka',
+        history: [],
+      })
+    );
+    expect(result.status).toBe('out_of_stock');
+    expect(store.size).toBe(0);
+    if (result.status === 'out_of_stock') {
+      expect(result.replyText).toMatch(/only 1 .* in stock/i);
+      expect(result.replyText).toMatch(/confirm 1/i);
     }
   });
 

@@ -182,8 +182,20 @@ export class OrderService {
       },
     ];
 
+    // 7. Insert the order AND decrement stock in ONE transaction, so
+    // an order can never exist without its stock going down (and a
+    // failed decrement can never leave a phantom order). The
+    // decrement is guarded (stock >= quantity) so a concurrent order
+    // cannot oversell: if the guard fails, the whole transaction
+    // rolls back and the customer gets the REAL current stock in
+    // the reply. A retried/double confirm (already_exists) never
+    // decrements twice — the first order already took the stock.
+    const productId = (product as any).id ?? null;
+    let db: pg.PoolClient | null = null;
     try {
-      const inserted = await this.pool.query(
+      db = await this.pool.connect();
+      await db.query('BEGIN');
+      const inserted = await db.query(
         `INSERT INTO orders (client_id, conversation_id, items_json, subtotal_bdt, delivery_charge_bdt, total_bdt, customer_name, customer_phone, customer_address, payment_status, status, idempotency_key)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 'confirmed', $10)
          ON CONFLICT (client_id, idempotency_key) DO NOTHING
@@ -204,30 +216,78 @@ export class OrderService {
       let order = inserted.rows[0];
       let created = true;
       if (!order) {
-        const existing = await this.pool.query(
+        const existing = await db.query(
           'SELECT * FROM orders WHERE client_id = $1 AND idempotency_key = $2 LIMIT 1',
           [client.id, idempotencyKey]
         );
         order = existing.rows[0];
         created = false;
         if (!order) {
+          await db.query('ROLLBACK');
           console.warn('[widget-order] idempotency conflict but no existing row for key', idempotencyKey);
           return { status: 'error' };
         }
+        // Idempotent retry: nothing changed in this transaction
+        // (the first order already decremented the stock), so end
+        // it without committing anything.
+        await db.query('ROLLBACK');
+        const lang = detectCustomerLanguage(text);
+        const replyText = this.confirmationReply(lang, order, product, quantity, total, true);
+        return { status: 'already_exists', order, replyText, modelUsed: 'order:already-exists' };
       }
+      if (productId !== null && stock !== null) {
+        const decremented = await db.query(
+          `UPDATE products SET stock = stock - $1
+           WHERE id = $2 AND client_id = $3 AND stock >= $1
+           RETURNING stock`,
+          [quantity, productId, client.id]
+        );
+        if (decremented.rowCount === 0) {
+          // Stock moved under us between the snapshot check and the
+          // insert (a concurrent order took it): roll the order back
+          // and report the real current stock.
+          const current = await db.query(
+            'SELECT stock FROM products WHERE id = $1 AND client_id = $2',
+            [productId, client.id]
+          );
+          const currentStock = current.rows[0] ? Number(current.rows[0].stock) : 0;
+          await db.query('ROLLBACK');
+          if (currentStock <= 0) {
+            return {
+              status: 'out_of_stock',
+              product,
+              replyText: buildOutOfStockReply(text, product, products),
+              modelUsed: 'order:out-of-stock',
+            };
+          }
+          return {
+            status: 'out_of_stock',
+            product,
+            replyText: this.lowStockReply(text, product, currentStock, quantity, products),
+            modelUsed: 'order:out-of-stock',
+          };
+        }
+      }
+      await db.query('COMMIT');
       const lang = detectCustomerLanguage(text);
-      const replyText = this.confirmationReply(lang, order, product, quantity, total, !created);
-      if (created) {
-        return { status: 'created', order, replyText, modelUsed: 'order:created' };
-      }
-      return { status: 'already_exists', order, replyText, modelUsed: 'order:already-exists' };
+      const replyText = this.confirmationReply(lang, order, product, quantity, total, false);
+      return { status: 'created', order, replyText, modelUsed: 'order:created' };
     } catch (err: any) {
-      // A failed insert must never become a false confirmation: no
-      // order, no "order placed" reply — the normal reply chain
-      // handles the message and the customer can confirm again
-      // (idempotency makes the retry safe).
+      // A failed insert/decrement must never become a false
+      // confirmation: no order, no "order placed" reply — the
+      // normal reply chain handles the message and the customer can
+      // confirm again (idempotency makes the retry safe).
+      if (db) {
+        try {
+          await db.query('ROLLBACK');
+        } catch {
+          // Already rolled back / connection dead — nothing to do.
+        }
+      }
       console.warn('[widget-order] order insert failed:', err?.message || err);
       return { status: 'error' };
+    } finally {
+      if (db) db.release();
     }
   }
 
