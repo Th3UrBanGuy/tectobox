@@ -13,6 +13,7 @@ WORKDIR /workspace
 
 # Copy dependency manifests
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY patches/ ./patches/
 COPY packages/contracts/package.json ./packages/contracts/
 COPY packages/messaging/package.json ./packages/messaging/
 COPY packages/coordination/package.json ./packages/coordination/
