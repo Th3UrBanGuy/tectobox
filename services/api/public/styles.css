@@ -1612,7 +1612,11 @@ body{font-optical-sizing:auto; -webkit-font-smoothing:antialiased; text-renderin
 
 /* Safe areas */
 .topnav{padding-left:calc(20px + env(safe-area-inset-left)); padding-right:calc(20px + env(safe-area-inset-right));}
-.page{padding-bottom:calc(28px + env(safe-area-inset-bottom));}
+/* Desktop only: on phones the dock-clearance rule below wins (see .app-main .page).
+   Left unconditional, this 28px bottom padding used to clobber the 108px mobile
+   clearance — the dock (~66px tall + 10px offset) then covered the last ~50px
+   of every page, hiding bottom buttons and text. */
+@media(min-width:901px){.page{padding-bottom:calc(28px + env(safe-area-inset-bottom));}}
 
 /* Tables → cards on small phones */
 @media (max-width:640px){
@@ -2786,6 +2790,22 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
   max-width: 1380px;
   width: 100%;
   box-sizing: border-box;
+}
+
+/* ── Floating dock clearance (phones ≤900px) ──
+   .app-main .page above is specificity (0,2,0), so it beats the plain .page
+   clearance in the mobile layer — the dock clearance MUST live here, after
+   it, with the same selector. The dock is ~66px tall + 10px bottom offset,
+   so 108px clears it with room to spare; scroll-padding keeps focused or
+   jumped-to elements out from under it too. #cview-inbox keeps padding:0
+   (its own .conv-list carries 96px) — the ID selectors below still win. */
+@media(max-width:900px){
+  .app-main .page{padding:16px 14px calc(108px + env(safe-area-inset-bottom));}
+  /* scroll-padding MUST be on .app-main — it is the scroll container
+     (height:100dvh, overflow-y:auto); the window never scrolls, so the
+     same declaration on html would do nothing. This keeps focused or
+     jumped-to elements out from under the dock. */
+  .app-main{scroll-padding-bottom:calc(108px + env(safe-area-inset-bottom));}
 }
 
 .app-main #cview-inbox.page {
