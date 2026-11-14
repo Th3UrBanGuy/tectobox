@@ -365,12 +365,20 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
               // at noise-handler decodeFrame). The handshake is done once
               // the server emits the QR, so wait for the wa:qr key (the
               // same key the QR modal polls) before asking for the code.
+              // If the socket dies mid-wait, stop at once instead of
+              // burning the whole window on a dead connection.
               const waitMs = deps.pairingWaitMs ?? 20000;
               const startedAt = Date.now();
+              const sockKey = `wa:${clientId}:${effSlot}`;
               let qrSeen = !!(await redis.get(`wa:qr:${clientId}:${effSlot}`).catch(() => null));
+              let sockDead = false;
               while (!qrSeen && Date.now() - startedAt < waitMs) {
                 await new Promise((r) => setTimeout(r, 500));
+                if (!sockets.has(sockKey)) { sockDead = true; break; }
                 qrSeen = !!(await redis.get(`wa:qr:${clientId}:${effSlot}`).catch(() => null));
+              }
+              if (sockDead) {
+                throw new Error('WhatsApp closed the connection — tap "Request a new code" to try again.');
               }
               if (!qrSeen) {
                 throw new Error('WhatsApp did not answer in time — tap "Request a new code" to try again.');
@@ -403,6 +411,19 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
                 slot: effSlot,
                 error: friendly,
               });
+              // The failed request poisoned the saved session: Baileys
+              // stores the half-registered identity (creds.me +
+              // pairingCode) before sending, so the next socket load
+              // skips the QR flow and the server rejects it as logged
+              // out — no QR ever arrives and every retry times out.
+              // End the socket and wipe the slot's session dir so the
+              // next tap starts clean. Nothing was paired, so nothing
+              // is lost.
+              try { entry.sock.end?.(new Error('pairing failed, resetting session')); } catch {}
+              try {
+                const baseDir = process.env.SESSION_DIR || path.join(process.cwd(), 'wa-auth');
+                await fs.promises.rm(path.join(baseDir, `wa:${clientId}:${effSlot}`), { recursive: true, force: true });
+              } catch {}
             }
           }
         } else {
