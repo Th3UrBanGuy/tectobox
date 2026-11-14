@@ -6,6 +6,7 @@ import { LicensingService } from '../licensing/licensing.service.js';
 import { WidgetIntakeService } from './intake.service.js';
 import { AiReplyService } from './ai-reply.service.js';
 import { PaymentClaimService } from './payment-claim.service.js';
+import { OrderService } from './order.service.js';
 
 /**
  * Overall widget-request budget (Seg-D, W1). The Go-engine fetch is
@@ -53,7 +54,8 @@ export class WidgetController {
   ) {
     this.intake = new WidgetIntakeService(pool, eventsService, licensing);
     const paymentClaim = new PaymentClaimService(pool, eventsService);
-    this.aiReply = new AiReplyService(pool, eventsService, licensing, paymentClaim);
+    const orderService = new OrderService(pool);
+    this.aiReply = new AiReplyService(pool, eventsService, licensing, paymentClaim, orderService);
   }
 
   @Post(':widgetKey/message')

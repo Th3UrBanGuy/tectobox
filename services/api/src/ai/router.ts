@@ -10,18 +10,13 @@
  * (vi.spyOn(aiRouter, 'demoResponder')), and a re-exported binding
  * would not be spied the same way.
  */
-import {
-  buildSystemPrompt,
-  CF_MODEL_POOL,
-  demoResponder as demoResponderImpl,
-  detectCustomerLanguage,
-  getAIResponse,
-  GO_AI_TIMEOUT_MS,
-  languageDirective,
-  parsePaymentClaim,
-  queryGoAIEngine,
-  resetGoAiCircuitBreaker,
-} from '@tectonic/ai-router';
+/**
+ * Only demoResponder is imported (as a local const binding, not a
+ * re-export, on purpose: the widget controller spec spies on it
+ * through this module, and a re-exported binding would not be spied
+ * the same way). Everything else is re-exported directly below.
+ */
+import { demoResponder as demoResponderImpl } from '@tectonic/ai-router';
 import type {
   AIRequestMessage,
   KnowledgeItem,
@@ -32,14 +27,20 @@ import type {
 
 export {
   buildSystemPrompt,
+  buildOutOfStockReply,
   CF_MODEL_POOL,
+  DEFAULT_DELIVERY_CHARGE_BDT,
   detectCustomerLanguage,
+  extractCustomerDetails,
+  findInStockAlternative,
+  findProduct,
   getAIResponse,
   GO_AI_TIMEOUT_MS,
   languageDirective,
   parsePaymentClaim,
   queryGoAIEngine,
   resetGoAiCircuitBreaker,
+  toBengaliDigits,
 } from '@tectonic/ai-router';
 
 export const demoResponder = demoResponderImpl;

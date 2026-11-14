@@ -13,6 +13,7 @@ import {
 } from '../ai/router.js';
 import { evaluatePromptSafety } from '../ai/guardrails.js';
 import { PaymentClaimService } from './payment-claim.service.js';
+import { OrderService } from './order.service.js';
 import type { WidgetIntakeContext } from './intake.service.js';
 
 export interface AiReplyResult {
@@ -50,7 +51,8 @@ export class AiReplyService {
     private readonly pool: pg.Pool,
     private readonly eventsService?: EventsService,
     private readonly licensing?: LicensingService,
-    private readonly paymentClaimService?: PaymentClaimService
+    private readonly paymentClaimService?: PaymentClaimService,
+    private readonly orderService?: OrderService
   ) {}
 
   /**
@@ -167,7 +169,7 @@ export class AiReplyService {
 
         const budgetExceeded = cap > 0 && used >= cap;
 
-        const prodsRes = await this.pool.query('SELECT name, sku, price_bdt, stock FROM products WHERE client_id = $1 ORDER BY id ASC', [client.id]);
+        const prodsRes = await this.pool.query('SELECT id, name, sku, price_bdt, stock FROM products WHERE client_id = $1 ORDER BY id ASC', [client.id]);
         const kbRes = await this.pool.query('SELECT title, content, category FROM knowledge WHERE client_id = $1 ORDER BY id ASC', [client.id]);
         prodsRows = prodsRes.rows;
         kbRows = kbRes.rows;
@@ -187,6 +189,35 @@ export class AiReplyService {
 
         // 6.1 Check if message contains a payment claim (TrxID / bKash / Nagad confirmation)
         const paymentClaim = parsePaymentClaim(text, prodsRes.rows, history);
+
+        // 6.2 Order placement (W3/W4): a customer confirmation with
+        // name + phone + address on file creates exactly one `orders`
+        // row (idempotent) — or refuses with the out-of-stock reply
+        // when stock does not cover it. This runs before the AI
+        // budget/credit chain on purpose: placing an order is a DB
+        // write, not an LLM call, so an exhausted AI budget must
+        // never block a paying customer. When the message is not an
+        // order placement (or the placement fails safe) the outcome
+        // is not_applicable/error and the normal reply chain below
+        // runs unchanged.
+        const orderOutcome =
+          !paymentClaim && this.orderService
+            ? await this.orderService.tryCreateOrder({
+                client,
+                conv,
+                text,
+                name: ctx.name,
+                phone: ctx.phone,
+                products: prodsRes.rows,
+                history,
+              })
+            : null;
+        const orderHandled =
+          !!orderOutcome &&
+          (orderOutcome.status === 'created' ||
+            orderOutcome.status === 'already_exists' ||
+            orderOutcome.status === 'out_of_stock');
+
         if (paymentClaim && this.paymentClaimService) {
           const claimResult = await this.paymentClaimService.handlePaymentClaim({
             client,
@@ -200,6 +231,9 @@ export class AiReplyService {
           });
           replyText = claimResult.replyText;
           modelUsed = claimResult.modelUsed;
+        } else if (orderHandled) {
+          replyText = (orderOutcome as { replyText: string }).replyText;
+          modelUsed = (orderOutcome as { modelUsed: string }).modelUsed;
         } else if (budgetExceeded) {
           // Graceful fallback to deterministic catalog responder without consuming LLM budget
           replyText = demoResponder(client.id, text, prodsRes.rows, history, kbRes.rows);
