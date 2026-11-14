@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import pg from 'pg';
 import crypto from 'crypto';
 import { DB_POOL } from '../database/database.module.js';
+import { getAppConfig } from '../config/app.config.js';
 
 export interface AuthenticatedUser {
   id: number;
@@ -42,7 +43,11 @@ export class TenantGuard implements CanActivate {
   }
 
   private async validateBearerToken(token: string, request: any): Promise<boolean> {
-    const jwtSecret = process.env.JWT_SECRET;
+    // JWT_SECRET comes from the validated app config (single source,
+    // Phase 6) — loadAppConfig() already fails fast at boot when it is
+    // missing or shorter than 16 chars, so this read cannot return an
+    // empty secret. The check below stays as a fail-closed guard.
+    const jwtSecret = getAppConfig().jwtSecret;
     if (!jwtSecret) {
       throw new UnauthorizedException('Authentication secret not configured');
     }

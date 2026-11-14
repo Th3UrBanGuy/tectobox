@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { demoResponder, queryGoAIEngine, GO_AI_TIMEOUT_MS } from './router.js';
 
 describe('demoResponder (API)', () => {
@@ -81,8 +81,18 @@ describe('demoResponder (API)', () => {
 });
 
 describe('queryGoAIEngine (F1 bridge)', () => {
+  const origGoAiUrl = process.env.GO_AI_URL;
+
+  beforeEach(() => {
+    // queryGoAIEngine fails fast when GO_AI_URL is unset (Phase 6); the
+    // tests stub fetch, so the URL value itself is irrelevant.
+    process.env.GO_AI_URL = 'http://127.0.0.1:8081/api/ai/chat';
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
+    if (origGoAiUrl === undefined) delete process.env.GO_AI_URL;
+    else process.env.GO_AI_URL = origGoAiUrl;
   });
 
   it('sends snake_case client_id/client_name/business_type to the Go bridge', async () => {

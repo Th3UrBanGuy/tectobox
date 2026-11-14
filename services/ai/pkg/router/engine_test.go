@@ -233,7 +233,7 @@ func TestGenerateReply_KnowledgeIsolation(t *testing.T) {
 // is bypassed for workspace traffic (pctx.ClientID != "") to eliminate cross-workspace
 // leaks through the unisolated shared web2api proxy session.
 func TestTier3_SkipSharedWeb2APIForWorkspaceTraffic(t *testing.T) {
-	t.Setenv("GEMINI_WEB2API_URL", "http://127.0.0.1:9999/v1/chat/completions")
+	t.Setenv("GEMINI_WEB2API_PROXY_URL", "http://127.0.0.1:9999/v1/chat/completions")
 	t.Setenv("GEMINI_WEB2API_KEY", "dummy-shared-key")
 
 	engine := NewEngine()
@@ -272,7 +272,7 @@ func TestTier3_Web2APITimeoutBounded(t *testing.T) {
 	}))
 	defer server.Close()
 
-	t.Setenv("GEMINI_WEB2API_URL", server.URL)
+	t.Setenv("GEMINI_WEB2API_PROXY_URL", server.URL)
 	t.Setenv("GEMINI_WEB2API_KEY", "dummy-key")
 	t.Setenv("GEMINI_WEB2API_TIMEOUT_MS", "50") // 50ms bounded timeout for test
 

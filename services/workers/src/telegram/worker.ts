@@ -234,16 +234,20 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
           data.idempotencyKey ||
           `tg:${data.clientId}:${data.to}:${Buffer.from(data.text).toString('base64').slice(0, 32)}`,
         send: async (data, stableIdKey) => {
-          const entry = await getClientWithFencing(String(data.clientId), data.sessionString);
+          // Phase 6 fix: fence + validate the lease for the ACTUAL slot
+          // (was: always the DEFAULT slot, so a non-default slot's send
+          // validated the wrong lease). The broadcast publisher always
+          // sends slot 'default' today, so this changes no current
+          // runtime behaviour — it makes non-default slots correct.
+          const slot =
+            typeof data.slot === 'string' && data.slot.length > 0 ? data.slot : DEFAULT_SLOT;
+          const entry = await getClientWithFencing(String(data.clientId), slot, data.sessionString);
           if (!entry) {
             throw new Error(`Failed to acquire active lease for Telegram client ${data.clientId}`);
           }
 
           // Atomically validate fencing token and touch lease at provider boundary.
-          // Reproduces the current behaviour exactly: the DEFAULT-slot lease
-          // is validated for every slot (known latent bug for non-default
-          // slots — deliberately not fixed in Phase 1).
-          const isValid = await coordinator.validateAndTouchLease(leaseKey(telegramSessionKey(data.clientId, DEFAULT_SLOT)), entry.token);
+          const isValid = await coordinator.validateAndTouchLease(leaseKey(telegramSessionKey(data.clientId, slot)), entry.token);
           if (!isValid) {
             throw new Error(`Stale fencing token ${entry.token} for Telegram client ${data.clientId}; side-effect aborted`);
           }

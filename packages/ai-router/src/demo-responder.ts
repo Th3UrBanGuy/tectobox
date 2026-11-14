@@ -8,6 +8,7 @@
 
 import { detectCustomerLanguage } from './language.js';
 import type { ProductItem, KnowledgeItem } from './prompts.js';
+import { DEFAULT_DELIVERY_CHARGE_BDT, toBengaliDigits } from './prompts.js';
 
 export function demoResponder(
   clientId: string | number,
@@ -73,12 +74,12 @@ export function demoResponder(
     }
 
     if (lang === 'bn') {
-      return 'আমাদের ডেলিভারি চার্জ ঢাকার ভেতরে ৬০ টাকা এবং ঢাকার বাইরে ১২০ টাকা। ক্যাশ অন ডেলিভারি সুবিধা রয়েছে।';
+      return `আমাদের ডেলিভারি চার্জ ঢাকার ভেতরে ${toBengaliDigits(DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka)} টাকা এবং ঢাকার বাইরে ${toBengaliDigits(DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka)} টাকা। ক্যাশ অন ডেলিভারি সুবিধা রয়েছে।`;
     }
     if (lang === 'banglish') {
-      return 'Amader delivery charge Dhaka city-r bhitore 60 taka ebong Dhaka-r baire 120 taka. Cash on delivery available ache.';
+      return `Amader delivery charge Dhaka city-r bhitore ${DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka} taka ebong Dhaka-r baire ${DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka} taka. Cash on delivery available ache.`;
     }
-    return 'Our delivery charge is 60 BDT inside Dhaka and 120 BDT outside Dhaka. Cash on Delivery is available.';
+    return `Our delivery charge is ${DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka} BDT inside Dhaka and ${DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka} BDT outside Dhaka. Cash on Delivery is available.`;
   }
 
   // 2. Order intent (with word boundaries and conversational memory)

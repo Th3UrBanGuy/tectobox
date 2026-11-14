@@ -50,6 +50,28 @@ async function callOpenAICompatible(url: string, apiKey: string, model: string, 
   }
 }
 
+/**
+ * Fail fast on a missing backend URL (Phase 6). The old code silently
+ * fell back to a localhost address that points at the caller's own
+ * container in production (the workers container has no AI backend on
+ * :8081), so a misconfigured deploy answered with deterministic
+ * templates instead of erroring. Now the missing var throws a clear
+ * error naming it, so the misconfiguration is visible at once.
+ * NOTE: this is a failure-mode change only — when the backend IS
+ * configured but unreachable, the deterministic-template fallback below
+ * is unchanged.
+ */
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `${name} is not set: the AI backend URL must be configured explicitly ` +
+        `(no localhost fallback). Set ${name} to the Go ai service URL.`,
+    );
+  }
+  return value;
+}
+
 export const GO_AI_TIMEOUT_MS = 25000;
 
 /**
@@ -65,7 +87,7 @@ export async function queryGoAIEngine(params: {
   knowledge?: KnowledgeItem[];
   model?: string;
 }): Promise<{ reply: string; language: string; model: string; cached: boolean } | null> {
-  const goUrl = process.env.GO_AI_URL || 'http://127.0.0.1:8081/api/ai/chat';
+  const goUrl = requireEnv('GO_AI_URL');
   try {
     const res = await fetch(goUrl, {
       method: 'POST',
@@ -136,26 +158,25 @@ export async function queryGoAIEngine(params: {
 
 /**
  * Multi-tier AI Response:
- * Tier 1: Gemini Web2API (zero auth, http://127.0.0.1:8081/v1)
- * Tier 2: Cloudflare playground models on AI_BASE_URL (http://127.0.0.1:18080/v1)
+ * Tier 1: Gemini Web2API (zero auth, the Go ai service /v1 base)
+ * Tier 2: Cloudflare playground models on AI_BASE_URL (optional tier)
  * Tier 3: Direct APIs (Gemini API, OpenRouter, OpenAI) if configured
  * Tier 4: Fallback demo responder
  */
 
 export async function getAIResponse(messages: AIRequestMessage[], contextKey = 'default'): Promise<string | null> {
   // 1. Try Gemini Web2API (fast, high quality, free)
-  // NOTE — env-var name collision (do NOT rename here; the rename +
-  // compose rollout is Phase 6): GEMINI_WEB2API_URL means this
-  // service's /v1 base URL here (the Go ai service,
-  // http://127.0.0.1:8081/v1), but the same name inside the ai
-  // container means the external web2api proxy URL. Setting it in the
-  // wrong place silently re-routes a tier.
+  // NOTE — env-var name (renamed in Phase 6): GEMINI_WEB2API_URL means
+  // this service's /v1 base URL here (the Go ai service,
+  // http://ai:8081/v1). Inside the ai container the same backend is
+  // read from GEMINI_WEB2API_PROXY_URL (the external web2api proxy
+  // URL). Setting one name in the wrong place silently re-routes a tier.
   // NOTE (F1 Knowledge Leak Fix):
   // The gemini-web2api proxy uses a single shared browser session for all requests without
   // per-workspace session isolation. In multi-tenant environments (widget / worker / workspace traffic),
   // skip web2api to prevent cross-workspace prompt and policy leakage.
   if (contextKey === 'default' || !contextKey) {
-    const geminiWeb2ApiUrl = process.env.GEMINI_WEB2API_URL || 'http://127.0.0.1:8081/v1';
+    const geminiWeb2ApiUrl = requireEnv('GEMINI_WEB2API_URL');
     const geminiModels = ['gemini-3.6-flash', 'gemini-flash-lite'];
     for (const m of geminiModels) {
       try {
@@ -167,19 +188,26 @@ export async function getAIResponse(messages: AIRequestMessage[], contextKey = '
     }
   }
 
-  // 2. Try Cloudflare Playground / Workers AI models
-  const cfBaseUrl = process.env.AI_BASE_URL || 'http://127.0.0.1:18080/v1';
-  const cfPool = (process.env.AI_MODEL_POOL ? process.env.AI_MODEL_POOL.split(',') : CF_MODEL_POOL)
-    .map(s => s.trim())
-    .filter(Boolean);
+  // 2. Try Cloudflare Playground / Workers AI models.
+  // NOTE (Phase 6): AI_BASE_URL is an OPTIONAL tier — there is no
+  // Cloudflare backend in compose, so when it is unset the tier is
+  // skipped entirely (never pointed at localhost:18080, which is the
+  // caller's own container in production). Tiers 3-5 still run, and the
+  // deterministic-template fallback is unchanged.
+  const cfBaseUrl = process.env.AI_BASE_URL;
+  if (cfBaseUrl) {
+    const cfPool = (process.env.AI_MODEL_POOL ? process.env.AI_MODEL_POOL.split(',') : CF_MODEL_POOL)
+      .map(s => s.trim())
+      .filter(Boolean);
 
-  for (const m of cfPool) {
-    try {
-      const resp = await callOpenAICompatible(cfBaseUrl, process.env.AI_API_KEY || 'dummy', m, messages, 2500);
-      if (resp && resp.trim().length > 0) {
-        return cleanModelOutput(resp);
-      }
-    } catch {}
+    for (const m of cfPool) {
+      try {
+        const resp = await callOpenAICompatible(cfBaseUrl, process.env.AI_API_KEY || 'dummy', m, messages, 2500);
+        if (resp && resp.trim().length > 0) {
+          return cleanModelOutput(resp);
+        }
+      } catch {}
+    }
   }
 
   // 3. Try official Gemini API if key is present

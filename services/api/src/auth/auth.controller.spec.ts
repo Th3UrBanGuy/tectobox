@@ -34,10 +34,17 @@ describe('AuthController', () => {
       ],
     });
 
-    const res = await controller.login({
+    // The controller returns Response | success-body; this test drives
+    // the success path, so narrow the union to the success body.
+    const res = (await controller.login({
       username: 'merchant_bob',
       password: rawPw,
-    });
+    })) as {
+      ok: boolean;
+      success: boolean;
+      user: { id: number; username: string; role: string; tenantId: number; clientId: number };
+      token: string;
+    };
 
     expect(res.success).toBe(true);
     expect(res.user.username).toBe('merchant_bob');

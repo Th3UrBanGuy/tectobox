@@ -83,7 +83,7 @@ describe('ChannelConnectController.connectChannel — RC5 & RC6 triggers', () =>
     const ctrl = new ChannelConnectController(pool, events);
     const res: any = await ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'b' });
     expect(res).toEqual({ ok: true, channel: 'whatsapp', slot: 'b', status: 'connecting', method: 'qr' });
-    expect(pool.queries.some((q) => q.sql.includes('INSERT INTO channel_sessions'))).toBe(true);
+    expect(pool.queries.some((q: { sql: string; params?: any[] }) => q.sql.includes('INSERT INTO channel_sessions'))).toBe(true);
     expect(events.publishChannelConnect).toHaveBeenCalledTimes(1);
     expect(events.publishChannelConnect).toHaveBeenCalledWith(69, 'b', { method: 'qr', phoneNumber: undefined });
   });
@@ -97,7 +97,7 @@ describe('ChannelConnectController.connectChannel — RC5 & RC6 triggers', () =>
     const ctrl = new ChannelConnectController(pool, events);
     const res: any = await ctrl.connectChannel(69, 69, 'telegram', { slot: 'hh', label: 'Primary TG' });
     expect(res).toEqual({ ok: true, channel: 'telegram', slot: 'hh', status: 'connecting', method: 'qr' });
-    expect(pool.queries.some((q) => q.sql.includes('INSERT INTO channel_sessions'))).toBe(true);
+    expect(pool.queries.some((q: { sql: string; params?: any[] }) => q.sql.includes('INSERT INTO channel_sessions'))).toBe(true);
     expect(events.publishChannelConnectTelegram).toHaveBeenCalledTimes(1);
     expect(events.publishChannelConnectTelegram).toHaveBeenCalledWith(69, 'hh', 42, 'Primary TG', { method: 'qr', phoneNumber: undefined });
   });
@@ -110,7 +110,7 @@ describe('ChannelConnectController.connectChannel — RC5 & RC6 triggers', () =>
     } as any;
     const ctrl = new ChannelConnectController(pool, events);
     await ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'main', label: 'Shop WA' });
-    const insertQuery = pool.queries.find((q) => q.sql.includes('INSERT INTO channel_sessions'));
+    const insertQuery = pool.queries.find((q: { sql: string; params?: any[] }) => q.sql.includes('INSERT INTO channel_sessions'));
     expect(insertQuery).toBeDefined();
     expect(insertQuery?.params?.[3]).toBe('Shop WA');
   });

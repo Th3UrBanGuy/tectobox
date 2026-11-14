@@ -30,6 +30,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
+	// NOTE (Phase 6): /api/ai/chat has NO auth by design — it relies on
+	// network isolation only. The ai service is reachable solely from
+	// the api/workers containers over the internal Docker network
+	// (compose: no published port, no public ingress route); it must
+	// never be exposed publicly. Do not add auth here — the typed
+	// client_id contract (400 on missing/camelCase) is the tenant guard.
 	mux.HandleFunc("/api/ai/chat", s.handleInternalAIChat)
 
 	// High-throughput middleware: CORS, Token Bucket Rate Limiting, and Brute-force protection

@@ -54,6 +54,9 @@ describe('Telegram Worker Connect and Disconnect Handling', () => {
     let leaseCounter = 100;
     const leases = new Map<string, number>();
     const events: { channel: string; event: any }[] = [];
+    // Lease keys passed to validateAndTouchLease at the provider boundary
+    // (recorded so tests can assert WHICH slot's lease was validated).
+    const validateAndTouchCalls: string[] = [];
 
     return {
       acquireLease: async (key: string, ttl: number) => {
@@ -76,7 +79,11 @@ describe('Telegram Worker Connect and Disconnect Handling', () => {
       events,
       claimSendAttempt: async () => ({ claimed: true }),
       recordSendState: async () => {},
-      validateAndTouchLease: async () => true,
+      validateAndTouchLease: async (key: string) => {
+        validateAndTouchCalls.push(key);
+        return true;
+      },
+      validateAndTouchCalls,
     };
   }
 
@@ -358,5 +365,63 @@ describe('Telegram Worker Connect and Disconnect Handling', () => {
     assert.ok(disconnectedEvent, 'must publish channel.status.telegram with status disconnected');
     assert.strictEqual(disconnectedEvent.payload.clientId, 69);
     assert.strictEqual(disconnectedEvent.payload.slot, 'hh');
+  });
+
+  it('outgoing send validates the lease for the ACTUAL slot, not the default slot (Phase 6)', async () => {
+    const broker = createMockBroker();
+    const coordinator = createMockCoordinator();
+    const redis = createMockRedis();
+    let sentTo: any = null;
+    let sentBody: any = null;
+
+    const mockClient = {
+      connect: async () => {},
+      sendMessage: async (to: any, body: any) => {
+        sentTo = to;
+        sentBody = body;
+      },
+      disconnect: async () => {},
+    };
+
+    await startTelegramWorker({
+      mq: broker.mq,
+      coordinator,
+      redis,
+      createClient: () => mockClient,
+    });
+
+    const outgoingConsumer = broker.consumers.get('message.outgoing.telegram');
+    assert.ok(outgoingConsumer, 'message.outgoing.telegram consumer must be registered');
+
+    // Non-default slot 'hh' with a session string (the broadcast
+    // publisher's shape). The send path must fence + validate the 'hh'
+    // lease, not the default-slot lease.
+    const msg = {
+      content: Buffer.from(
+        JSON.stringify({
+          clientId: 69,
+          slot: 'hh',
+          to: '8801712345678',
+          text: 'hello from the shop',
+          sessionString: '1'.repeat(64),
+        }),
+      ),
+    };
+
+    await outgoingConsumer(msg);
+
+    // The lease validated at the provider boundary must be the 'hh'
+    // slot's lease key (lease:tg:69:hh), never the default-slot key.
+    assert.ok(
+      coordinator.validateAndTouchCalls.includes('lease:tg:69:hh'),
+      `validateAndTouchLease must be called with the hh-slot lease key; got ${JSON.stringify(coordinator.validateAndTouchCalls)}`,
+    );
+    assert.ok(
+      !coordinator.validateAndTouchCalls.includes('lease:tg:69'),
+      'must NOT validate the default-slot lease for a non-default slot',
+    );
+    assert.strictEqual(sentTo, '8801712345678', 'sendMessage must be called with the recipient');
+    assert.deepStrictEqual(sentBody, { message: 'hello from the shop' });
+    assert.strictEqual((msg as any).acked, true, 'Outgoing message must be acked after send');
   });
 });

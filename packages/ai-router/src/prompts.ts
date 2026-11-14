@@ -30,6 +30,22 @@ export interface KnowledgeItem {
   category?: string;
 }
 
+/**
+ * Default delivery charge (BDT) used when the shop's knowledge does not
+ * specify one — single source (Phase 6). Used by buildSystemPrompt and
+ * demoResponder; change the numbers here and both follow.
+ */
+export const DEFAULT_DELIVERY_CHARGE_BDT = {
+  insideDhaka: 60,
+  outsideDhaka: 120,
+} as const;
+
+/** Render an ASCII number with Bengali digits (e.g. 60 -> "৬০"). */
+export function toBengaliDigits(value: number): string {
+  const BENGALI_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  return String(value).replace(/[0-9]/g, (d) => BENGALI_DIGITS[Number(d)]);
+}
+
 export interface PromptContext {
   clientName?: string;
   businessType?: 'physical' | 'digital';
@@ -79,7 +95,7 @@ ${kbLines}
 RULES:
 1. Always be polite, helpful, and concise (1-3 sentences).
 2. Prices and product specs must be exact from the catalog.
-3. If delivery charge is asked and not specified in knowledge, default to 60 BDT inside Dhaka and 120 BDT outside Dhaka.
+3. If delivery charge is asked and not specified in knowledge, default to ${DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka} BDT inside Dhaka and ${DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka} BDT outside Dhaka.
 4. If a customer wants to buy or order, ask for their name, phone number, and delivery address.`;
 
   if (!options?.includeSecurityDirective) return base;

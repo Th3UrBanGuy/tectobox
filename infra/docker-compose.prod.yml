@@ -121,6 +121,11 @@ services:
           memory: 350M
     environment:
       PORT: 8081
+      # Phase 6 rename: the ai container reads the external web2api proxy
+      # URL from GEMINI_WEB2API_PROXY_URL (was GEMINI_WEB2API_URL, which
+      # now means the Go /v1 base in the api/workers containers). Empty by
+      # default — the Go engine skips the web2api tier when unset.
+      GEMINI_WEB2API_PROXY_URL: ${GEMINI_WEB2API_PROXY_URL:-}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health"]
       interval: 10s
@@ -227,6 +232,14 @@ services:
       # is ever produced. Values live in /opt/tectobox/.env (never in repo).
       TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      # AI backend (Phase 6): the workers' ai path calls the Go ai service
+      # (queryGoAIEngine / getAIResponse). These were missing, so the code
+      # silently fell back to 127.0.0.1:8081 — the workers container itself
+      # — and the ai.requests queue never reached the Go engine. The
+      # providers now fail fast when these are unset, so they are set here
+      # (same values as the api service).
+      GO_AI_URL: http://ai:8081/api/ai/chat
+      GEMINI_WEB2API_URL: http://ai:8081/v1
     volumes:
       - infra_sessiondata:/data/sessions
     depends_on:

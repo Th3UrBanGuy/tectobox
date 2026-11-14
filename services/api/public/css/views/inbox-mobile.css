@@ -110,7 +110,6 @@
     background: var(--card2);
     color: var(--ink);
     cursor: pointer;
-  }
 
   .inbox.m-chat-open .messages {
     flex: 1 1 auto;
@@ -148,5 +147,4 @@
     min-width: 38px;
     min-height: 38px;
   }
-}
 

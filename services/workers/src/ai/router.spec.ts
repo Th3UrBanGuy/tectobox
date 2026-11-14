@@ -59,6 +59,10 @@ describe('demoResponder (Workers)', () => {
 describe('queryGoAIEngine (Workers timeout alignment)', () => {
   it('returns knowledge-grounded template answer when Go backend times out or aborts', async () => {
     const origFetch = globalThis.fetch;
+    const origGoAiUrl = process.env.GO_AI_URL;
+    // queryGoAIEngine fails fast when GO_AI_URL is unset (Phase 6); the
+    // test stubs fetch, so the URL value itself is irrelevant.
+    process.env.GO_AI_URL = 'http://127.0.0.1:8081/api/ai/chat';
     try {
       globalThis.fetch = (async () => {
         const err = new Error('The operation was aborted due to timeout');
@@ -84,6 +88,8 @@ describe('queryGoAIEngine (Workers timeout alignment)', () => {
       assert.strictEqual(res?.model, 'timeout-fallback:deterministic');
     } finally {
       globalThis.fetch = origFetch;
+      if (origGoAiUrl === undefined) delete process.env.GO_AI_URL;
+      else process.env.GO_AI_URL = origGoAiUrl;
     }
   });
 

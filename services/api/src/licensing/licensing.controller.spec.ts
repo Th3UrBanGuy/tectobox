@@ -3,6 +3,7 @@ import { ForbiddenException, NotFoundException, BadRequestException, ConflictExc
 import { PlansController } from './plans.controller.js';
 import { LicensesController } from './licenses.controller.js';
 import { AccessController } from './access.controller.js';
+import { IssueLicenseDto, ActivateLicenseDto } from './dto/licensing.dto.js';
 import { AdminGuard } from '../auth/admin.guard.js';
 
 // NOTE: Nest's GUARDS_METADATA constant ('__guards__') is not re-exported
@@ -142,7 +143,9 @@ describe('Plans/Licenses admin handlers', () => {
   });
 
   it('issueLicense rejects a missing client_id', async () => {
-    await expect(licensesController.issueLicense({ days: 30 })).rejects.toThrow(BadRequestException);
+    // Deliberately missing client_id: the runtime must reject it. The
+    // cast is test-only (the value is NOT a valid DTO by construction).
+    await expect(licensesController.issueLicense({ days: 30 } as IssueLicenseDto)).rejects.toThrow(BadRequestException);
   });
 
   it('issueLicense rejects an unknown deliver mode', async () => {
@@ -381,6 +384,8 @@ describe('LicensesController.activateLicense — client self-service (§E)', () 
   });
 
   it('missing code returns 400', async () => {
-    await expect(controller.activateLicense(42, {})).rejects.toThrow(BadRequestException);
+    // Deliberately missing code: the runtime must reject it. The cast
+    // is test-only (the value is NOT a valid DTO by construction).
+    await expect(controller.activateLicense(42, {} as ActivateLicenseDto)).rejects.toThrow(BadRequestException);
   });
 });

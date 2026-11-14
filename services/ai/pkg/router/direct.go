@@ -36,11 +36,12 @@ const (
 // knowledge-grounded deterministic responder (Tier 4) or isolated
 // direct APIs.
 //
-// NOTE — env-var name collision (do NOT rename here; Phase 6 owns the
-// compose rollout): GEMINI_WEB2API_URL means the *external web2api proxy
-// URL* inside this ai container, but the same name in the api/workers
-// containers means *this service's /v1 base URL* (http://ai:8081/v1).
-// Setting it in the wrong place silently re-routes a tier.
+// NOTE — env-var name (renamed in Phase 6): this container reads the
+// *external web2api proxy URL* from GEMINI_WEB2API_PROXY_URL. The old
+// name GEMINI_WEB2API_URL is kept by the api/workers containers, where
+// it means *this service's /v1 base URL* (http://ai:8081/v1). The two
+// names must not be confused — setting the proxy URL under the old name
+// in this container silently re-routes a tier.
 func (e *Engine) web2APIAllowed(pctx PromptContext) bool {
 	return pctx.ClientID == ""
 }
@@ -51,7 +52,7 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 	// web UI, so first replies take ~5s — the 2s Tier-3 context would
 	// always time out, hence a detached 25s context here.
 	if e.web2APIAllowed(pctx) {
-		if url := os.Getenv("GEMINI_WEB2API_URL"); url != "" {
+		if url := os.Getenv("GEMINI_WEB2API_PROXY_URL"); url != "" {
 			if key := os.Getenv("GEMINI_WEB2API_KEY"); key != "" {
 				model := os.Getenv("GEMINI_WEB2API_MODEL")
 				if model == "" {

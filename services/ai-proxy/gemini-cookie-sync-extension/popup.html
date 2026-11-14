@@ -52,6 +52,12 @@
   <button id="export" type="button">Export gemini-auth.json</button>
   <p id="status">Ready.</p>
   <p class="note">Open Gemini, sign in, then refresh the page before inspection. The generated file contains highly sensitive session data; do not share it or commit it to Git.</p>
-  <script src="popup.js"></script>
+  <!-- Phase 6: popup.js split into focused classic scripts; load order
+       matters (constants -> cookies -> page-meta -> export -> popup-ui). -->
+  <script src="constants.js"></script>
+  <script src="cookies.js"></script>
+  <script src="page-meta.js"></script>
+  <script src="export.js"></script>
+  <script src="popup-ui.js"></script>
 </body>
 </html>
