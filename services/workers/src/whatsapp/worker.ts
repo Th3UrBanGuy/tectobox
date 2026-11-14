@@ -13,6 +13,8 @@ export interface WhatsappWorkerDeps {
   redis?: any;
   coordinator?: any;
   initialSockets?: Map<string, { sock: any; token: number }>;
+  /** Max ms to wait for the Noise handshake before requesting a pairing code (default 20000). */
+  pairingWaitMs?: number;
 }
 
 export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
@@ -355,6 +357,23 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
             try {
               if (typeof entry.sock.requestPairingCode !== 'function') {
                 throw new Error('This WhatsApp version does not support pairing codes');
+              }
+              // Baileys 6.6 requestPairingCode sends the pairing stanza
+              // immediately — it does NOT wait for the Noise handshake.
+              // Called right after makeWASocket, it corrupts the handshake
+              // and the server drops the connection ("Connection Failure"
+              // at noise-handler decodeFrame). The handshake is done once
+              // the server emits the QR, so wait for the wa:qr key (the
+              // same key the QR modal polls) before asking for the code.
+              const waitMs = deps.pairingWaitMs ?? 20000;
+              const startedAt = Date.now();
+              let qrSeen = !!(await redis.get(`wa:qr:${clientId}:${effSlot}`).catch(() => null));
+              while (!qrSeen && Date.now() - startedAt < waitMs) {
+                await new Promise((r) => setTimeout(r, 500));
+                qrSeen = !!(await redis.get(`wa:qr:${clientId}:${effSlot}`).catch(() => null));
+              }
+              if (!qrSeen) {
+                throw new Error('WhatsApp did not answer in time — tap "Request a new code" to try again.');
               }
               const raw = String(await entry.sock.requestPairingCode(String(phoneNumber).replace(/[^0-9]/g, '')));
               const code = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();

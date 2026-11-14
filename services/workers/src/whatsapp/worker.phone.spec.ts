@@ -84,6 +84,9 @@ describe('WhatsApp Worker Phone Login (pairing code)', () => {
     const initialSockets = new Map<string, { sock: any; token: number }>();
     initialSockets.set('wa:69:default', { sock: mockSock, token: 42 });
 
+    // Handshake already done: QR key present, so no waiting.
+    await redis.set('wa:qr:69:default', 'data:image/png;base64,xxx');
+
     await startWhatsappWorker({
       mq: broker.mq,
       redis,
@@ -107,6 +110,88 @@ describe('WhatsApp Worker Phone Login (pairing code)', () => {
     assert.ok(codeEvent, 'pairing_code must be published over SSE');
     assert.strictEqual(codeEvent.event.code, 'AB12-CD34');
     assert.strictEqual(codeEvent.event.channel, 'whatsapp');
+  });
+
+  it('phone connect: waits for the QR (handshake) before requesting the code', async () => {
+    const broker = createMockBroker();
+    const coordinator = createMockCoordinator();
+    const redis = createMockRedis();
+    let pairingCalledAt = 0;
+    const startedAt = Date.now();
+
+    const mockSock = {
+      requestPairingCode: async () => {
+        pairingCalledAt = Date.now() - startedAt;
+        return 'AB12CD34';
+      },
+      ev: { on: () => {} },
+      end: () => {},
+      destroy: async () => {},
+    };
+
+    const initialSockets = new Map<string, { sock: any; token: number }>();
+    initialSockets.set('wa:69:default', { sock: mockSock, token: 42 });
+
+    await startWhatsappWorker({
+      mq: broker.mq,
+      redis,
+      coordinator,
+      initialSockets,
+    });
+
+    const connectConsumer = broker.consumers.get('channel.connect.whatsapp');
+    // QR arrives 100ms in — requestPairingCode must NOT fire before that.
+    setTimeout(() => redis.set('wa:qr:69:default', 'data:image/png;base64,xxx'), 100);
+    await connectConsumer!({
+      content: Buffer.from(
+        JSON.stringify({ clientId: 69, slot: 'default', method: 'phone', phoneNumber: '8801712345678' })
+      ),
+    });
+
+    assert.ok(pairingCalledAt >= 100, 'must wait for the handshake/QR before requesting the code');
+    assert.strictEqual(await redis.get('wa:pairing:69:default'), 'AB12-CD34');
+  });
+
+  it('phone connect: no QR within the wait window publishes a timeout pairing_error', async () => {
+    const broker = createMockBroker();
+    const coordinator = createMockCoordinator();
+    const redis = createMockRedis();
+    let pairingCalled = false;
+
+    const mockSock = {
+      requestPairingCode: async () => {
+        pairingCalled = true;
+        return 'AB12CD34';
+      },
+      ev: { on: () => {} },
+      end: () => {},
+      destroy: async () => {},
+    };
+
+    const initialSockets = new Map<string, { sock: any; token: number }>();
+    initialSockets.set('wa:69:default', { sock: mockSock, token: 42 });
+
+    await startWhatsappWorker({
+      mq: broker.mq,
+      redis,
+      coordinator,
+      initialSockets,
+      pairingWaitMs: 100,
+    });
+
+    const connectConsumer = broker.consumers.get('channel.connect.whatsapp');
+    const msg = {
+      content: Buffer.from(
+        JSON.stringify({ clientId: 69, slot: 'default', method: 'phone', phoneNumber: '8801712345678' })
+      ),
+    };
+    await connectConsumer!(msg);
+
+    assert.strictEqual((msg as any).acked, true, 'Connect message must be acked even on timeout');
+    assert.strictEqual(pairingCalled, false, 'must NOT request a code before the handshake');
+    const errEvent = coordinator.events.find((e: any) => e.event.type === 'pairing_error');
+    assert.ok(errEvent, 'pairing_error must be published on timeout');
+    assert.match(errEvent.event.error, /did not answer in time/);
   });
 
   it('qr connect: never requests a pairing code', async () => {
@@ -161,6 +246,8 @@ describe('WhatsApp Worker Phone Login (pairing code)', () => {
     const initialSockets = new Map<string, { sock: any; token: number }>();
     initialSockets.set('wa:69:default', { sock: mockSock, token: 42 });
 
+    await redis.set('wa:qr:69:default', 'data:image/png;base64,xxx');
+
     await startWhatsappWorker({
       mq: broker.mq,
       redis,
@@ -200,6 +287,8 @@ describe('WhatsApp Worker Phone Login (pairing code)', () => {
 
     const initialSockets = new Map<string, { sock: any; token: number }>();
     initialSockets.set('wa:69:default', { sock: mockSock, token: 42 });
+
+    await redis.set('wa:qr:69:default', 'data:image/png;base64,xxx');
 
     await startWhatsappWorker({
       mq: broker.mq,
