@@ -270,7 +270,7 @@ export function extractCustomerDetails(rawText: string): ExtractedDetails {
   }
 
   const addressMatch =
-    text.match(/(?:deliver to|address(?: is|:)?|ঠিকানা|thikana)\s*:?\s*([^.,;\n।]{3,120})/i);
+    text.match(/(?:deliver to|address(?: is|:)?|ঠিকানা|thikana)\s*:?\s*([^.\n;।]{3,200})/i);
   if (addressMatch) {
     out.address = addressMatch[1].trim();
   }

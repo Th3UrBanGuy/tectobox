@@ -274,7 +274,7 @@ func ExtractCustomerDetails(rawText string) CustomerDetails {
 		}
 	}
 
-	addrRe := regexp.MustCompile(`(?i)(?:deliver to|address(?: is|:)?|ঠিকানা|thikana)\s*:?\s*([^.,;\n।]{3,120})`)
+	addrRe := regexp.MustCompile(`(?i)(?:deliver to|address(?: is|:)?|ঠিকানা|thikana)\s*:?\s*([^.\n;।]{3,200})`)
 	if m := addrRe.FindStringSubmatch(text); m != nil {
 		out.Address = strings.TrimSpace(m[1])
 	}
