@@ -9,6 +9,12 @@ const dbProvider = {
     const pool = new pg.Pool({
       connectionString: process.env.DATABASE_URL || 'postgresql://tectobox:tectobox_dev@localhost:5432/tectobox',
       max: 20,
+      // Fail fast instead of queueing forever (Seg-D, W1): pg's default
+      // connectionTimeoutMillis is 0 (wait indefinitely), so a saturated
+      // pool would hang a widget request until the client gave up. 5s
+      // turns pool exhaustion into a catchable error, and the widget
+      // path answers it with a graceful fallback reply instead.
+      connectionTimeoutMillis: 5000,
     });
     pool.on('error', (err: any) => {
       console.warn('[database] Handled idle pg client error:', err.message);

@@ -19,7 +19,16 @@ export interface AiReplyResult {
   replyText: string | null;
   replyId: number | null;
   modelUsed: string;
+  /** Per-stage timings in ms (Seg-D instrumentation, logged by the controller). */
+  timings?: { dbMs: number; goMs: number; fallbackMs: number; outDbMs: number };
 }
+
+const GENERIC_FALLBACK_REPLIES: Record<string, string> = {
+  bn: 'দুঃখিত, এখন উত্তর দিতে সমস্যা হচ্ছে। অনুগ্রহ করে একটু পরে আবার চেষ্টা করুন।',
+  banglish: 'Dukkhito, ekhon uttor dite shomossha hocche. Ektu pore abar cheshta korun.',
+  hi: 'माफ़ कीजिए, अभी जवाब देने में परेशानी हो रही है। कृपया थोड़ी देर में फिर कोशिश करें।',
+  en: "Sorry, we're having trouble replying right now. Please try again in a moment.",
+};
 
 /**
  * AI reply generation (steps 5–7 of `handleWidgetMessage`): the
@@ -44,8 +53,46 @@ export class AiReplyService {
     private readonly paymentClaimService?: PaymentClaimService
   ) {}
 
+  /**
+   * Never-throw guarantee (Seg-D, W1): the widget endpoint must never
+   * drop a customer's message silently. Any unexpected failure inside
+   * the reply path falls back to a generic graceful reply (and a
+   * best-effort store of it) instead of throwing up to the controller.
+   */
   async generateReply(ctx: WidgetIntakeContext): Promise<AiReplyResult> {
+    const started = Date.now();
+    try {
+      const result = await this.generateReplyInner(ctx);
+      return { ...result, timings: result.timings ?? { dbMs: 0, goMs: 0, fallbackMs: 0, outDbMs: 0 } };
+    } catch (err: any) {
+      console.warn('[widget-ai-reply] reply path failed, sending generic fallback:', err?.message || err);
+      const lang = detectCustomerLanguage(ctx.text);
+      const replyText = GENERIC_FALLBACK_REPLIES[lang] || GENERIC_FALLBACK_REPLIES.en;
+      let replyId: number | null = null;
+      try {
+        const outMsg = await this.pool.query(
+          `INSERT INTO messages (conversation_id, direction, text, raw_json, created_at)
+           VALUES ($1, 'out', $2, $3, NOW())
+           RETURNING *`,
+          [ctx.conv.id, replyText, JSON.stringify({ via: 'ai', model: 'error-fallback:generic' })],
+        );
+        replyId = outMsg.rows[0]?.id ?? null;
+      } catch {
+        // Best-effort only: the reply below is still returned to the
+        // customer even when the store is down.
+      }
+      return {
+        replyText,
+        replyId,
+        modelUsed: 'error-fallback:generic',
+        timings: { dbMs: 0, goMs: 0, fallbackMs: 0, outDbMs: Date.now() - started },
+      };
+    }
+  }
+
+  private async generateReplyInner(ctx: WidgetIntakeContext): Promise<AiReplyResult> {
     const { client, conv, msg, text, access } = ctx;
+    const timings = { dbMs: 0, goMs: 0, fallbackMs: 0, outDbMs: 0 };
 
     // 5. Check if customer is asking for a human agent
     const humanRegex = /(human|agent|person|representative|support|real person|customer care|help me talk|help me|manager|talk to someone|call me|মানুষ|এজেন্ট|প্রতিনিধি|কল দেন|কথা বলব|অপারেটর|সাপোর্ট|সাহায্য|manush|kotha bolbo|call den|kew asen|operator|sahajjo|madad|insaan|sahayata)/i;
@@ -79,11 +126,13 @@ export class AiReplyService {
       modelUsed = 'human-handover';
 
       if (this.eventsService) {
-        await this.eventsService.broadcastTenantEvent(client.id, {
+        // Fire-and-forget (Seg-D): the SSE fan-out must never stall the
+        // customer's reply if Redis is slow or reconnecting.
+        this.eventsService.broadcastTenantEvent(client.id, {
           type: SSE_EVENT_TYPES.CONVERSATION_FLAG,
           conversationId: conv.id,
           needsHuman: true,
-        });
+        }).catch(() => {});
       }
     } else {
       // 6. Generate AI auto-reply if enabled and not paused/needs_human.
@@ -94,6 +143,15 @@ export class AiReplyService {
       const isGlobalAutoReply = !autoReplyRow.rows[0] || autoReplyRow.rows[0].value !== '0';
 
       if (isGlobalAutoReply && !client.ai_paused && !conv.needs_human && (access?.aiAllowed ?? false)) {
+        // Any failure in the AI chain below must fall back to the
+        // deterministic responder, never drop the reply (Seg-D, W1).
+        // prodsRows/kbRows are hoisted so the fallback can still use
+        // whatever catalog data was already loaded.
+        let prodsRows: any[] = [];
+        let kbRows: any[] = [];
+        const history: Array<{ role: string; content: string }> = [];
+        const dbStarted = Date.now();
+        try {
         // Enforce daily AI budget cap
         const todayStr = new Date().toISOString().slice(0, 10);
         const budRes = await this.pool.query(
@@ -111,6 +169,8 @@ export class AiReplyService {
 
         const prodsRes = await this.pool.query('SELECT name, sku, price_bdt, stock FROM products WHERE client_id = $1 ORDER BY id ASC', [client.id]);
         const kbRes = await this.pool.query('SELECT title, content, category FROM knowledge WHERE client_id = $1 ORDER BY id ASC', [client.id]);
+        prodsRows = prodsRes.rows;
+        kbRows = kbRes.rows;
 
         // Retrieve past messages for conversational memory & multi-turn dialog context
         const recentHistoryRes = await this.pool.query(
@@ -119,10 +179,11 @@ export class AiReplyService {
            ORDER BY id DESC LIMIT 8`,
           [conv.id, msg.id]
         );
-        const history = recentHistoryRes.rows.reverse().map(r => ({
+        history.push(...recentHistoryRes.rows.reverse().map(r => ({
           role: r.direction === 'in' ? 'user' : 'assistant',
           content: r.text,
-        }));
+        })));
+        timings.dbMs = Date.now() - dbStarted;
 
         // 6.1 Check if message contains a payment claim (TrxID / bKash / Nagad confirmation)
         const paymentClaim = parsePaymentClaim(text, prodsRes.rows, history);
@@ -156,6 +217,7 @@ export class AiReplyService {
             modelUsed = 'budget-fallback:deterministic';
           } else {
             // Ultra-fast path: Go AI Engine with native language detection & in-memory caching
+            const goStarted = Date.now();
             const goResult = await queryGoAIEngine({
               clientId: client.id,
               clientName: client.name,
@@ -165,11 +227,13 @@ export class AiReplyService {
               products: prodsRes.rows,
               knowledge: kbRes.rows,
             });
+            timings.goMs = Date.now() - goStarted;
 
             if (goResult && goResult.reply) {
               replyText = goResult.reply;
               modelUsed = goResult.model;
             } else {
+              const fallbackStarted = Date.now();
               const lang = detectCustomerLanguage(text);
               const langDir = languageDirective(lang);
               const sysPrompt = buildSystemPrompt({
@@ -190,6 +254,7 @@ export class AiReplyService {
               if (!replyText || replyText.trim().length === 0) {
                 replyText = demoResponder(client.id, text, prodsRes.rows, history, kbRes.rows);
               }
+              timings.fallbackMs = Date.now() - fallbackStarted;
             }
 
             // Increment daily used counter
@@ -199,27 +264,45 @@ export class AiReplyService {
             ).catch(() => {});
           }
         }
+        } catch (err: any) {
+          // The AI chain failed (DB, licence, Go engine, fallback) — answer
+          // from the deterministic responder with whatever catalog data was
+          // loaded instead of dropping the customer's reply (Seg-D, W1).
+          console.warn('[widget-ai-reply] AI chain failed, deterministic fallback:', err?.message || err);
+          replyText = demoResponder(client.id, text, prodsRows, history, kbRows);
+          modelUsed = 'error-fallback:deterministic';
+        }
       }
     }
 
     if (replyText) {
-      const outMsg = await this.pool.query(
-        `INSERT INTO messages (conversation_id, direction, text, raw_json, created_at)
-         VALUES ($1, 'out', $2, $3, NOW())
-         RETURNING *`,
-        [conv.id, replyText, JSON.stringify({ via: 'ai', model: modelUsed })]
-      );
-      replyId = outMsg.rows[0].id;
+      const outStarted = Date.now();
+      try {
+        const outMsg = await this.pool.query(
+          `INSERT INTO messages (conversation_id, direction, text, raw_json, created_at)
+           VALUES ($1, 'out', $2, $3, NOW())
+           RETURNING *`,
+          [conv.id, replyText, JSON.stringify({ via: 'ai', model: modelUsed })]
+        );
+        replyId = outMsg.rows[0].id;
+        timings.outDbMs = Date.now() - outStarted;
 
-      if (this.eventsService) {
-        await this.eventsService.broadcastTenantEvent(client.id, {
-          type: SSE_EVENT_TYPES.MESSAGE,
-          conversation: conv,
-          outbound: outMsg.rows[0],
-        });
+        if (this.eventsService) {
+          // Fire-and-forget (Seg-D): see the inbound broadcast above.
+          this.eventsService.broadcastTenantEvent(client.id, {
+            type: SSE_EVENT_TYPES.MESSAGE,
+            conversation: conv,
+            outbound: outMsg.rows[0],
+          }).catch(() => {});
+        }
+      } catch (err: any) {
+        // The reply was generated but could not be stored — still return
+        // it to the customer (replyId null) instead of dropping it.
+        console.warn('[widget-ai-reply] outbound insert failed, reply still returned:', err?.message || err);
+        timings.outDbMs = Date.now() - outStarted;
       }
     }
 
-    return { replyText, replyId, modelUsed };
+    return { replyText, replyId, modelUsed, timings };
   }
 }

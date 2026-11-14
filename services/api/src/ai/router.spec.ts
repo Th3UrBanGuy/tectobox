@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { demoResponder, queryGoAIEngine, GO_AI_TIMEOUT_MS } from './router.js';
+import { demoResponder, queryGoAIEngine, GO_AI_TIMEOUT_MS, resetGoAiCircuitBreaker } from './router.js';
 
 describe('demoResponder (API)', () => {
   it('answers delivery from knowledge when delivery knowledge is seeded', () => {
@@ -87,10 +87,14 @@ describe('queryGoAIEngine (F1 bridge)', () => {
     // queryGoAIEngine fails fast when GO_AI_URL is unset (Phase 6); the
     // tests stub fetch, so the URL value itself is irrelevant.
     process.env.GO_AI_URL = 'http://127.0.0.1:8081/api/ai/chat';
+    // The circuit breaker is module-level state: reset it so failures
+    // recorded by one test cannot trip the breaker in the next.
+    resetGoAiCircuitBreaker();
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    resetGoAiCircuitBreaker();
     if (origGoAiUrl === undefined) delete process.env.GO_AI_URL;
     else process.env.GO_AI_URL = origGoAiUrl;
   });
@@ -148,5 +152,79 @@ describe('queryGoAIEngine (F1 bridge)', () => {
   it('has explicit timeout bounded to 25s below widget 30s abort', () => {
     expect(GO_AI_TIMEOUT_MS).toBe(25000);
     expect(GO_AI_TIMEOUT_MS).toBeLessThan(30000);
+  });
+
+  // Seg-D (W1): a missing backend URL must never throw out of the widget
+  // path — the caller falls through to the deterministic responder.
+  it('returns null (does not throw) when GO_AI_URL is unset', async () => {
+    delete process.env.GO_AI_URL;
+    const res = await queryGoAIEngine({
+      clientId: 77,
+      clientName: 'Shop B',
+      businessType: 'physical',
+      text: 'hi',
+      knowledge: [],
+    });
+    expect(res).toBeNull();
+  });
+
+  // Seg-D (W1): after 3 consecutive engine failures the circuit breaker
+  // opens and the widget is answered from the deterministic responder
+  // without burning the 25s fetch timeout again.
+  it('opens the circuit breaker after 3 consecutive failures', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error('connect ECONNREFUSED 127.0.0.1:8081');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const knowledge = [
+      {
+        title: 'Return Policy',
+        content: 'Returns accepted within 14 business days.',
+      },
+    ];
+    const params = {
+      clientId: 77,
+      clientName: 'Shop B',
+      businessType: 'physical',
+      text: 'What is your return policy?',
+      knowledge,
+    };
+
+    for (let i = 0; i < 3; i++) {
+      expect(await queryGoAIEngine(params)).toBeNull();
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    const open = await queryGoAIEngine(params);
+    expect(open).not.toBeNull();
+    expect(open?.reply).toContain('14 business days');
+    expect(open?.model).toBe('circuit-open:deterministic');
+    // Breaker open: no further fetch attempt was made.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('closes the circuit breaker again after a success', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error('connect ECONNREFUSED 127.0.0.1:8081');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const params = { clientId: 77, text: 'hi', knowledge: [] };
+    for (let i = 0; i < 3; i++) await queryGoAIEngine(params);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ reply: 'ok', language: 'en', model: 'x', cached: false }),
+    })));
+    // Breaker is still open (cooldown 30s), so the success cannot be
+    // observed yet — reset it, then a success must close it: the next
+    // failure after that must attempt a fetch again instead of
+    // short-circuiting.
+    resetGoAiCircuitBreaker();
+    expect((await queryGoAIEngine(params))?.reply).toBe('ok');
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await queryGoAIEngine(params)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });

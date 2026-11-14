@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -70,7 +71,13 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 				}
 				wCtx, wCancel := context.WithTimeout(context.WithoutCancel(ctx), t3Timeout)
 				defer wCancel()
-				if reply, err := e.callOpenAICompatible(wCtx, url, key, model, sysPrompt, userMsg); err == nil && reply != "" {
+				// Seg-D instrumentation: this leg has a detached 20s timeout
+				// (web2api drives the Gemini web UI), so log its elapsed time
+				// whenever it is actually attempted.
+				t3Start := time.Now()
+				reply, err := e.callOpenAICompatible(wCtx, url, key, model, sysPrompt, userMsg)
+				log.Printf("[ai] tier3 web2api elapsed_ms=%d err=%v", time.Since(t3Start).Milliseconds(), err)
+				if err == nil && reply != "" {
 					return reply, "gemini-web2api:" + model, nil
 				}
 			}

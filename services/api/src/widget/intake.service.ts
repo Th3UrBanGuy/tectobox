@@ -13,6 +13,8 @@ export interface WidgetIntakeContext {
   name: string | null;
   phone: string | null;
   access: any | null;
+  /** Per-stage timings in ms (Seg-D instrumentation, logged by the controller). */
+  timings?: { licenceMs: number; dbMs: number; totalMs: number };
 }
 
 /**
@@ -34,6 +36,7 @@ export class WidgetIntakeService {
   ) {}
 
   async intake(widgetKey: string, body: any): Promise<WidgetIntakeContext> {
+    const started = Date.now();
     const clientRes = await this.pool.query(
       'SELECT id, name, suspended FROM clients WHERE widget_key = $1 LIMIT 1',
       [widgetKey]
@@ -45,9 +48,11 @@ export class WidgetIntakeService {
     // Licence gate for the widget itself (the webchat feature): the widget
     // is public-by-key, so the owner's licence is resolved here, not from
     // a caller. Without webchat the intake is refused outright.
+    const licenceStarted = Date.now();
     const access = this.licensing
       ? await this.licensing.resolveAccess(client.id)
       : null;
+    const licenceMs = Date.now() - licenceStarted;
     if (access && !access.features.includes('webchat')) {
       throw new ForbiddenException('Webchat is not included in this workspace licence.');
     }
@@ -62,6 +67,7 @@ export class WidgetIntakeService {
     const phone = digits.length >= 7 && digits.length <= 15 ? digits : null;
 
     // 1. Upsert conversation
+    const dbStarted = Date.now();
     const convRes = await this.pool.query(
       `INSERT INTO conversations (client_id, platform, platform_user_id, slot, customer_name, customer_phone, customer_contact, last_message_at, unread_count, status)
        VALUES ($1, 'webchat', $2, 'default', $3, $4, $5, NOW(), 1, 'open')
@@ -102,15 +108,18 @@ export class WidgetIntakeService {
       [client.id, visitorId, name, phone]
     ).catch(() => {});
 
-    // 4. Broadcast inbound SSE
+    // 4. Broadcast inbound SSE — fire-and-forget (Seg-D): the admin
+    // SSE fan-out over Redis must never stall the customer's reply if
+    // Redis is slow or reconnecting. broadcastTenantEvent already
+    // swallows publish errors internally.
     if (this.eventsService) {
-      await this.eventsService.broadcastTenantEvent(client.id, {
+      this.eventsService.broadcastTenantEvent(client.id, {
         type: SSE_EVENT_TYPES.MESSAGE,
         conversation: conv,
         inbound: msg,
-      });
+      }).catch(() => {});
     }
 
-    return { client, conv, msg, text, visitorId, name, phone, access };
+    return { client, conv, msg, text, visitorId, name, phone, access, timings: { licenceMs, dbMs: Date.now() - dbStarted, totalMs: Date.now() - started } };
   }
 }

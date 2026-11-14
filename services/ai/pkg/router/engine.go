@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -60,7 +61,15 @@ func NewEngine() *Engine {
 // 1. Detects customer language (Bangla script, Banglish, English)
 // 2. Builds contextual system prompt with catalog, policies, and past conversation memory
 // 3. Executes multi-tier routing: Gemini Web -> Cloudflare -> Direct APIs -> Demo responder
-func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMessage string, history []ChatMessage, modelPreference string) (string, detector.Language, string, bool) {
+func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMessage string, history []ChatMessage, modelPreference string) (out string, outLang detector.Language, outModel string, outCached bool) {
+	// Seg-D instrumentation: one log line per reply with the tier that
+	// served it and the elapsed time, so a slow tier is visible in the
+	// ai container log (previously the engine logged nothing per request).
+	start := time.Now()
+	defer func() {
+		log.Printf("[ai] model=%s cached=%v elapsed_ms=%d", outModel, outCached, time.Since(start).Milliseconds())
+	}()
+
 	cleanMsg := strings.TrimSpace(userMessage)
 	if cleanMsg == "" {
 		return "", detector.LangEnglish, "none", false
