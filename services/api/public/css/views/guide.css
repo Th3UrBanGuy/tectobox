@@ -71,7 +71,10 @@
 
 /* guide image step badges */
 .guide-img-wrap{position:relative; display:block; margin-top:10px; border-radius:16px; overflow:hidden;
-  border:1px solid var(--line-hi); box-shadow:var(--shadow);}
+  border:1px solid var(--line-hi); box-shadow:var(--shadow);
+  /* P22: guide screenshots are 1200x624 — reserve the space so the
+  layout does not jump (0-height flash) while the image loads. */
+  aspect-ratio:1200/624; background:var(--hover);}
 .guide-img{width:100%; display:block; margin:0 !important; border:none !important; border-radius:0 !important; box-shadow:none !important;}
 .guide-img-num{position:absolute; top:10px; left:10px; width:30px; height:30px; border-radius:50%;
   background:#111; color:#fff; font-size:14px; font-weight:800; display:flex; align-items:center; justify-content:center;

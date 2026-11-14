@@ -5,6 +5,31 @@ import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
 
+/**
+ * P18 (2026-11-15): normalise a knowledge category to its canonical
+ * key. The form sends keys ('policy') but a label ('Return / Policy',
+ * any case) could also arrive — and a stored label fell through the
+ * frontend's key lookup to 'General'. Accept key OR label, any case;
+ * unknown values become 'general'.
+ */
+export const KB_CATEGORIES: Record<string, string> = {
+  policy: 'Return / Policy',
+  shipping: 'Shipping',
+  product: 'Product info',
+  faq: 'FAQ',
+  marketing: 'Marketing',
+  general: 'General',
+};
+
+export function normalizeKnowledgeCategory(raw: any): string {
+  const s = String(raw || '').trim().toLowerCase();
+  if (KB_CATEGORIES[s]) return s;
+  for (const [key, label] of Object.entries(KB_CATEGORIES)) {
+    if (label.toLowerCase() === s) return key;
+  }
+  return 'general';
+}
+
 @Controller('api')
 @UseGuards(TenantGuard)
 export class KnowledgeController {
@@ -40,7 +65,7 @@ export class KnowledgeController {
       `INSERT INTO knowledge (client_id, title, content, category, source_url, created_at)
        VALUES ($1, $2, $3, $4, $5, NOW())
        RETURNING *`,
-      [tenantId, body.title, body.content, body.category || 'general', body.source_url || null]
+      [tenantId, body.title, body.content, normalizeKnowledgeCategory(body.category), body.source_url || null]
     );
     const item = result.rows[0];
     return { ...item, ok: true, success: true, item };
@@ -64,7 +89,7 @@ export class KnowledgeController {
     const cur = check.rows[0];
     const title = body.title ?? cur.title;
     const content = body.content ?? cur.content;
-    const category = body.category ?? cur.category;
+    const category = body.category !== undefined ? normalizeKnowledgeCategory(body.category) : cur.category;
 
     const result = await this.pool.query(
       `UPDATE knowledge

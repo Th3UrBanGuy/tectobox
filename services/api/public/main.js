@@ -120,7 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btnRefOrders.disabled = true;
     try {
       const n = await loadOrdersPage();
-      if (n == null) toast('Could not refresh orders — see the list for details.', 'err');
+      if (n == null) toast('Could not refresh orders: ' + (state.ordersError || 'unknown error'), 'err');
       else if (n === 0) toast('Orders refreshed — no orders yet');
       else toast(`Orders refreshed — ${n} order${n === 1 ? '' : 's'}`);
     } catch (e) { toast('Refresh failed: ' + (e && e.message ? e.message : 'unknown error'), 'err'); }
@@ -290,7 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('btn-tg-verify').disabled = true;
     $('qr-status').textContent = 'Verifying…';
     try {
-      const res = await api(`/api/clients/${state.clientId}/connectors/telegram/signin`, {
+      const res = await clientApi(`/api/clients/:clientId/connectors/telegram/signin`, {
         method: 'POST',
         body: JSON.stringify({ slot: state.qrSlot || 'default', code, password: password || undefined }),
       });
@@ -321,7 +321,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('btn-pairing-change-number').style.display = 'none';
     $('qr-status').textContent = 'Requesting a new pairing code…';
     try {
-      await api(`/api/clients/${state.clientId}/connectors/whatsapp/connect`, {
+      await clientApi(`/api/clients/:clientId/connectors/whatsapp/connect`, {
         method: 'POST',
         body: JSON.stringify({ slot: state.qrSlot || 'default', method: 'phone', phoneNumber: state.qrPhone }),
       });
@@ -336,7 +336,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const num = await askPhoneNumber(ch);
     if (!num) return;
     try {
-      await api(`/api/clients/${state.clientId}/connectors/${ch}/connect`, {
+      await clientApi(`/api/clients/:clientId/connectors/${ch}/connect`, {
         method: 'POST',
         body: JSON.stringify({ slot: sl, method: 'phone', phoneNumber: num }),
       });

@@ -317,6 +317,8 @@ export const SSE_EVENT_TYPES = {
   TG_CODE_ERROR: 'tg_code_error',
   /** Telegram account needs its 2FA password. */
   TG_PASSWORD_NEEDED: 'tg_password_needed',
+  /** Admin broadcast notification to a workspace (P12). */
+  ADMIN_NOTIFICATION: 'admin:notification',
 } as const;
 
 export type SseEventType = (typeof SSE_EVENT_TYPES)[keyof typeof SSE_EVENT_TYPES];

@@ -22,6 +22,17 @@ export const SYSTEM_FEATURES = [
  * class-level TenantGuard and the method-level AdminGuard on the plan
  * routes are preserved; `getFeatures` stays open to tenants.
  */
+/**
+ * P8 (2026-11-15): plans store features in the `features_json` column
+ * but the frontend reads `p.features` — so every plan rendered "0
+ * features" even when created with all 7 checked. Map the column to
+ * the `features` field on every plan row the API returns.
+ */
+function withFeatures(row: any) {
+  const features = row.features_json ?? row.features ?? [];
+  return { ...row, features: Array.isArray(features) ? features : [] };
+}
+
 @Controller('api')
 @UseGuards(TenantGuard)
 export class PlansController {
@@ -40,7 +51,7 @@ export class PlansController {
   @UseGuards(AdminGuard)
   async listPlans() {
     const result = await this.pool.query('SELECT * FROM plans ORDER BY id ASC');
-    return result.rows;
+    return result.rows.map(withFeatures);
   }
 
   @Post('admin/plans')
@@ -59,7 +70,7 @@ export class PlansController {
         body.price_bdt || 0,
       ]
     );
-    return result.rows[0];
+    return withFeatures(result.rows[0]);
   }
 
   @Patch('admin/plans/:id')
@@ -82,7 +93,7 @@ export class PlansController {
         id,
       ]
     );
-    return result.rows[0];
+    return withFeatures(result.rows[0]);
   }
 
   @Delete('admin/plans/:id')

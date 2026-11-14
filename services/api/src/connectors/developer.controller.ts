@@ -10,6 +10,7 @@ import {
   Inject,
   ParseIntPipe,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import crypto, { randomBytes } from 'crypto';
@@ -95,7 +96,14 @@ export class DeveloperController {
     @Body() body: { name?: string }
   ) {
     const target = tenantId || clientId;
-    const name = String(body?.name || 'integration').trim().slice(0, 60);
+    // P7/P19 (2026-11-15): the name is REQUIRED. The old code defaulted
+    // an empty name to 'integration' — which created the stray xyz key
+    // the coordinator had to delete by hand — and a missing/invalid
+    // name reached the DB and leaked its internal error ("Validation
+    // failed (numeric string is expected)") to the user. Validate
+    // FIRST, with a clean message, before any DB work.
+    const name = String(body?.name || '').trim().slice(0, 60);
+    if (!name) throw new BadRequestException('Name is required — নাম দিন');
     const raw = 'tk_' + randomBytes(24).toString('hex');
     const prefix = raw.slice(0, 8);
     const hash = crypto.createHash('sha256').update(raw).digest('hex');
@@ -116,10 +124,14 @@ export class DeveloperController {
     @Param('id', ParseIntPipe) id: number
   ) {
     const target = tenantId || clientId;
-    await this.pool.query(
-      'UPDATE api_keys SET revoked = true WHERE id = $1 AND client_id = $2',
+    // P19: revoke must actually revoke — the old code returned ok even
+    // when no row matched, so a failed revoke looked successful. A
+    // missing/foreign key is a clean 404, never a silent ok.
+    const result = await this.pool.query(
+      'UPDATE api_keys SET revoked = true WHERE id = $1 AND client_id = $2 AND NOT revoked RETURNING id',
       [id, target]
     );
+    if (result.rowCount === 0) throw new NotFoundException('API key not found');
     return { ok: true, success: true };
   }
 
@@ -166,10 +178,11 @@ export class DeveloperController {
     @Param('id', ParseIntPipe) id: number
   ) {
     const target = tenantId || clientId;
-    await this.pool.query(
-      'DELETE FROM client_webhooks WHERE id = $1 AND client_id = $2',
+    const result = await this.pool.query(
+      'DELETE FROM client_webhooks WHERE id = $1 AND client_id = $2 RETURNING id',
       [id, target]
     );
+    if (result.rowCount === 0) throw new NotFoundException('Webhook not found');
     return { ok: true, success: true };
   }
 }

@@ -10,12 +10,21 @@ const KB_CATS = {
   policy: 'Return / Policy', shipping: 'Shipping', product: 'Product info',
   faq: 'FAQ', marketing: 'Marketing', general: 'General',
 };
-const kbCatLabel = c => KB_CATS[c] || 'General';
+// P18: a stored LABEL ('Return / Policy') must map back to its label,
+// not fall through to 'General' — older rows may hold the label.
+const KB_CATS_BY_LABEL = Object.fromEntries(
+  Object.entries(KB_CATS).map(([k, l]) => [l.toLowerCase(), l]));
+const kbCatLabel = c => KB_CATS[c] || KB_CATS_BY_LABEL[String(c || '').toLowerCase()] || 'General';
+const kbCatKey = c => {
+  if (KB_CATS[c]) return c;
+  const hit = Object.entries(KB_CATS).find(([, l]) => l.toLowerCase() === String(c || '').toLowerCase());
+  return hit ? hit[0] : 'general';
+};
 const kbCatOptions = sel => Object.entries(KB_CATS).map(([v, l]) =>
   `<option value="${v}"${v === sel ? ' selected' : ''}>${l}</option>`).join('');
 
 async function loadKnowledge() {
-  state.knowledge = await api(`/api/clients/${state.clientId}/knowledge`);
+  state.knowledge = await clientApi(`/api/clients/:clientId/knowledge`);
   // A non-array payload (backend hiccup) used to crash the whole KB view
   // with "state.knowledge.map is not a function" (2026-11-13 click audit).
   if (!Array.isArray(state.knowledge)) state.knowledge = [];
@@ -47,7 +56,7 @@ function kbStartEdit(id) {
   card.innerHTML = `
     <div class="frow" style="margin-bottom:10px; display:flex; gap:10px;">
       <input class="input no-icon" data-kbe-title type="text" value="${esc(k.title)}" style="flex:2;">
-      <select class="input no-icon" data-kbe-cat style="flex:1;">${kbCatOptions(k.category || 'general')}</select>
+      <select class="input no-icon" data-kbe-cat style="flex:1;">${kbCatOptions(kbCatKey(k.category || 'general'))}</select>
     </div>
     <div class="frow" style="margin-bottom:10px;"><textarea class="input no-icon" data-kbe-content rows="4">${esc(k.content)}</textarea></div>
     <div class="row">
@@ -207,7 +216,7 @@ async function saveKnowledge() {
   const category = $('kb-category').value;
   if (!title || !content) return toast('Title and content are required', 'err');
   try {
-    await api(`/api/clients/${state.clientId}/knowledge`, { method: 'POST', body: JSON.stringify({ title, content, category }) });
+    await clientApi(`/api/clients/:clientId/knowledge`, { method: 'POST', body: JSON.stringify({ title, content, category }) });
     $('kb-title').value = ''; $('kb-content').value = '';
     loadKnowledge();
   } catch (e) { toast('Could not save: ' + e.message, 'err'); }
@@ -220,7 +229,7 @@ async function saveKnowledge() {
 async function restartGateway(channel, slot = 'default') {
   let res;
   try {
-    res = await api(`/api/clients/${state.clientId}/connectors/${channel}/connect`, {
+    res = await clientApi(`/api/clients/:clientId/connectors/${channel}/connect`, {
       method: 'POST', body: JSON.stringify({ slot }),
     });
   } catch (e) { return toast('Could not restart: ' + e.message, 'err'); }
@@ -230,7 +239,7 @@ async function restartGateway(channel, slot = 'default') {
   const t0 = Date.now();
   const timer = setInterval(async () => {
     let s;
-    try { s = await api(`/api/clients/${state.clientId}/connectors`); } catch { return; }
+    try { s = await clientApi(`/api/clients/:clientId/connectors`); } catch { return; }
     const accts = (((channel === 'whatsapp' ? s.whatsapp : s.telegram) || {}).accounts) || [];
     const acct = accts.find(a => (a.slot || 'default') === slot);
     if (!acct) { clearInterval(timer); loadConnectors(); return; }

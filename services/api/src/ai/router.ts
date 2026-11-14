@@ -38,6 +38,7 @@ export {
   GO_AI_TIMEOUT_MS,
   languageDirective,
   parsePaymentClaim,
+  isActualPaymentStatement,
   queryGoAIEngine,
   resetGoAiCircuitBreaker,
   toBengaliDigits,

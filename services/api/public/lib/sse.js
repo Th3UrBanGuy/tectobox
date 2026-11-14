@@ -42,6 +42,9 @@ function connectSSE() {
           const conv = state.conversations.find(c => c.id === state.activeId);
           if (conv) { conv.unread_count = 0; renderConvList(); }
         }
+      } else if (evt.type === 'admin:notification') {
+        // P12: an admin broadcast to this workspace — show it as a toast.
+        toast(`${evt.title ? evt.title + ': ' : ''}${evt.message || ''}`, 'ok');
       } else if (evt.type === 'payment:received') {
         playPaymentChime();
         updatePaymentBadge((state.pendingPaymentsCount || 0) + 1);

@@ -10,6 +10,7 @@ async function loadOrdersPage() {
   const box = $('orders-full-list');
   if (!box) return;
   box.innerHTML = '<div class="small muted" style="padding:24px; text-align:center;">Loading orders & logistics...</div>';
+  state.ordersError = null;
   try {
     const res = await api('/api/orders');
     const orders = res.orders || res || [];
@@ -66,7 +67,16 @@ async function loadOrdersPage() {
     });
     return orders.length;
   } catch (e) {
-    box.innerHTML = `<div class="notice warn">${esc(e.message)}</div>`;
+    // P4: the real error, in the list, WITH a Retry button — the old
+    // refresh handler toasted a generic "see the list for details"
+    // while the list showed nothing actionable.
+    state.ordersError = e.message || 'Unknown error';
+    box.innerHTML = `<div class="notice warn" style="display:flex; flex-direction:column; gap:10px; align-items:flex-start;">
+      <span>Could not load orders: ${esc(state.ordersError)}</span>
+      <button class="btn-primary" id="btn-orders-retry">Retry</button>
+    </div>`;
+    const rb = $('btn-orders-retry');
+    if (rb) rb.onclick = () => loadOrdersPage();
     return null;
   }
 }

@@ -3,6 +3,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { EventsService } from '../events/events.service.js';
 import { SSE_EVENT_TYPES } from '@tectonic/contracts';
 import { LicensingService } from '../licensing/licensing.service.js';
+import { extractLeadSignals } from './lead-intel.js';
 
 export interface WidgetIntakeContext {
   client: any;
@@ -97,15 +98,41 @@ export class WidgetIntakeService {
     );
     const msg = insertMsg.rows[0];
 
-    // 3. Upsert lead
+    // 3. Upsert lead — P15 (2026-11-15): fill the intel fields from the
+    // real chat via extractLeadSignals instead of the old hardcoded
+    // score 20 / 'warm' placeholder. Signals are MERGED, never
+    // overwritten with empties: a later "hello" must not erase a
+    // product affinity a previous message established. On conflict the
+    // stored values win when the new message adds nothing (score takes
+    // the max, temperature follows the max score).
+    const signals = await this.pool
+      .query('SELECT id, name, price_bdt FROM products WHERE client_id = $1 ORDER BY id', [client.id])
+      .then((r) => extractLeadSignals(text, r.rows))
+      .catch(() => extractLeadSignals(text, []));
     await this.pool.query(
-      `INSERT INTO leads (client_id, platform, platform_user_id, name, phone, status, stage, score, temperature, created_at, updated_at)
-       VALUES ($1, 'webchat', $2, $3, $4, 'lead', 'new', 20, 'warm', NOW(), NOW())
+      `INSERT INTO leads (client_id, platform, platform_user_id, name, phone, status, stage, score, temperature,
+                          product_affinity_json, intent_summary, predicted_value_bdt, conversion_probability, next_action, intel_updated_at, created_at, updated_at)
+       VALUES ($1, 'webchat', $2, $3, $4, 'lead', 'new', $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), NOW())
        ON CONFLICT(client_id, platform, platform_user_id) DO UPDATE
        SET name = COALESCE(excluded.name, leads.name),
            phone = COALESCE(excluded.phone, leads.phone),
+           score = GREATEST(leads.score, excluded.score),
+           temperature = CASE WHEN GREATEST(leads.score, excluded.score) >= 60 THEN 'hot'
+                              WHEN GREATEST(leads.score, excluded.score) >= 35 THEN 'warm'
+                              ELSE leads.temperature END,
+           product_affinity_json = CASE WHEN jsonb_array_length(excluded.product_affinity_json) > 0 THEN excluded.product_affinity_json ELSE leads.product_affinity_json END,
+           intent_summary = CASE WHEN excluded.intent_summary <> '' THEN excluded.intent_summary ELSE leads.intent_summary END,
+           predicted_value_bdt = CASE WHEN excluded.predicted_value_bdt > 0 THEN excluded.predicted_value_bdt ELSE leads.predicted_value_bdt END,
+           conversion_probability = CASE WHEN excluded.conversion_probability > 0 THEN excluded.conversion_probability ELSE leads.conversion_probability END,
+           next_action = CASE WHEN excluded.next_action <> '' THEN excluded.next_action ELSE leads.next_action END,
+           intel_updated_at = NOW(),
            updated_at = NOW()`,
-      [client.id, visitorId, name, phone]
+      [
+        client.id, visitorId, name, phone,
+        signals.score, signals.temperature,
+        JSON.stringify(signals.productAffinity), signals.intentSummary,
+        signals.predictedValueBdt, signals.conversionProbability, signals.nextAction,
+      ]
     ).catch(() => {});
 
     // 4. Broadcast inbound SSE — fire-and-forget (Seg-D): the admin

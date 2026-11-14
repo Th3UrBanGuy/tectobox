@@ -21,6 +21,24 @@ export interface SlowRequestRecord {
 export interface WatchdogMetrics {
   uptimeSec: number;
   status: 'HEALTHY' | 'DEGRADED' | 'CRITICAL';
+  /**
+   * P11 (2026-11-15): flat aliases for the dashboard counters. The
+   * admin watchdog view reads these flat fields (metrics.activeRequests,
+   * metrics.requestsPerMinute, metrics.totalRequests,
+   * metrics.avgLatencyMs, metrics.statusCodes) — the old shape only
+   * had the nested requests/performance objects, so every counter read
+   * `?? 0` and the panel showed HEALTHY with all counters at 0 while
+   * the endpoint table below it showed real traffic. The nested shape
+   * is kept for existing consumers; the flat fields are the same data.
+   */
+  activeRequests: number;
+  requestsPerMinute: number;
+  totalRequests: number;
+  avgLatencyMs: number;
+  p95LatencyMs: number;
+  maxLatencyMs: number;
+  errorRate: number;
+  statusCodes: { '2xx': number; '3xx': number; '4xx': number; '5xx': number };
   requests: {
     total: number;
     active: number;
@@ -214,13 +232,25 @@ export class WatchdogService {
     const heapTotalMb = Math.round(mem.heapTotal / 1024 / 1024);
 
     const alerts: string[] = [];
+    // P11: the old rate counted 5xx only — the audit's 124 errors on
+    // /api/conversations were 4xx and never moved the HEALTHY badge.
+    // The badge must reflect the real error rate (4xx + 5xx). The rate
+    // only drives status/alerts once there is a real sample (20+
+    // requests) — a single 404 among a handful of requests is not a
+    // degraded system, but 124 errors in 329 hits is.
     const errorRate =
+      this.totalRequests > 0 ? ((this.status4xx + this.status5xx) / this.totalRequests) * 100 : 0;
+    const errorRate5xx =
       this.totalRequests > 0 ? (this.status5xx / this.totalRequests) * 100 : 0;
+    const hasErrorSample = this.totalRequests >= 20;
 
-    if (errorRate > 20) {
-      alerts.push(`CRITICAL: 5xx error rate is elevated at ${errorRate.toFixed(1)}%`);
-    } else if (errorRate > 5) {
-      alerts.push(`WARNING: 5xx error rate is above threshold at ${errorRate.toFixed(1)}%`);
+    if (hasErrorSample && errorRate > 20) {
+      alerts.push(`CRITICAL: error rate is elevated at ${errorRate.toFixed(1)}%`);
+    } else if (hasErrorSample && errorRate > 5) {
+      alerts.push(`WARNING: error rate is above threshold at ${errorRate.toFixed(1)}%`);
+    }
+    if (hasErrorSample && errorRate5xx > 5) {
+      alerts.push(`WARNING: 5xx error rate is ${errorRate5xx.toFixed(1)}%`);
     }
 
     if (avgLatencyMs > 1500) {
@@ -232,9 +262,9 @@ export class WatchdogService {
     }
 
     let status: 'HEALTHY' | 'DEGRADED' | 'CRITICAL' = 'HEALTHY';
-    if (errorRate > 20) {
+    if (hasErrorSample && errorRate > 20) {
       status = 'CRITICAL';
-    } else if (errorRate > 5 || avgLatencyMs > 1500 || rssMb > 500) {
+    } else if ((hasErrorSample && errorRate > 5) || avgLatencyMs > 1500 || rssMb > 500) {
       status = 'DEGRADED';
     }
 
@@ -250,6 +280,20 @@ export class WatchdogService {
     return {
       uptimeSec: Math.round((now - this.startTime) / 1000),
       status,
+      // P11 flat aliases — same numbers as the nested shape below.
+      activeRequests: this.activeRequests,
+      requestsPerMinute: rpm,
+      totalRequests: this.totalRequests,
+      avgLatencyMs,
+      p95LatencyMs,
+      maxLatencyMs: this.maxLatencyMs,
+      errorRate,
+      statusCodes: {
+        '2xx': this.status2xx,
+        '3xx': this.status3xx,
+        '4xx': this.status4xx,
+        '5xx': this.status5xx,
+      },
       requests: {
         total: this.totalRequests,
         active: this.activeRequests,

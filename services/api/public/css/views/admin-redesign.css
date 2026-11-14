@@ -46,7 +46,8 @@
 .lic-sec{margin-bottom:22px;}
 .lic-sec-t{margin-bottom:12px;}
 .lic-sec-t h3{font-size:17px;font-weight:800;color:var(--ink);margin:0 0 2px;}
-.lic-sec-t p{color:var(--muted);font-size:13px;margin:0;}
+/* P8: help text must never be cut off — wrap fully, no truncation. */
+.lic-sec-t p{color:var(--muted);font-size:13px;margin:0;overflow:visible;white-space:normal;text-overflow:clip;}
 .plan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-bottom:6px;}
 .plan-card{background:var(--card);border:1.5px solid var(--line);border-radius:var(--r-lg);padding:16px;
   box-shadow:var(--shadow);transition:border-color .15s,transform .15s var(--ease);}

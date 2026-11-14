@@ -7,8 +7,15 @@
 
 // ---------------- admin ----------------
 async function loadAdmin() {
+  // P2 (2026-11-15): the old Promise.all blanked the whole view when
+  // ONE fetch failed (and the "Manage" actions on the cards vanished
+  // with it). Each fetch is now isolated — a failure shows an empty
+  // section + a toast, never a blank admin view.
+  const safe = async (p, fallback) => { try { return await p; } catch (e) { toast('Failed to load admin data: ' + e.message, 'err'); return fallback; } };
   const [ov, workspaces, resources] = await Promise.all([
-    api('/api/admin/overview'), api('/api/admin/workspaces'), api('/api/admin/resources'),
+    safe(api('/api/admin/overview'), { workspaces: 0, channels: 0, connected: 0, errored: 0 }),
+    safe(api('/api/admin/workspaces'), []),
+    safe(api('/api/admin/resources'), []),
   ]);
   const stats = [
     ['Workspaces', ov.workspaces, ''],
@@ -78,7 +85,7 @@ function renderWorkspaces(workspaces) {
         <div class="ws-ctl">
           <div><b>AI replies</b><small>${w.ai_paused ? 'Paused — inbox still works' : 'AI answers customers'}</small></div>
           <div class="spacer"></div>
-          <label class="switch" title="Pause AI for this workspace"><input type="checkbox" data-wsai="${w.client_id}" ${w.ai_paused ? 'checked' : ''} ${w.suspended ? 'disabled' : ''}><span class="sl"></span></label>
+          <label class="switch" title="AI replies on/off"><input type="checkbox" data-wsai="${w.client_id}" ${!w.ai_paused ? 'checked' : ''} ${w.suspended ? 'disabled' : ''}><span class="sl"></span></label>
         </div>
         ${budgetCtl}
         <div class="ws-ctl">
@@ -100,9 +107,12 @@ function renderWorkspaces(workspaces) {
     </div>`;
   }).join('') || '<div class="card"><p class="muted">No workspaces yet.</p></div>';
   document.querySelectorAll('[data-wsai]').forEach(t => t.onchange = async () => {
+    // P9: the checkbox now means "AI ON" (checked = answering), matching
+    // the "AI on" badge — it used to mean "paused", the exact inverse.
+    const paused = !t.checked;
     try {
-      await api(`/api/admin/clients/${t.dataset.wsai}/ai-pause`, { method: 'POST', body: JSON.stringify({ paused: t.checked }) });
-      toast(t.checked ? 'AI paused — inbox keeps working' : 'AI resumed');
+      await api(`/api/admin/clients/${t.dataset.wsai}/ai-pause`, { method: 'POST', body: JSON.stringify({ paused }) });
+      toast(paused ? 'AI paused — inbox keeps working' : 'AI resumed');
       loadAdmin();
     } catch (e) { toast('Failed: ' + e.message, 'err'); loadAdmin(); }
   });
@@ -450,10 +460,15 @@ async function saveAdminConfig() {
 }
 async function loadAdminAudit() {
   const rows = await api('/api/admin/audit');
-  $('audit-list').innerHTML = rows.map(a => `
+  // P12: the log had no column headers — add them so each row reads.
+  $('audit-list').innerHTML = `<div class="audit-row audit-head">
+      <span class="ev">Event</span>
+      <span class="muted small">Actor → Target</span>
+      <span class="right"><span>IP</span><span>When</span></span>
+    </div>` + (rows.map(a => `
     <div class="audit-row">
       <span class="ev">${esc(a.event)}</span>
       <span class="muted small">${esc(a.actor || '')}${a.target ? ' → ' + esc(a.target) : ''}</span>
       <span class="right"><span>${esc(a.ip || '')}</span><span>${fmtDT(a.created_at)}</span></span>
-    </div>`).join('') || '<div class="tbl-empty">No audit events yet.</div>';
+    </div>`).join('') || '<div class="tbl-empty">No audit events yet.</div>');
 }

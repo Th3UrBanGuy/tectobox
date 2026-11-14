@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Put, Body, Param, Query, Req, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException, NotImplementedException, UnauthorizedException, Optional } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Put, Body, Param, Query, Req, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException, UnauthorizedException, Optional, OnModuleInit } from '@nestjs/common';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { AdminGuard } from '../auth/admin.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
@@ -10,10 +10,22 @@ import { TotpService, totpErrorToHttp } from '../auth/totp.service.js';
 import { LicensingService } from '../licensing/licensing.service.js';
 import { EventsService } from '../events/events.service.js';
 import { CreateUserDto, ResetPasswordDto } from './dto/admin.dto.js';
+import { CF_MODEL_POOL } from '@tectonic/ai-router';
+import { SSE_EVENT_TYPES } from '@tectonic/contracts';
+
+/** P10 (2026-11-15): the correct internal AI-server URL. The old code
+ * default was http://localhost:18080/v1, which is what the live admin
+ * panel displayed — localhost inside a container is never the AI
+ * server. The runtime AI path uses GEMINI_WEB2API_URL /
+ * http://ai:8081/v1 (compose + app.config.ts); the admin config must
+ * show the same address. */
+const DEFAULT_AI_BASE_URL = 'http://ai:8081/v1';
+/** First Tier-1 model in providers.ts — the default when no model is configured. */
+const DEFAULT_AI_MODEL = 'gemini-3.6-flash';
 
 @Controller('api')
 @UseGuards(TenantGuard, AdminGuard)
-export class AdminController {
+export class AdminController implements OnModuleInit {
   private readonly totp: TotpService;
 
   constructor(
@@ -24,8 +36,68 @@ export class AdminController {
     this.totp = new TotpService(pool);
   }
 
+  /**
+   * P12: ensure the notifications history table exists (same
+   * CREATE-TABLE-IF-NOT-EXISTS pattern as PaymentsController) — the
+   * numbered migration 005 covers fresh/apply-on-deploy DBs, this
+   * covers a live DB where the migration has not been applied yet.
+   */
+  async onModuleInit() {
+    try {
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS admin_notifications (
+          id SERIAL PRIMARY KEY,
+          client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+          title TEXT NOT NULL DEFAULT 'Admin notice',
+          message TEXT NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_admin_notifications_client ON admin_notifications(client_id, created_at DESC);
+      `);
+    } catch (err: any) {
+      console.warn('[admin] Failed to ensure admin_notifications table:', err.message);
+    }
+  }
+
   private getEvents(): EventsService {
     return this.eventsService || new EventsService(this.pool, this.licensing);
+  }
+
+  /**
+   * P1 (2026-11-15): the ONE channel truth. Overview stats and the
+   * resources table are computed from this single query — the old code
+   * counted channels from channel_sessions only (with a hardcoded
+   * floor of 4) while the table merged channel_sessions + meta_pages
+   * and fabricated 3 rows when the DB was empty, so the numbers could
+   * never agree. Status 'ready' (webchat with a widget key) is
+   * normalised to 'connected' here — it means the same thing.
+   */
+  private async getChannelResources() {
+    const rows = await this.pool.query(`
+      SELECT cs.channel, cs.status, cs.updated_at as "lastSeen",
+             c.name AS workspace, c.id AS client_id, NULL AS account
+      FROM channel_sessions cs
+      JOIN clients c ON c.id = cs.client_id
+    `);
+    const meta = await this.pool.query(`
+      SELECT mp.channel, mp.status, mp.updated_at as "lastSeen",
+             cl.name AS workspace, cl.id AS client_id,
+             CASE WHEN mp.channel = 'instagram' THEN '@' || COALESCE(mp.ig_username, mp.page_id)
+                  ELSE mp.page_name END AS account
+      FROM meta_pages mp
+      JOIN clients cl ON cl.id = mp.client_id
+    `);
+    return [...rows.rows, ...meta.rows].map((r: any) => ({
+      channel: r.channel,
+      account: r.account || r.workspace || '—',
+      workspace: r.workspace || '—',
+      // 'ready' is the webchat status for "widget key exists" — it IS connected.
+      status: r.status === 'ready' ? 'connected' : (r.status || 'disconnected'),
+      clientId: r.client_id ?? null,
+      // No last-seen in the DB means never seen — show '—', never a
+      // fabricated timestamp (the old fallback stamped "now" on all rows).
+      lastSeen: r.lastSeen ? new Date(r.lastSeen).toISOString() : null,
+    }));
   }
 
   @Get(['admin/overview', 'global-stats'])
@@ -35,15 +107,13 @@ export class AdminController {
     const msgCount = await this.pool.query('SELECT COUNT(*) as count FROM messages');
     const orderCount = await this.pool.query('SELECT COUNT(*) as count, COALESCE(SUM(total_bdt), 0) as total FROM orders');
     const leadCount = await this.pool.query('SELECT COUNT(*) as count FROM leads');
-    const channelCount = await this.pool.query('SELECT COUNT(DISTINCT channel) as count FROM channel_sessions');
-    const connectedCount = await this.pool.query("SELECT COUNT(*) as count FROM channel_sessions WHERE status = 'connected'");
-    const erroredCount = await this.pool.query("SELECT COUNT(*) as count FROM channel_sessions WHERE status = 'error'");
+    const resources = await this.getChannelResources();
 
     return {
       workspaces: Number(clientsCount.rows[0]?.count || 0),
-      channels: Math.max(4, Number(channelCount.rows[0]?.count || 0)),
-      connected: Number(connectedCount.rows[0]?.count || 0),
-      errored: Number(erroredCount.rows[0]?.count || 0),
+      channels: resources.length,
+      connected: resources.filter((r) => r.status === 'connected').length,
+      errored: resources.filter((r) => r.status === 'error').length,
       conversations: Number(convCount.rows[0]?.count || 0),
       messages: Number(msgCount.rows[0]?.count || 0),
       orders: Number(orderCount.rows[0]?.count || 0),
@@ -79,6 +149,7 @@ export class AdminController {
                FROM licenses l
                LEFT JOIN plans p ON p.id = l.plan_id
                WHERE l.client_id = c.id AND l.status = 'active'
+                 AND (l.kind <> 'time' OR l.ends_at IS NULL OR l.ends_at > NOW())
                ORDER BY l.id DESC LIMIT 1
              ) as license
       FROM clients c
@@ -306,20 +377,46 @@ export class AdminController {
     const rows = await this.pool.query('SELECT key, value FROM settings');
     const cfg: Record<string, string> = {};
     for (const r of rows.rows) cfg[r.key] = r.value;
+    // P10 (2026-11-15): the old code returned ONLY autoReply /
+    // aiBaseUrl / settings — the frontend reads c.aiModel and
+    // c.aiModelPool, so the model fields were always empty, and the
+    // aiBaseUrl default was a localhost address that must never be
+    // served on the live site. Defaults now point at the real internal
+    // AI server (http://ai:8081/v1) and the Tier-1 model + CF pool.
+    const pool = cfg['ai.model_pool']
+      ? cfg['ai.model_pool'].split(',').map((s) => s.trim()).filter(Boolean)
+      : CF_MODEL_POOL;
     return {
       autoReply: cfg['ai.auto_reply'] !== '0',
-      aiBaseUrl: cfg['ai.base_url'] || 'http://localhost:18080/v1',
+      aiBaseUrl: cfg['ai.base_url'] || DEFAULT_AI_BASE_URL,
+      aiModel: cfg['ai.model'] || DEFAULT_AI_MODEL,
+      aiModelPool: pool,
       settings: cfg,
     };
   }
 
   @Put('admin/config')
   async updateConfig(@Body() body: any) {
+    // P10: the old code stored body keys verbatim ('aiModel',
+    // 'aiBaseUrl', 'autoReply') while getConfig reads the canonical
+    // keys ('ai.model', 'ai.base_url', 'ai.auto_reply') — so a save
+    // NEVER round-tripped (the auto-reply toggle silently did nothing).
+    // Map the frontend's camelCase keys to the canonical settings keys.
+    const keyMap: Record<string, string> = {
+      autoReply: 'ai.auto_reply',
+      aiModel: 'ai.model',
+      aiModelPool: 'ai.model_pool',
+      aiBaseUrl: 'ai.base_url',
+    };
     for (const [k, v] of Object.entries(body)) {
+      const key = keyMap[k] || k;
+      let value = v;
+      if (key === 'ai.auto_reply') value = v === true || v === '1' || v === 'true' ? '1' : '0';
+      if (key === 'ai.model_pool' && Array.isArray(v)) value = (v as string[]).join(',');
       await this.pool.query(
         `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW())
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = NOW()`,
-        [k, String(v)]
+        [key, String(value)]
       );
     }
     return { ok: true, success: true };
@@ -327,35 +424,11 @@ export class AdminController {
 
   @Get('admin/resources')
   async getResources() {
-    const rows = await this.pool.query(`
-      SELECT cs.channel, cs.status, cs.updated_at as "lastSeen",
-             c.name AS workspace, c.id AS client_id, NULL AS account
-      FROM channel_sessions cs
-      JOIN clients c ON c.id = cs.client_id
-    `);
-    const meta = await this.pool.query(`
-      SELECT mp.channel, mp.status, mp.updated_at as "lastSeen",
-             cl.name AS workspace, cl.id AS client_id,
-             CASE WHEN mp.channel = 'instagram' THEN '@' || COALESCE(mp.ig_username, mp.page_id)
-                  ELSE mp.page_name END AS account
-      FROM meta_pages mp
-      JOIN clients cl ON cl.id = mp.client_id
-    `);
-    const combined = [...rows.rows, ...meta.rows];
-    if (combined.length === 0) {
-      return [
-        { channel: 'whatsapp', account: 'Baileys Multi-Device', workspace: 'Default', status: 'connected', lastSeen: new Date().toISOString() },
-        { channel: 'telegram', account: 'GramJS Worker', workspace: 'Default', status: 'idle', lastSeen: new Date().toISOString() },
-        { channel: 'webchat', account: 'Widget Storefront', workspace: 'Default', status: 'connected', lastSeen: new Date().toISOString() },
-      ];
-    }
-    return combined.map(r => ({
-      channel: r.channel,
-      account: r.account || r.workspace || '—',
-      workspace: r.workspace || '—',
-      status: r.status || 'disconnected',
-      lastSeen: r.lastSeen || new Date().toISOString(),
-    }));
+    // P1: real rows only, from the same query as the overview. When
+    // nothing is connected the table is EMPTY — the old code fabricated
+    // whatsapp/telegram/webchat rows stamped "now", which is why the
+    // admin panel claimed "connected" while the real sessions were empty.
+    return this.getChannelResources();
   }
 
   @Get('stats')
@@ -389,9 +462,107 @@ export class AdminController {
     return res.rows[0];
   }
 
+  /**
+   * P12 (2026-11-15): notifications that actually send. The old code
+   * threw NotImplementedException while the UI offered a send form.
+   * Each send is recorded in `admin_notifications` (migration
+   * 005-admin-notifications.sql) so the Notifications tab can show a
+   * real history — never invented — and is broadcast over SSE to each
+   * target workspace, where the dashboard shows it as a toast.
+   * Body: { message, title?, clientIds?: number[] } — no clientIds
+   * means every workspace. A target workspace id that does not exist
+   * is skipped (recorded as skipped, not sent).
+   */
   @Post('admin/notify')
   async sendNotification(@Body() body: any) {
-    throw new NotImplementedException('Notification broadcasting is not implemented');
+    const message = String(body?.message || '').trim().slice(0, 2000);
+    if (!message) throw new BadRequestException('Message is required');
+    const title = String(body?.title || 'Admin notice').trim().slice(0, 120);
+    let targets: number[];
+    if (Array.isArray(body?.clientIds) && body.clientIds.length) {
+      targets = body.clientIds.map((n: any) => parseInt(String(n), 10)).filter((n: number) => !Number.isNaN(n));
+    } else {
+      const all = await this.pool.query('SELECT id FROM clients ORDER BY id');
+      targets = all.rows.map((r: any) => r.id);
+    }
+    if (targets.length === 0) return { ok: true, sent: 0, skipped: 0 };
+    const existing = await this.pool.query(
+      `SELECT id FROM clients WHERE id = ANY($1::int[])`, [targets]
+    );
+    const existingIds = new Set(existing.rows.map((r: any) => r.id));
+    const sent: number[] = [];
+    const skipped: number[] = [];
+    for (const id of targets) {
+      if (!existingIds.has(id)) { skipped.push(id); continue; }
+      await this.pool.query(
+        `INSERT INTO admin_notifications (client_id, title, message, created_at)
+         VALUES ($1, $2, $3, NOW())`,
+        [id, title, message]
+      );
+      sent.push(id);
+    }
+    const events = this.getEvents();
+    for (const id of sent) {
+      await events.broadcastTenantEvent(id, {
+        type: SSE_EVENT_TYPES.ADMIN_NOTIFICATION,
+        title,
+        message,
+      }).catch(() => {});
+    }
+    return { ok: true, sent: sent.length, skipped: skipped.length };
+  }
+
+  /** P12: the real sent-notifications history for the Notifications tab. */
+  @Get('admin/notifications')
+  async getNotifications(
+    @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string
+  ) {
+    const limit = Math.min(200, Math.max(1, parseInt(limitStr || '', 10) || 50));
+    const offset = Math.max(0, parseInt(offsetStr || '', 10) || 0);
+    const result = await this.pool.query(
+      `SELECT n.id, n.client_id, c.name AS workspace, n.title, n.message, n.created_at
+       FROM admin_notifications n
+       LEFT JOIN clients c ON c.id = n.client_id
+       ORDER BY n.id DESC LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+    return result.rows;
+  }
+
+  /**
+   * P13/P20 (2026-11-15): admin "View chat" — read a conversation that
+   * belongs to ANOTHER workspace. The admin has no tenant of their own,
+   * so the normal inbox endpoints (tenant-scoped) can never serve it.
+   * These AdminGuard endpoints return the conversation + its client +
+   * orders, and its messages, so the inbox can render the real
+   * conversation read-only instead of the admin's empty inbox.
+   */
+  @Get('admin/conversations/:id')
+  async getAdminConversation(@Param('id', ParseIntPipe) id: number) {
+    const conv = await this.pool.query(
+      `SELECT c.*, cl.name AS workspace, cl.id AS client_id
+       FROM conversations c JOIN clients cl ON cl.id = c.client_id
+       WHERE c.id = $1`,
+      [id]
+    );
+    if (conv.rows.length === 0) throw new NotFoundException('Conversation not found');
+    const orders = await this.pool.query(
+      'SELECT id, total_bdt, status, created_at FROM orders WHERE conversation_id = $1 ORDER BY id DESC LIMIT 20',
+      [id]
+    );
+    return { ...conv.rows[0], orders: orders.rows };
+  }
+
+  @Get('admin/conversations/:id/messages')
+  async getAdminConversationMessages(@Param('id', ParseIntPipe) id: number) {
+    const conv = await this.pool.query('SELECT id FROM conversations WHERE id = $1', [id]);
+    if (conv.rows.length === 0) throw new NotFoundException('Conversation not found');
+    const result = await this.pool.query(
+      'SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC, id ASC LIMIT 500',
+      [id]
+    );
+    return result.rows;
   }
 
   @Get('admin/clients/:id/ai-budget')

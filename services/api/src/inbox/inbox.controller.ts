@@ -61,10 +61,20 @@ export class InboxController {
     const total = parseInt(countRes.rows[0]?.total || '0', 10);
 
     const queryParams = [...params, limit, offset];
-    const dataSql = `SELECT c.id, c.client_id, c.platform, c.platform_user_id, c.slot, c.customer_name, c.customer_phone,
+    // P14 (2026-11-15): the list used to select c.customer_name only —
+    // null for webchat visitors who gave no name — so every row fell
+    // back to the platform label ("Webchat" / "WE"). Join the lead for
+    // the same visitor and prefer its name/phone; the frontend falls
+    // back to the visitor id when even the lead has no name.
+    const dataSql = `SELECT c.id, c.client_id, c.platform, c.platform_user_id, c.slot,
+                            COALESCE(c.customer_name, l.name) AS customer_name,
+                            COALESCE(c.customer_phone, l.phone) AS customer_phone,
                             c.last_message_at, c.unread_count, c.status, c.needs_human,
                             (SELECT text FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_message_text
                      FROM conversations c
+                     LEFT JOIN leads l ON l.client_id = c.client_id
+                       AND l.platform = c.platform
+                       AND l.platform_user_id = c.platform_user_id
                      ${whereClause}
                      ORDER BY c.last_message_at DESC
                      LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`;

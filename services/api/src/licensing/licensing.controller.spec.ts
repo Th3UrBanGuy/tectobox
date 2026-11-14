@@ -103,7 +103,9 @@ describe('Plans/Licenses admin handlers', () => {
 
     const res = await plansController.createPlan({ name: 'Pro', kind: 'time' });
 
-    expect(res).toEqual(plan);
+    // P8: the API always maps features_json → features, so the row
+    // carries an (empty here) features array the frontend can count.
+    expect(res).toEqual({ ...plan, features: [] });
     expect(mockPool.query.mock.calls[0][0]).toMatch(/INSERT INTO plans/);
   });
 

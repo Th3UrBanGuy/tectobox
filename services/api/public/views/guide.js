@@ -12,7 +12,7 @@ const GUIDES = [
     sub: 'Do these 3 things and Tectobox starts working for you',
     steps: [
       { t: 'Connect WhatsApp', d: 'Go to Connect Channels → WhatsApp → Add account, then scan the QR code with your business phone. New chats will appear in your Inbox automatically.', img: '/img/guide-connect.png?v=20261006c', go: ['Connect WhatsApp', () => gotoSettings('channels')] },
-      { t: 'Add your products', d: 'Go to My Products → Add product. Enter the name, price and a short description. The AI uses this to answer "how much?" questions.', img: '/img/guide-products.png?v=20261006c', go: ['Add a product', () => showView('products')] },
+      { t: 'Add your products', d: 'Go to My Products → Add product. Enter the name, SKU, price, stock, category and a photo. The AI uses this to answer "how much?" questions.', img: '/img/guide-products.png?v=20261006c', go: ['Add a product', () => showView('products')] },
       { t: 'Teach the AI', d: 'Go to Teach the AI → add your delivery rules, payment methods and common answers. Anything you write here, the AI will know.', img: '/img/guide-teach.png?v=20261006c', go: ['Teach the AI', () => gotoSettings('kb')], req: 'knowledge' },
     ]
   },
@@ -90,7 +90,7 @@ async function renderGetStarted() {
     const [st, pr, kb] = await Promise.all([
       api('/api/status').catch(() => ({})),
       api('/api/products').catch(() => []),
-      api(`/api/clients/${state.clientId}/knowledge`).catch(() => []),
+      clientApi(`/api/clients/:clientId/knowledge`).catch(() => []),
     ]);
     const plats = (st && st.platforms) || {};
     channels = Object.values(plats).filter(p => p && (p.status === 'connected' || (p.accounts || []).some(a => a.status === 'connected'))).length;
