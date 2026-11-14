@@ -183,4 +183,43 @@ describe('WhatsApp Worker Phone Login (pairing code)', () => {
     const statusPub = broker.published.find((p) => p.routingKey === 'channel.status.whatsapp');
     assert.strictEqual(statusPub, undefined, 'must NOT publish connected on pairing failure');
   });
+
+  it('phone connect: a "Connection Closed" failure is translated to a helpful pairing_error', async () => {
+    const broker = createMockBroker();
+    const coordinator = createMockCoordinator();
+    const redis = createMockRedis();
+
+    const mockSock = {
+      requestPairingCode: async () => {
+        throw new Error('Connection Closed');
+      },
+      ev: { on: () => {} },
+      end: () => {},
+      destroy: async () => {},
+    };
+
+    const initialSockets = new Map<string, { sock: any; token: number }>();
+    initialSockets.set('wa:69:default', { sock: mockSock, token: 42 });
+
+    await startWhatsappWorker({
+      mq: broker.mq,
+      redis,
+      coordinator,
+      initialSockets,
+    });
+
+    const connectConsumer = broker.consumers.get('channel.connect.whatsapp');
+    const msg = {
+      content: Buffer.from(
+        JSON.stringify({ clientId: 69, slot: 'default', method: 'phone', phoneNumber: '01712345678' })
+      ),
+    };
+    await connectConsumer!(msg);
+
+    assert.strictEqual((msg as any).acked, true, 'Connect message must be acked even on pairing failure');
+    const errEvent = coordinator.events.find((e: any) => e.event.type === 'pairing_error');
+    assert.ok(errEvent, 'pairing_error must be published');
+    assert.match(errEvent.event.error, /country code is wrong/);
+    assert.doesNotMatch(errEvent.event.error, /Connection Closed/);
+  });
 });

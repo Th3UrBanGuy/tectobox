@@ -248,6 +248,12 @@ export class ConnectorsController {
       if (!/^[0-9]{7,15}$/.test(phoneNumber)) {
         throw new BadRequestException('Enter a valid phone number with country code (digits only).');
       }
+      // A leading 0 means the number was typed in local format (e.g.
+      // 0164...). Baileys/GramJS need international format, and WhatsApp
+      // answers a bad number by dropping the socket ("Connection Closed").
+      if (phoneNumber.startsWith('0')) {
+        throw new BadRequestException('Number must start with the country code (e.g. 880 for Bangladesh) — remove the leading 0.');
+      }
     }
 
     const row = await this.pool.query(

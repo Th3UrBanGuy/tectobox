@@ -1,7 +1,7 @@
 /* Tectobox service worker — app shell cache + OTA updates + push notifications.
  * Version bump = clients get an "Update available" prompt, never a stale app.
  */
-var SW_VERSION = 'tectobox-v3';
+var SW_VERSION = 'tectobox-v4';
 var SHELL = [
   '/app',
   '/manifest.webmanifest',

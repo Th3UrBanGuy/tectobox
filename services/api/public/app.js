@@ -3559,15 +3559,71 @@ function askConnectMethod(channel) {
     modal.onclick = (e) => { if (e.target === modal) done(null); };
   });
 }
+// Every dial code, [code, name] — Bangladesh first (default), the rest
+// alphabetical. The picker stops the classic failure: a number typed in
+// local format (leading 0, no country code) makes WhatsApp drop the socket
+// and the modal just says "Connection Closed".
+const COUNTRY_CODES = [['880','Bangladesh'],['93','Afghanistan'],['355','Albania'],['213','Algeria'],
+['376','Andorra'],['244','Angola'],['1264','Anguilla'],['1268','Antigua and Barbuda'],['54','Argentina'],
+['374','Armenia'],['297','Aruba'],['61','Australia'],['43','Austria'],['994','Azerbaijan'],
+['1242','Bahamas'],['973','Bahrain'],['1246','Barbados'],['375','Belarus'],['32','Belgium'],
+['501','Belize'],['229','Benin'],['1441','Bermuda'],['975','Bhutan'],['591','Bolivia'],
+['387','Bosnia and Herzegovina'],['267','Botswana'],['55','Brazil'],['673','Brunei'],['359','Bulgaria'],
+['226','Burkina Faso'],['257','Burundi'],['855','Cambodia'],['237','Cameroon'],['1','Canada'],
+['238','Cape Verde'],['1345','Cayman Islands'],['236','Central African Republic'],['235','Chad'],['56','Chile'],
+['86','China'],['57','Colombia'],['269','Comoros'],['242','Congo'],['243','DR Congo'],
+['506','Costa Rica'],['385','Croatia'],['53','Cuba'],['357','Cyprus'],['420','Czechia'],
+['45','Denmark'],['253','Djibouti'],['1767','Dominica'],['1809','Dominican Republic'],['593','Ecuador'],
+['20','Egypt'],['503','El Salvador'],['240','Equatorial Guinea'],['291','Eritrea'],['372','Estonia'],
+['268','Eswatini'],['251','Ethiopia'],['679','Fiji'],['358','Finland'],['33','France'],
+['241','Gabon'],['220','Gambia'],['995','Georgia'],['49','Germany'],['233','Ghana'],
+['30','Greece'],['299','Greenland'],['1473','Grenada'],['1671','Guam'],['502','Guatemala'],
+['224','Guinea'],['245','Guinea-Bissau'],['592','Guyana'],['509','Haiti'],['504','Honduras'],
+['852','Hong Kong'],['36','Hungary'],['354','Iceland'],['91','India'],['62','Indonesia'],
+['98','Iran'],['964','Iraq'],['353','Ireland'],['972','Israel'],['39','Italy'],
+['1876','Jamaica'],['81','Japan'],['962','Jordan'],['7','Kazakhstan'],['254','Kenya'],
+['686','Kiribati'],['965','Kuwait'],['996','Kyrgyzstan'],['856','Laos'],['371','Latvia'],
+['961','Lebanon'],['266','Lesotho'],['231','Liberia'],['218','Libya'],['423','Liechtenstein'],
+['370','Lithuania'],['352','Luxembourg'],['853','Macao'],['261','Madagascar'],['265','Malawi'],
+['60','Malaysia'],['960','Maldives'],['223','Mali'],['356','Malta'],['692','Marshall Islands'],
+['222','Mauritania'],['230','Mauritius'],['52','Mexico'],['691','Micronesia'],['373','Moldova'],
+['377','Monaco'],['976','Mongolia'],['382','Montenegro'],['212','Morocco'],['258','Mozambique'],
+['95','Myanmar'],['264','Namibia'],['674','Nauru'],['977','Nepal'],['31','Netherlands'],
+['64','New Zealand'],['505','Nicaragua'],['227','Niger'],['234','Nigeria'],['850','North Korea'],
+['389','North Macedonia'],['47','Norway'],['968','Oman'],['92','Pakistan'],['680','Palau'],
+['970','Palestine'],['507','Panama'],['675','Papua New Guinea'],['595','Paraguay'],['51','Peru'],
+['63','Philippines'],['48','Poland'],['351','Portugal'],['1787','Puerto Rico'],['974','Qatar'],
+['40','Romania'],['7','Russia'],['250','Rwanda'],['1869','Saint Kitts and Nevis'],['1758','Saint Lucia'],
+['1784','Saint Vincent'],['685','Samoa'],['378','San Marino'],['239','Sao Tome and Principe'],['966','Saudi Arabia'],
+['221','Senegal'],['381','Serbia'],['248','Seychelles'],['232','Sierra Leone'],['65','Singapore'],
+['421','Slovakia'],['386','Slovenia'],['677','Solomon Islands'],['252','Somalia'],['27','South Africa'],
+['82','South Korea'],['211','South Sudan'],['34','Spain'],['94','Sri Lanka'],['249','Sudan'],
+['597','Suriname'],['46','Sweden'],['41','Switzerland'],['963','Syria'],['886','Taiwan'],
+['992','Tajikistan'],['255','Tanzania'],['66','Thailand'],['228','Togo'],['676','Tonga'],
+['1868','Trinidad and Tobago'],['216','Tunisia'],['90','Turkey'],['993','Turkmenistan'],['688','Tuvalu'],
+['256','Uganda'],['380','Ukraine'],['971','UAE'],['44','United Kingdom'],['1','United States'],
+['598','Uruguay'],['998','Uzbekistan'],['678','Vanuatu'],['379','Vatican'],['58','Venezuela'],
+['84','Vietnam'],['967','Yemen'],['260','Zambia'],['263','Zimbabwe']];
 // Phone number entry for phone login. Returns digits only (country code
-// included, no '+'), or null on cancel.
+// included, no '+'), or null on cancel. The country-code picker + the
+// normalization below guarantee international format: leading zeros are
+// stripped, and a pasted full number (already starting with the code) is
+// not double-prefixed.
 function askPhoneNumber(channel) {
   return new Promise((resolve) => {
-    const modal = $('phone-modal'), input = $('phone-number');
+    const modal = $('phone-modal'), input = $('phone-number'), cc = $('phone-cc');
+    if (!cc.options.length) {
+      for (const [code, name] of COUNTRY_CODES) {
+        const o = document.createElement('option');
+        o.value = code; o.textContent = `+${code} ${name}`;
+        if (code === '880') o.selected = true;
+        cc.appendChild(o);
+      }
+    }
     $('phone-title').textContent = `Your ${channel === 'whatsapp' ? 'WhatsApp' : 'Telegram'} number`;
     $('phone-sub').textContent = channel === 'whatsapp'
-      ? 'The number of the WhatsApp account you want to link — with country code, digits only'
-      : 'The number of the Telegram account you want to link — with country code, digits only';
+      ? 'Pick your country code, then type your WhatsApp number — without the leading 0'
+      : 'Pick your country code, then type your Telegram number — without the leading 0';
     $('phone-err').textContent = '';
     input.value = '';
     modal.classList.remove('hidden');
@@ -3578,9 +3634,20 @@ function askPhoneNumber(channel) {
       resolve(val);
     };
     const submit = () => {
-      const digits = input.value.replace(/[^0-9]/g, '');
-      if (!/^[0-9]{7,15}$/.test(digits)) {
-        $('phone-err').textContent = 'Enter a valid number with country code, digits only.';
+      const code = cc.value.replace(/[^0-9]/g, '');
+      const hadPlus = input.value.trim().startsWith('+');
+      const local = input.value.replace(/[^0-9]/g, '').replace(/^0+/, '');
+      if (!local) {
+        $('phone-err').textContent = 'Type your number (without the leading 0).';
+        return;
+      }
+      // A pasted full number must not be double-prefixed — but a local
+      // number can coincidentally start with a 1-digit code (US '1':
+      // local 171... is NOT the full number). So "already prefixed" only
+      // counts for a '+' paste or a >=11-digit number starting with the code.
+      const digits = (hadPlus || (local.startsWith(code) && local.length >= 11)) ? local : code + local;
+      if (!/^[0-9]{7,15}$/.test(digits) || local.length < 6) {
+        $('phone-err').textContent = 'Enter a valid number — pick the country code, then your number without the leading 0.';
         return;
       }
       done(digits);
@@ -3672,6 +3739,7 @@ async function startQrConnect(channel, slot = 'default', label = null) {
 function startPhoneConnect(channel, slot = 'default', label = null, phoneNumber = '') {
   state.qrMethod = 'phone';
   state.qrPhone = phoneNumber;
+  state.qrLabel = label;
   $('qr-title').textContent = (channel === 'whatsapp' ? 'Connect WhatsApp' : 'Connect Telegram') + (label ? ` — ${label}` : '');
   $('qr-sub').textContent = channel === 'whatsapp'
     ? 'No scanning — enter the code on your phone'
@@ -3682,9 +3750,11 @@ function startPhoneConnect(channel, slot = 'default', label = null, phoneNumber 
     $('pairing-wrap').classList.remove('hidden');
     $('tg-code-wrap').classList.add('hidden');
     $('pairing-wrap').classList.remove('code-ready');
+    $('pairing-wrap').classList.remove('pairing-error');
     $('pairing-code').textContent = '';
     $('pairing-steps').textContent = 'WhatsApp → ⋮ menu → Linked devices → Link with phone number instead, then enter this code.';
     $('btn-pairing-refresh').style.display = 'none';
+    $('btn-pairing-change-number').style.display = 'none';
     $('qr-status').textContent = 'Requesting your pairing code…';
     $('qr-modal').classList.remove('hidden');
     setupConnectModal(channel, slot, (acct) => { if (acct.pairingCode) showPairingCode(acct.pairingCode); });
@@ -4568,7 +4638,11 @@ function connectSSE() {
         if (String(evt.clientId) === String(state.clientId) && evt.channel === state.qrChannel
           && (evt.slot || 'default') === (state.qrSlot || 'default') && state.qrMethod === 'phone') {
           $('qr-status').textContent = evt.error || 'Could not request a pairing code.';
+          // Hide the empty skeleton and offer both ways out: retry the same
+          // number, or change it (the usual cause is a wrong number).
+          $('pairing-wrap').classList.add('pairing-error');
           $('btn-pairing-refresh').style.display = '';
+          $('btn-pairing-change-number').style.display = '';
         }
       } else if (evt.type === 'tg_code_sent') {
         if (String(evt.clientId) === String(state.clientId) && evt.channel === state.qrChannel
@@ -4948,8 +5022,10 @@ document.addEventListener('DOMContentLoaded', () => {
   $('btn-pairing-refresh').onclick = async () => {
     if (!state.qrPhone) return;
     $('pairing-wrap').classList.remove('code-ready');
+    $('pairing-wrap').classList.remove('pairing-error');
     $('pairing-code').textContent = '';
     $('btn-pairing-refresh').style.display = 'none';
+    $('btn-pairing-change-number').style.display = 'none';
     $('qr-status').textContent = 'Requesting a new pairing code…';
     try {
       await api(`/api/clients/${state.clientId}/connectors/whatsapp/connect`, {
@@ -4957,6 +5033,22 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({ slot: state.qrSlot || 'default', method: 'phone', phoneNumber: state.qrPhone }),
       });
     } catch (e) { $('qr-status').textContent = 'Could not request a new code: ' + e.message; }
+  };
+  // Wrong number? Close this modal, ask for the number again (same channel
+  // + slot + label), and start the phone flow with the corrected number.
+  $('btn-pairing-change-number').onclick = async () => {
+    const ch = state.qrChannel, sl = state.qrSlot || 'default', lb = state.qrLabel || sl;
+    if (!ch) return;
+    if (state.qrClose) state.qrClose(); else { $('qr-modal').classList.add('hidden'); state.qrChannel = null; state.qrSlot = null; }
+    const num = await askPhoneNumber(ch);
+    if (!num) return;
+    try {
+      await api(`/api/clients/${state.clientId}/connectors/${ch}/connect`, {
+        method: 'POST',
+        body: JSON.stringify({ slot: sl, method: 'phone', phoneNumber: num }),
+      });
+    } catch (e) { return toast('Could not start: ' + e.message, 'err'); }
+    startPhoneConnect(ch, sl, lb, num);
   };
   $('pairing-code').onclick = () => {
     const code = $('pairing-code').textContent.replace(/-/g, '');

@@ -746,6 +746,12 @@ table.tbl tr.rowlink:hover td{background:var(--hover);}
   cursor:pointer; opacity:0; transform:scale(.96); transition:opacity .45s ease, transform .45s cubic-bezier(.22,1,.36,1);}
 .pairing-wrap.code-ready .pairing-code{opacity:1; transform:scale(1);}
 .pairing-wrap.code-ready .pairing-skeleton{opacity:0; pointer-events:none;}
+/* Pairing failed: hide the empty skeleton so the error text stands alone. */
+.pairing-wrap.pairing-error .pairing-skeleton{display:none;}
+/* Phone-number entry: country-code select + number box side by side. */
+.phone-row{display:flex; gap:8px;}
+.phone-row select{flex:0 0 152px; min-width:0;}
+.phone-row input{flex:1; min-width:0;}
 .code-input{text-align:center; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size:22px; letter-spacing:.35em; font-weight:700;}
 .pick-btn{display:block; width:100%; text-align:left; background:var(--card2); border:1px solid var(--line); border-radius:13px; padding:14px 17px; margin-bottom:10px; cursor:pointer; transition:all .18s;}

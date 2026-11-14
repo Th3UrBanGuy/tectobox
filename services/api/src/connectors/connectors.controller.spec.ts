@@ -201,6 +201,21 @@ describe('ConnectorsController.connectChannel — phone login', () => {
     expect(events.publishChannelConnectTelegram).not.toHaveBeenCalled();
   });
 
+  it('phone: rejects a number typed in local format (leading 0)', async () => {
+    const pool = fakePool();
+    const events = {
+      publishChannelConnect: vi.fn(async () => true),
+      publishChannelConnectTelegram: vi.fn(async () => true),
+    } as any;
+    const ctrl = new ConnectorsController(pool, events);
+    // 017... is a local-format number: Baileys would drop the socket and
+    // the user would only see "Connection Closed". Reject it here instead.
+    await expect(ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'b', method: 'phone', phoneNumber: '01712345678' }))
+      .rejects.toThrow('country code');
+    expect(events.publishChannelConnect).not.toHaveBeenCalled();
+    expect(events.publishChannelConnectTelegram).not.toHaveBeenCalled();
+  });
+
   it('signin: telegram code goes to the worker; other channels and bad codes are rejected', async () => {
     const pool = fakePool();
     const events = { publishTelegramSignIn: vi.fn(async () => true) } as any;

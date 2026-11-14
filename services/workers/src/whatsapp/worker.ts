@@ -369,13 +369,20 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
               });
               console.log(`[whatsapp] pairing code issued for ${clientId}:${effSlot}`);
             } catch (e: any) {
-              console.warn(`[whatsapp] pairing code failed for ${clientId}:${effSlot}:`, e.message);
+              const raw = e.message || 'Could not request a pairing code';
+              // Baileys drops the socket ("Connection Closed") when the
+              // number is not on WhatsApp or not in international format.
+              // The raw text tells the user nothing, so translate it.
+              const friendly = /connection closed/i.test(raw)
+                ? 'WhatsApp closed the connection — this number may not be on WhatsApp, or the country code is wrong. Check the number and try again.'
+                : raw;
+              console.warn(`[whatsapp] pairing code failed for ${clientId}:${effSlot}:`, raw);
               await coordinator.publishEvent(`tenant:${clientId}:events`, {
                 type: 'pairing_error',
                 clientId: Number(clientId),
                 channel: 'whatsapp',
                 slot: effSlot,
-                error: e.message || 'Could not request a pairing code',
+                error: friendly,
               });
             }
           }

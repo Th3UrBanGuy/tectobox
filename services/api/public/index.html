@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Tectobox">
-<link rel="stylesheet" href="/styles.css?v=20261114_phone_login">
+<link rel="stylesheet" href="/styles.css?v=20261114_phone_cc">
 <script src="/theme-init.js?v=20261107b"></script>
 </head>
 <body>
@@ -758,6 +758,7 @@
         <div class="pairing-code" id="pairing-code" title="Tap to copy"></div>
         <p class="small muted" id="pairing-steps" style="margin:4px 0 0;"></p>
         <button class="btn-primary" id="btn-pairing-refresh" style="display:none; margin-top:12px;">Request a new code</button>
+        <button class="btn-ghost" id="btn-pairing-change-number" style="display:none; margin-top:8px;">Change number</button>
       </div>
       <div id="tg-code-wrap" class="hidden">
         <div class="frow"><input id="tg-code" class="input no-icon code-input" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="12345" maxlength="5"></div>
@@ -792,8 +793,8 @@
 <div id="phone-modal" class="modal-bg hidden">
   <div class="modal" style="width:360px; text-align:center;">
     <h3 id="phone-title">Enter your phone number</h3>
-    <p class="msub" id="phone-sub">With country code, digits only — e.g. 8801XXXXXXXXX</p>
-    <div class="frow"><input id="phone-number" class="input no-icon" type="tel" inputmode="numeric" autocomplete="tel" placeholder="8801XXXXXXXXX" maxlength="15"></div>
+    <p class="msub" id="phone-sub">Pick your country code, then type your number — without the leading 0</p>
+    <div class="frow phone-row"><select id="phone-cc" class="input no-icon" aria-label="Country code"></select><input id="phone-number" class="input no-icon" type="tel" inputmode="numeric" autocomplete="tel-national" placeholder="1XXXXXXXXX" maxlength="15"></div>
     <p class="small" id="phone-err" style="color:#e5484d; min-height:16px; margin:4px 0 8px;"></p>
     <div class="frow" style="gap:8px;">
       <button class="btn-primary" id="btn-phone-ok" style="flex:1;">Continue</button>
@@ -1318,7 +1319,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=20261114_phone_login"></script>
+<script src="/app.js?v=20261114_phone_cc"></script>
     <div class="gs-overlay hidden" id="gs-overlay">
       <div class="gs-card" id="get-started" role="dialog" aria-label="Get started"></div>
     </div>
