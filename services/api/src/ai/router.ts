@@ -156,6 +156,8 @@ async function callOpenAICompatible(url: string, apiKey: string, model: string, 
   }
 }
 
+export const GO_AI_TIMEOUT_MS = 25000;
+
 /**
  * High-performance Go AI Engine client
  */
@@ -187,19 +189,54 @@ export async function queryGoAIEngine(params: {
         clientName: undefined,
         businessType: undefined,
       }),
-      // 30s: measured Gemini replies take ~5-16s end-to-end (web2api
-      // ~5s+ for the full system prompt + 600 tokens, plus tier
-      // fallthrough). The old 5.5s abort was calibrated for the dead
-      // canned responder and cut real replies off in the widget.
-      signal: AbortSignal.timeout(30000),
+      // 25s: explicit timeout below the widget's 30s abort.
+      // Measured Gemini web2api takes ~5-20s. Bounding to 25s prevents slow
+      // calls from dying mid-flight at the widget abort boundary.
+      signal: AbortSignal.timeout(GO_AI_TIMEOUT_MS),
     });
     if (res.ok) {
       const data = await res.json() as any;
       if (data && data.reply) {
         return data;
       }
+    } else if (res.status === 504) {
+      const templateReply = demoResponder(
+        params.clientId || 'default',
+        params.text,
+        params.products || [],
+        params.history || [],
+        params.knowledge || []
+      );
+      const lang = detectCustomerLanguage(params.text);
+      return {
+        reply: templateReply,
+        language: lang,
+        model: 'timeout-fallback:deterministic',
+        cached: false,
+      };
     }
-  } catch {}
+  } catch (err: any) {
+    if (
+      err?.name === 'TimeoutError' ||
+      err?.name === 'AbortError' ||
+      (err && String(err).toLowerCase().includes('timeout'))
+    ) {
+      const templateReply = demoResponder(
+        params.clientId || 'default',
+        params.text,
+        params.products || [],
+        params.history || [],
+        params.knowledge || []
+      );
+      const lang = detectCustomerLanguage(params.text);
+      return {
+        reply: templateReply,
+        language: lang,
+        model: 'timeout-fallback:deterministic',
+        cached: false,
+      };
+    }
+  }
   return null;
 }
 

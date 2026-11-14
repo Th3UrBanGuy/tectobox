@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { demoResponder, queryGoAIEngine } from './router.js';
+import { demoResponder, queryGoAIEngine, GO_AI_TIMEOUT_MS } from './router.js';
 
 describe('demoResponder (API)', () => {
   it('answers delivery from knowledge when delivery knowledge is seeded', () => {
@@ -106,5 +106,37 @@ describe('queryGoAIEngine (F1 bridge)', () => {
     expect(body).not.toHaveProperty('clientId');
     expect(body).not.toHaveProperty('clientName');
     expect(body).not.toHaveProperty('businessType');
+  });
+
+  it('returns knowledge-grounded template answer when Go backend times out or aborts', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      const err = new Error('The operation was aborted due to timeout');
+      err.name = 'TimeoutError';
+      throw err;
+    }));
+
+    const knowledge = [
+      {
+        title: 'Return Policy',
+        content: 'Returns accepted within 14 business days.',
+      },
+    ];
+
+    const res = await queryGoAIEngine({
+      clientId: 77,
+      clientName: 'Shop B',
+      businessType: 'physical',
+      text: 'What is your return policy?',
+      knowledge,
+    });
+
+    expect(res).not.toBeNull();
+    expect(res?.reply).toContain('14 business days');
+    expect(res?.model).toBe('timeout-fallback:deterministic');
+  });
+
+  it('has explicit timeout bounded to 25s below widget 30s abort', () => {
+    expect(GO_AI_TIMEOUT_MS).toBe(25000);
+    expect(GO_AI_TIMEOUT_MS).toBeLessThan(30000);
   });
 });

@@ -150,6 +150,8 @@ async function callOpenAICompatible(url: string, apiKey: string, model: string, 
   }
 }
 
+export const GO_AI_TIMEOUT_MS = 25000;
+
 /**
  * High-performance Go AI Engine client
  */
@@ -181,15 +183,52 @@ export async function queryGoAIEngine(params: {
         clientName: undefined,
         businessType: undefined,
       }),
-      signal: AbortSignal.timeout(5500),
+      // 25s: explicit timeout below the widget's 30s abort.
+      signal: AbortSignal.timeout(GO_AI_TIMEOUT_MS),
     });
     if (res.ok) {
       const data = await res.json() as any;
       if (data && data.reply) {
         return data;
       }
+    } else if (res.status === 504) {
+      const templateReply = demoResponder(
+        params.clientId || 'default',
+        params.text,
+        params.products || [],
+        params.history || [],
+        params.knowledge || []
+      );
+      const lang = detectCustomerLanguage(params.text);
+      return {
+        reply: templateReply,
+        language: lang,
+        model: 'timeout-fallback:deterministic',
+        cached: false,
+      };
     }
-  } catch {}
+  } catch (err: any) {
+    if (
+      err?.name === 'TimeoutError' ||
+      err?.name === 'AbortError' ||
+      (err && String(err).toLowerCase().includes('timeout'))
+    ) {
+      const templateReply = demoResponder(
+        params.clientId || 'default',
+        params.text,
+        params.products || [],
+        params.history || [],
+        params.knowledge || []
+      );
+      const lang = detectCustomerLanguage(params.text);
+      return {
+        reply: templateReply,
+        language: lang,
+        model: 'timeout-fallback:deterministic',
+        cached: false,
+      };
+    }
+  }
   return null;
 }
 

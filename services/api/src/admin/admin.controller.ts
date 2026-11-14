@@ -53,9 +53,10 @@ export class AdminController {
   async listWorkspaces() {
     const result = await this.pool.query(`
       SELECT c.*,
+             c.id as id,
              c.id as client_id,
              c.name as client_name,
-             u.id as id,
+             u.id as user_id,
              u.username,
              u.active,
              (SELECT COUNT(*) FROM conversations WHERE client_id = c.id) as conv_count,

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { demoResponder } from './router.ts';
+import { demoResponder, queryGoAIEngine, GO_AI_TIMEOUT_MS } from './router.ts';
 
 describe('demoResponder (Workers)', () => {
   it('answers delivery questions from knowledge when seeded', () => {
@@ -53,5 +53,42 @@ describe('demoResponder (Workers)', () => {
 
     const reply = demoResponder('client1', 'What is your return policy?', [], [], knowledge);
     assert.ok(reply.includes('14 business days'), 'must return seeded policy');
+  });
+});
+
+describe('queryGoAIEngine (Workers timeout alignment)', () => {
+  it('returns knowledge-grounded template answer when Go backend times out or aborts', async () => {
+    const origFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = (async () => {
+        const err = new Error('The operation was aborted due to timeout');
+        err.name = 'TimeoutError';
+        throw err;
+      }) as any;
+
+      const knowledge = [
+        {
+          title: 'Return Policy',
+          content: 'Returns accepted within 14 business days.',
+        },
+      ];
+
+      const res = await queryGoAIEngine({
+        clientId: 'client1',
+        text: 'What is your return policy?',
+        knowledge,
+      });
+
+      assert.ok(res !== null, 'response must not be null');
+      assert.ok(res?.reply.includes('14 business days'), 'must return knowledge-grounded reply');
+      assert.strictEqual(res?.model, 'timeout-fallback:deterministic');
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it('has explicit timeout bounded to 25s below widget 30s abort', () => {
+    assert.strictEqual(GO_AI_TIMEOUT_MS, 25000);
+    assert.ok(GO_AI_TIMEOUT_MS < 30000);
   });
 });
