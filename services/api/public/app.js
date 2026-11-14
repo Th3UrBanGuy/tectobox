@@ -4587,7 +4587,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Theme toggles (navbar + login page)
   const syncThemeIcon = () => {
     const dark = document.documentElement.getAttribute('data-theme') !== 'light';
-    for (const [sun, moon] of [['icon-sun', 'icon-moon'], ['icon-sun-login', 'icon-moon-login']]) {
+    for (const [sun, moon] of [['icon-sun', 'icon-moon'], ['icon-sun-login', 'icon-moon-login'], ['icon-sun-top', 'icon-moon-top']]) {
       const s = $(sun), m = $(moon);
       if (s) s.classList.toggle('hidden', !dark);
       if (m) m.classList.toggle('hidden', dark);
@@ -4606,6 +4606,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnThemeM) btnThemeM.onclick = toggleTheme;
   const btnSignoutM = $('btn-signout-mobile');
   if (btnSignoutM) btnSignoutM.onclick = () => $('btn-signout')?.click();
+  const btnSidebarLogout = $('btn-sidebar-logout');
+  if (btnSidebarLogout) btnSidebarLogout.onclick = () => $('btn-signout')?.click();
   const loginToggle = $('btn-theme-login');
   if (loginToggle) loginToggle.onclick = toggleTheme;
   // back buttons on sub-views (CSP blocks inline onclick)

@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Tectobox">
-<link rel="stylesheet" href="/styles.css?v=20261114_login_eye">
+<link rel="stylesheet" href="/styles.css?v=20261114_brandbar">
 <script src="/theme-init.js?v=20261107b"></script>
 </head>
 <body>
@@ -138,6 +138,10 @@
 
     <!-- Sleek Integrated Sidebar Footer -->
     <div class="sidebar-footer">
+      <button class="sidebar-logout-btn" id="btn-sidebar-logout" title="Log out" aria-label="Log out">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        <span>Log out</span>
+      </button>
       <div class="sidebar-user-card" id="sidebar-user-card" title="Account & Security Settings">
         <div class="sidebar-user-avatar" id="user-avatar">?</div>
         <div class="sidebar-user-info">
@@ -164,6 +168,19 @@
 
   <!-- App Main Content Area -->
   <main class="app-main" id="app-main">
+
+  <!-- Mobile top brand bar — phone only (≤900px): Tectobox wordmark +
+       theme toggle, nothing else. The rest lives in Menu → Account. -->
+  <header class="mobile-brandbar" id="mobile-brandbar">
+    <div class="mobile-brand">
+      <img src="/img/tectobox-icon.png?v=20261106" alt="" class="mobile-brand-icon" width="28" height="28">
+      <span class="mobile-brand-word">Tectobox</span>
+    </div>
+    <button class="icon-btn" id="btn-theme-mobile" title="Toggle Theme (Light / Dark)" aria-label="Toggle Theme">
+      <svg id="icon-sun-top" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M2 12h2.5M19.5 12H22M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+      <svg id="icon-moon-top" class="hidden" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+  </header>
 
   <!-- ===== CLIENT ===== -->
   <div id="view-client" class="hidden">
@@ -1254,7 +1271,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=20261114_fixall_r2"></script>
+<script src="/app.js?v=20261114_brandbar"></script>
     <div class="gs-overlay hidden" id="gs-overlay">
       <div class="gs-card" id="get-started" role="dialog" aria-label="Get started"></div>
     </div>

@@ -2505,6 +2505,25 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
   z-index: 70;
 }
 
+/* Labeled Log out button — the footer user-card only had a tiny unlabeled
+   icon, so on the phone drawer nobody could find it. Full-width row,
+   delegates to the existing #btn-signout handler. */
+.sidebar-logout-btn{
+  display:flex; align-items:center; gap:9px;
+  width:100%; padding:9px 12px;
+  border:1px solid var(--line); border-radius:var(--r-md);
+  background:transparent; color:var(--ink);
+  font:inherit; font-size:13.5px; font-weight:600;
+  cursor:pointer; text-align:left;
+  transition:all .15s ease;
+}
+.sidebar-logout-btn svg{flex-shrink:0;}
+.sidebar-logout-btn:hover{
+  border-color:var(--danger, #f43f5e);
+  color:var(--danger, #f43f5e);
+  background:var(--hover);
+}
+
 .sidebar-user-card {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
@@ -2816,6 +2835,28 @@ details.customize summary{cursor:pointer;font-weight:700;color:var(--ink);font-s
      same declaration on html would do nothing. This keeps focused or
      jumped-to elements out from under the dock. */
   .app-main{scroll-padding-bottom:calc(108px + env(safe-area-inset-bottom));}
+}
+
+/* ── Mobile top brand bar (phones ≤900px) ──
+   The app had no branding at the top on phones — the sidebar (with its
+   brand header) hides behind the bottom-dock Menu drawer. This slim bar
+   carries ONLY the Tectobox wordmark + the theme toggle; everything else
+   stays in Menu → Account. Hidden on desktop (sidebar already brands).
+   Sticky inside .app-main, which is the real scroll container. */
+.mobile-brandbar{display:none;}
+@media(max-width:900px){
+  .mobile-brandbar{
+    display:flex; align-items:center; justify-content:space-between;
+    position:sticky; top:0; z-index:60;
+    height:52px; padding:0 14px; flex-shrink:0;
+    background:var(--bg); border-bottom:1px solid var(--line);
+  }
+  .mobile-brand{display:flex; align-items:center; gap:9px; min-width:0;}
+  .mobile-brand-icon{width:28px; height:28px; border-radius:8px; object-fit:cover; flex-shrink:0;}
+  .mobile-brand-word{
+    font-size:18px; font-weight:800; letter-spacing:-.02em;
+    color:var(--ink); line-height:1; white-space:nowrap;
+  }
 }
 
 .app-main #cview-inbox.page {
