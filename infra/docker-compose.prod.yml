@@ -50,7 +50,7 @@ services:
     environment:
       DOMAIN: ${DOMAIN:-}
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - tectobox_caddy_data:/data
       - tectobox_caddy_config:/config
     depends_on:
@@ -69,8 +69,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-tectobox}
     volumes:
       - tectobox_pgdata:/var/lib/postgresql/data
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
-      - ./postgres/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./infra/postgres/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tectobox}"]
       interval: 10s
@@ -100,7 +100,7 @@ services:
       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -rabbitmq_management load_definitions "/etc/rabbitmq/definitions.json"
     volumes:
       - tectobox_rabbitmqdata:/var/lib/rabbitmq
-      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
