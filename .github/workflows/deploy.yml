@@ -103,7 +103,12 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/caddy/Caddyfile" -o /opt/tectobox/infra/caddy/Caddyfile
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/postgres/init.sql" -o /opt/tectobox/infra/postgres/init.sql
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/postgres/schema.sql" -o /opt/tectobox/infra/postgres/schema.sql
-            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/rabbitmq/definitions.json" -o /opt/tectobox/infra/rabbitmq/definitions.json
+            # Never overwrite the live definitions.json: it holds the broker
+            # password (the committed copy is intentionally password-less).
+            # A clobbered file wipes the broker password on the next
+            # rabbitmq recreate (AMQP 403, site down — Nov 11 incident).
+            # Only seed it on a fresh install where it does not exist yet.
+            if [ ! -f /opt/tectobox/infra/rabbitmq/definitions.json ]; then curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/main/infra/rabbitmq/definitions.json" -o /opt/tectobox/infra/rabbitmq/definitions.json; fi
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/deploy.sh" -o /opt/tectobox/scripts/deploy.sh
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/migrate.sh" -o /opt/tectobox/scripts/migrate.sh
             chmod +x /opt/tectobox/scripts/*.sh
