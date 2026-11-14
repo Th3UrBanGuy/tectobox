@@ -3047,9 +3047,16 @@ async function loadConnectors() {
     const m = PLATFORMS[ch] || { label: ch };
     const isMeta = ch === 'messenger' || ch === 'instagram';
     // Multi-account: render account list for whatsapp/telegram.
+    // List only accounts that actually connected. A half-finished or failed
+    // connect leaves a row stuck at 'connecting'/'disconnected'/'error' —
+    // it must never appear in the list; it only becomes visible once the
+    // link really succeeds. The connect modal is the in-progress surface,
+    // and the API still returns the row so the modal poll and the restart
+    // poller can track it.
+    const connectedAccts = (!isMeta && s.accounts) ? s.accounts.filter(a => a.status === 'connected') : [];
     let acctHtml = '';
-    if (!isMeta && s.accounts && s.accounts.length) {
-      acctHtml = '<div class="acct-list">' + s.accounts.map(a => `
+    if (connectedAccts.length) {
+      acctHtml = '<div class="acct-list">' + connectedAccts.map(a => `
         <div class="acct-row">
           <span class="plat-badge ${chanMeta[ch] ? chanMeta[ch].cls : ''}">${chanMeta[ch] ? chanMeta[ch].badge : '?'}</span>
           <div class="inf">
@@ -3095,15 +3102,10 @@ async function loadConnectors() {
           <div id="ca-activity" class="ca-activity"><div class="ca-empty">No comments yet.</div></div>
         </div>`
       : '';
-    // Card header pill: for multi-account channels reflect the accounts, not a
-    // possibly-stale channel-level status (avoids "disconnected" header next
-    // to a "connected" account row after reconnect).
-    const accts = (!isMeta && s.accounts && s.accounts.length) ? s.accounts : null;
-    const headStatus = accts
-      ? (accts.some(a => a.status === 'connected') ? 'connected'
-        : accts.some(a => a.status === 'pending') ? 'pending'
-        : accts.some(a => a.status === 'error') ? 'error' : 'disconnected')
-      : s.status;
+    // Card header pill: only connected accounts count — a half-finished
+    // connect must never paint the card 'pending' from its dead row.
+    const accts = connectedAccts.length ? connectedAccts : null;
+    const headStatus = accts ? 'connected' : s.status;
     return `<div class="chan-card fade-in">
       <div class="top"><span class="plat-badge ${chanMeta[ch] ? chanMeta[ch].cls : ''}">${chanMeta[ch] ? chanMeta[ch].badge : '?'}</span>
         <span class="nm">${esc(m.label)}</span>
@@ -3673,13 +3675,28 @@ function setupConnectModal(channel, slot, onPollExtra) {
   state.qrSlot = slot;
   if (state.qrPoll) { clearInterval(state.qrPoll); clearTimeout(state.qrPollKill); state.qrPoll = null; }
   const pollSlot = slot, pollChannel = channel;
-  const closeQrModal = () => {
+  const closeQrModal = (opts) => {
     if (state.qrPoll) { clearInterval(state.qrPoll); clearTimeout(state.qrPollKill); state.qrPoll = null; }
     $('qr-modal').classList.add('hidden');
+    const ch = state.qrChannel, sl = state.qrSlot;
     state.qrChannel = null;
     state.qrSlot = null;
     state.qrMethod = null;
     state.qrPhone = null;
+    if (opts && opts.abandon && ch && sl) {
+      // Cancelled halfway: the attempt never succeeded, so its row must not
+      // linger in the list (it used to reappear as 'pending' after a
+      // refresh). Delete it — but only after a fresh read confirms it still
+      // isn't 'connected', so a scan that landed a moment earlier is never
+      // wiped. Fire-and-forget: the modal closes instantly either way.
+      api(`/api/clients/${state.clientId}/connectors`).then(s => {
+        const accts = (((ch === 'whatsapp' ? s.whatsapp : s.telegram) || {}).accounts) || [];
+        const acct = accts.find(a => (a.slot || 'default') === (sl || 'default'));
+        if (acct && acct.status !== 'connected') {
+          api(`/api/clients/${state.clientId}/connectors/${ch}/${encodeURIComponent(sl)}`, { method: 'DELETE' }).catch(() => {});
+        }
+      }).catch(() => {});
+    }
     if (state.view === 'settings') loadConnectors();
   };
   state.qrClose = closeQrModal;
@@ -4987,7 +5004,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('btn-chan-pick-cancel').onclick = () => $('chan-pick-modal').classList.add('hidden');
   $('chan-pick-modal').onclick = (e) => { if (e.target.id === 'chan-pick-modal') e.target.classList.add('hidden'); };
   $('btn-save-kb').onclick = saveKnowledge;
-  $('btn-close-qr').onclick = () => { if (state.qrClose) state.qrClose(); else { state.qrChannel = null; state.qrSlot = null; $('qr-modal').classList.add('hidden'); } };
+  $('btn-close-qr').onclick = () => { if (state.qrClose) state.qrClose({ abandon: true }); else { state.qrChannel = null; state.qrSlot = null; $('qr-modal').classList.add('hidden'); } };
   // Phone login buttons (static in the connect modal — wired once here).
   $('btn-tg-verify').onclick = async () => {
     const code = $('tg-code').value.replace(/[^0-9]/g, '');
