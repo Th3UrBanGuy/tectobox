@@ -249,6 +249,30 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     return null;
   }
 
+  /** WhatsApp pairing code issued by requestPairingCode (phone login). */
+  async getPairingCode(clientId: number, slot: string): Promise<string | null> {
+    if (this.redis) {
+      try {
+        return await this.redis.get(`wa:pairing:${clientId}:${slot}`);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /** True while a Telegram phone-code login is waiting for the user to type the code. */
+  async getPhoneCodeSent(clientId: number, slot: string): Promise<boolean> {
+    if (this.redis) {
+      try {
+        return (await this.redis.get(`tg:codesent:${clientId}:${slot}`)) === '1';
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
   async setRedisKey(key: string, val: string, ttlSec?: number): Promise<void> {
     if (this.redis) {
       try {
@@ -302,8 +326,15 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
    * worker is restarting is durably queued instead of unroutable.
    * Returns false when the broker is not connected (caller keeps the
    * 'connecting' row; re-tapping Connect retries).
+   * opts.method 'phone' + opts.phoneNumber asks for a pairing code instead
+   * of a QR: the worker calls requestPairingCode and publishes the code
+   * back over SSE (type 'pairing_code') and Redis (wa:pairing:...).
    */
-  async publishChannelConnect(clientId: number, slot: string): Promise<boolean> {
+  async publishChannelConnect(
+    clientId: number,
+    slot: string,
+    opts?: { method?: string; phoneNumber?: string }
+  ): Promise<boolean> {
     if (!this.isConnected || !this.mq) {
       console.warn('[events] RabbitMQ not connected, cannot publish WhatsApp connect command');
       return false;
@@ -314,7 +345,12 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
         await channel.assertQueue('channel.connect.whatsapp', { durable: true });
         await channel.bindQueue('channel.connect.whatsapp', 'tectobox.events', 'channel.connect.whatsapp');
       }
-      await this.mq.publish('channel.connect.whatsapp', { clientId, slot });
+      await this.mq.publish('channel.connect.whatsapp', {
+        clientId,
+        slot,
+        method: opts?.method || 'qr',
+        phoneNumber: opts?.phoneNumber || undefined,
+      });
       return true;
     } catch (err: any) {
       console.warn('[events] Failed to publish WhatsApp connect command:', err.message);
@@ -325,12 +361,16 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   /**
    * Telegram connect trigger (channel.connect.telegram).
    * Durable routing key carrying clientId, slot, channel row id, and label.
+   * opts.method 'phone' + opts.phoneNumber sends a Telegram login code to
+   * that number instead of starting the QR flow (worker publishes
+   * 'tg_code_sent' when the code is on its way).
    */
   async publishChannelConnectTelegram(
     clientId: number,
     slot: string,
     channelRowId?: number,
-    label?: string
+    label?: string,
+    opts?: { method?: string; phoneNumber?: string }
   ): Promise<boolean> {
     if (!this.isConnected || !this.mq) {
       console.warn('[events] RabbitMQ not connected, cannot publish Telegram connect command');
@@ -348,10 +388,48 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
         channelRowId,
         id: channelRowId,
         label,
+        method: opts?.method || 'qr',
+        phoneNumber: opts?.phoneNumber || undefined,
       });
       return true;
     } catch (err: any) {
       console.warn('[events] Failed to publish Telegram connect command:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Telegram phone-code sign-in (channel.signin.telegram). The user typed
+   * the code Telegram sent to their phone; the worker finishes signInUser
+   * (and signInUserWithPassword when the account has 2FA) and publishes
+   * 'connected' only on real success. A wrong/expired code comes back as
+   * an SSE 'tg_code_error' so the modal can offer a retry.
+   */
+  async publishTelegramSignIn(
+    clientId: number,
+    slot: string,
+    code: string,
+    password?: string
+  ): Promise<boolean> {
+    if (!this.isConnected || !this.mq) {
+      console.warn('[events] RabbitMQ not connected, cannot publish Telegram sign-in');
+      return false;
+    }
+    try {
+      const channel = this.mq.getChannel();
+      if (channel) {
+        await channel.assertQueue('channel.signin.telegram', { durable: true });
+        await channel.bindQueue('channel.signin.telegram', 'tectobox.events', 'channel.signin.telegram');
+      }
+      await this.mq.publish('channel.signin.telegram', {
+        clientId,
+        slot,
+        phoneCode: code,
+        password: password || undefined,
+      });
+      return true;
+    } catch (err: any) {
+      console.warn('[events] Failed to publish Telegram sign-in:', err.message);
       return false;
     }
   }

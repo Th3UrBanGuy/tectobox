@@ -93,12 +93,14 @@ export class ConnectorsController {
         .filter((s) => s.channel === 'whatsapp')
         .map(async (s) => {
           const qr = await this.eventsService.getQrCode(targetClient, s.slot);
+          const pairingCode = await this.eventsService.getPairingCode(targetClient, s.slot);
           return {
             slot: s.slot,
             status: s.status,
             label: s.label,
             aiPaused: s.ai_paused,
             qr: qr || undefined,
+            pairingCode: pairingCode || undefined,
           };
         })
     );
@@ -108,12 +110,14 @@ export class ConnectorsController {
         .filter((s) => s.channel === 'telegram')
         .map(async (s) => {
           const qr = await this.eventsService.getQrCode(targetClient, s.slot, 'telegram');
+          const phoneCodeSent = await this.eventsService.getPhoneCodeSent(targetClient, s.slot);
           return {
             slot: s.slot,
             status: s.status,
             label: s.label,
             aiPaused: s.ai_paused,
             qr: qr || undefined,
+            phoneCodeSent: phoneCodeSent || undefined,
           };
         })
     );
@@ -134,12 +138,12 @@ export class ConnectorsController {
     const instagramPages = metaPages.rows.filter((p) => p.channel === 'instagram');
     return {
       whatsapp: {
-        method: 'QR code scan (Baileys Linked devices)',
+        method: 'QR code scan or phone number (Baileys Linked devices)',
         status: waAccounts.some((a) => a.status === 'connected') ? 'connected' : 'disconnected',
         accounts: waAccounts,
       },
       telegram: {
-        method: 'QR code scan (Linked devices)',
+        method: 'QR code scan or phone number login (Linked devices)',
         status: tgAccounts.some((a) => a.status === 'connected') ? 'connected' : 'disconnected',
         accounts: tgAccounts,
       },
@@ -234,6 +238,17 @@ export class ConnectorsController {
     const targetClient = tenantId || clientId;
     const slot = body?.slot || 'default';
     const label = body?.label !== undefined ? String(body.label).trim() : null;
+    // Phone login: 'qr' (default) or 'phone'. A phone number is digits only,
+    // 7-15 long, country code included, no '+' — Baileys/GramJS both want it
+    // that way. The number is never stored; it only rides the connect
+    // command to the worker.
+    const method = body?.method === 'phone' ? 'phone' : 'qr';
+    const phoneNumber = String(body?.phoneNumber || '').replace(/[^0-9]/g, '');
+    if (method === 'phone' && (channel === 'whatsapp' || channel === 'telegram')) {
+      if (!/^[0-9]{7,15}$/.test(phoneNumber)) {
+        throw new BadRequestException('Enter a valid phone number with country code (digits only).');
+      }
+    }
 
     const row = await this.pool.query(
       `INSERT INTO channel_sessions (client_id, channel, slot, status, label, updated_at)
@@ -250,7 +265,10 @@ export class ConnectorsController {
 
     // RC5 & RC6: start real channel session in worker.
     if (channel === 'whatsapp') {
-      const triggered = await this.eventsService.publishChannelConnect(targetClient, slot);
+      const triggered = await this.eventsService.publishChannelConnect(targetClient, slot, {
+        method,
+        phoneNumber: method === 'phone' ? phoneNumber : undefined,
+      });
       if (!triggered) {
         console.warn(
           `[connectors] WhatsApp connect for client ${targetClient}:${slot} did not reach the worker (broker down?) — row stays 'connecting'; re-tap Connect to retry`
@@ -262,7 +280,8 @@ export class ConnectorsController {
         targetClient,
         slot,
         rowId,
-        finalLabel
+        finalLabel,
+        { method, phoneNumber: method === 'phone' ? phoneNumber : undefined }
       );
       if (!triggered) {
         console.warn(
@@ -271,7 +290,35 @@ export class ConnectorsController {
       }
     }
 
-    return { ok: true, channel, slot, status: 'connecting' };
+    return { ok: true, channel, slot, status: 'connecting', method };
+  }
+
+  @Post('clients/:clientId/connectors/:channel/signin')
+  @UseGuards(TenantGuard)
+  async signinChannel(
+    @CurrentTenant() tenantId: number,
+    @Param('clientId', ParseIntPipe) clientId: number,
+    @Param('channel') channel: string,
+    @Body() body: any
+  ) {
+    // Telegram phone login, step 2: the user typed the code Telegram sent.
+    // Only Telegram has a code to submit — WhatsApp pairing codes are typed
+    // into the phone's own WhatsApp, never here.
+    if (channel !== 'telegram') {
+      throw new BadRequestException('Phone-code sign-in is only for Telegram.');
+    }
+    const targetClient = tenantId || clientId;
+    const slot = body?.slot || 'default';
+    const code = String(body?.code || '').replace(/[^0-9]/g, '');
+    if (!/^[0-9]{5}$/.test(code)) {
+      throw new BadRequestException('Enter the 5-digit code Telegram sent you.');
+    }
+    const password = body?.password !== undefined ? String(body.password) : undefined;
+    const triggered = await this.eventsService.publishTelegramSignIn(targetClient, slot, code, password);
+    if (!triggered) {
+      throw new BadRequestException('Could not reach the worker — try again.');
+    }
+    return { ok: true, channel, slot, status: 'verifying' };
   }
 
   @Post('clients/:clientId/connectors/:channel/disconnect')

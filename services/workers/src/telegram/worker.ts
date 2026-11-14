@@ -41,7 +41,7 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
     }
   };
 
-  const getClientWithFencing = async (clientId: string, sessionStringOrSlot?: string, explicitSlot?: string) => {
+  const getClientWithFencing = async (clientId: string, sessionStringOrSlot?: string, explicitSlot?: string, opts?: { autoLogin?: 'qr' | 'none' }) => {
     // Support signature: (clientId, sessionString) or (clientId, slot, sessionString)
     let slot = 'default';
     let sessionString = '';
@@ -95,7 +95,10 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
       // Check if signInUserWithQrCode is available on client
       if (typeof (client as any).checkAuthorization === 'function') {
         const isAuth = await (client as any).checkAuthorization();
-        if (!isAuth && typeof (client as any).signInUserWithQrCode === 'function') {
+        // Phone login asks for 'none': the caller sends the code itself
+        // (sendCode) and finishes sign-in on channel.signin.telegram —
+        // starting the QR flow here would fight it.
+        if (!isAuth && opts?.autoLogin !== 'none' && typeof (client as any).signInUserWithQrCode === 'function') {
           (client as any).signInUserWithQrCode({ apiId, apiHash }, {
             qrCode: async ({ token: qrTok }: any) => {
               try {
@@ -322,7 +325,7 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
         return;
       }
 
-      const { clientId, slot, channelRowId, id, label } = payload || {};
+      const { clientId, slot, channelRowId, id, label, method, phoneNumber } = payload || {};
       if (!clientId) {
         console.warn('[telegram] connect command without clientId, dropping:', payload);
         channel.nack(msg, false, false);
@@ -331,16 +334,192 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
 
       const effectiveSlot = slot || 'default';
       try {
+        if (method === 'phone' && phoneNumber) {
+          // Phone login: connect the client WITHOUT starting the QR flow,
+          // then ask Telegram to text the login code to this number. The
+          // code itself is typed by the user in the app (signin consumer).
+          const entry = await getClientWithFencing(String(clientId), effectiveSlot, undefined, { autoLogin: 'none' });
+          if (!entry) {
+            console.warn(`[telegram] phone connect ${clientId}:${effectiveSlot} could not acquire lease`);
+            channel.ack(msg);
+            return;
+          }
+          const alreadyAuth =
+            typeof (entry.client as any).checkAuthorization === 'function'
+              ? await (entry.client as any).checkAuthorization().catch(() => false)
+              : false;
+          if (alreadyAuth) {
+            // Saved session is alive — getClientWithFencing already
+            // published 'connected' via its isAuth branch.
+            console.log(`[telegram] phone connect ${clientId}:${effectiveSlot} already authorized`);
+            channel.ack(msg);
+            return;
+          }
+          const apiId = parseInt(process.env.TELEGRAM_API_ID || '0');
+          const apiHash = process.env.TELEGRAM_API_HASH || '';
+          try {
+            const sent: any = await (entry.client as any).sendCode(
+              { apiId, apiHash },
+              String(phoneNumber).replace(/[^0-9]/g, '')
+            );
+            const phoneCodeHash = sent?.phoneCodeHash || sent?.phone_code_hash || '';
+            if (!phoneCodeHash) throw new Error('Telegram did not return a code hash');
+            await redis.set(`tg:codehash:${clientId}:${effectiveSlot}`, phoneCodeHash, 'EX', 300);
+            await redis.set(`tg:phone:${clientId}:${effectiveSlot}`, String(phoneNumber).replace(/[^0-9]/g, ''), 'EX', 300);
+            await redis.set(`tg:codesent:${clientId}:${effectiveSlot}`, '1', 'EX', 300);
+            await coordinator.publishEvent(`tenant:${clientId}:events`, {
+              type: 'tg_code_sent',
+              clientId: Number(clientId),
+              channel: 'telegram',
+              slot: effectiveSlot,
+            });
+            console.log(`[telegram] login code sent to ${clientId}:${effectiveSlot}`);
+          } catch (e: any) {
+            const raw = String(e?.errorMessage || e?.message || 'Could not send the code');
+            const flood = raw.match(/FLOOD_WAIT_(\d+)/);
+            const friendly = flood
+              ? `Too many tries — wait ${flood[1]}s and try again.`
+              : /PHONE_NUMBER_INVALID/.test(raw)
+                ? 'That phone number is not a Telegram number.'
+                : raw;
+            console.warn(`[telegram] sendCode failed for ${clientId}:${effectiveSlot}:`, raw);
+            await coordinator.publishEvent(`tenant:${clientId}:events`, {
+              type: 'tg_code_error',
+              clientId: Number(clientId),
+              channel: 'telegram',
+              slot: effectiveSlot,
+              error: friendly,
+            });
+          }
+          channel.ack(msg);
+          return;
+        }
+
         const entry = await getClientWithFencing(String(clientId), effectiveSlot);
         if (entry) {
           console.log(`[telegram] connect command started session for ${clientId}:${effectiveSlot}`);
-          await publishChannelStatus(String(clientId), effectiveSlot, 'connected');
+          // No 'connected' publish here: the row must flip only when the
+          // QR is actually scanned (the .then() in getClientWithFencing)
+          // or a saved session is alive (its isAuth branch). Publishing
+          // here used to flip the row at Connect-tap time, which closed
+          // the QR modal before the user could scan.
         } else {
           console.warn(`[telegram] connect ${clientId}:${effectiveSlot} could not acquire lease`);
         }
         channel.ack(msg);
       } catch (err) {
         console.error('[telegram] connect command failed:', err);
+        channel.ack(msg);
+      }
+    });
+
+    // channel.signin.telegram consumer — step 2 of phone login.
+    const signinQueue = 'channel.signin.telegram';
+    await channel.assertQueue(signinQueue, { durable: true });
+    await channel.bindQueue(signinQueue, 'tectobox.events', signinQueue);
+    await channel.consume(signinQueue, async (msg: any) => {
+      if (!msg) return;
+
+      let payload: any;
+      try {
+        payload = JSON.parse(msg.content.toString());
+      } catch (err) {
+        console.error('[telegram] malformed signin payload, dropping:', err);
+        channel.nack(msg, false, false);
+        return;
+      }
+
+      const { clientId, slot, phoneCode, password } = payload || {};
+      if (!clientId || !phoneCode) {
+        console.warn('[telegram] signin command without clientId/code, dropping:', payload);
+        channel.nack(msg, false, false);
+        return;
+      }
+
+      const effectiveSlot = slot || 'default';
+      const key = effectiveSlot && effectiveSlot !== 'default' ? `tg:${clientId}:${effectiveSlot}` : `tg:${clientId}`;
+      const sendError = async (error: string) => {
+        await coordinator.publishEvent(`tenant:${clientId}:events`, {
+          type: 'tg_code_error',
+          clientId: Number(clientId),
+          channel: 'telegram',
+          slot: effectiveSlot,
+          error,
+        });
+      };
+
+      try {
+        const entry = sessions.get(key);
+        if (!entry) {
+          await sendError('This login session expired — start again from Connect.');
+          channel.ack(msg);
+          return;
+        }
+        const phoneCodeHash = await redis.get(`tg:codehash:${clientId}:${effectiveSlot}`);
+        const phoneNumber = await redis.get(`tg:phone:${clientId}:${effectiveSlot}`);
+        if (!phoneCodeHash || !phoneNumber) {
+          await sendError('The code expired — request a new one from Connect.');
+          channel.ack(msg);
+          return;
+        }
+
+        const apiId = parseInt(process.env.TELEGRAM_API_ID || '0');
+        const apiHash = process.env.TELEGRAM_API_HASH || '';
+        const finishLogin = async () => {
+          const savedStr = typeof (entry.client.session as any)?.save === 'function' ? (entry.client.session as any).save() : '';
+          if (savedStr) {
+            await redis.set(`tg:session:${clientId}:${effectiveSlot}`, savedStr);
+          }
+          await redis.del(`tg:qr:${clientId}:${effectiveSlot}`).catch(() => {});
+          await redis.del(`tg:codehash:${clientId}:${effectiveSlot}`).catch(() => {});
+          await redis.del(`tg:phone:${clientId}:${effectiveSlot}`).catch(() => {});
+          await redis.del(`tg:codesent:${clientId}:${effectiveSlot}`).catch(() => {});
+          await coordinator.publishEvent(`tenant:${clientId}:events`, {
+            type: 'channel_status',
+            clientId: Number(clientId),
+            channel: 'telegram',
+            slot: effectiveSlot,
+            status: 'connected',
+          });
+          await publishChannelStatus(String(clientId), effectiveSlot, 'connected');
+          console.log(`[telegram] phone login succeeded for ${clientId}:${effectiveSlot}`);
+        };
+
+        try {
+          await (entry.client as any).signInUser(
+            { apiId, apiHash },
+            { phoneNumber, phoneCodeHash, phoneCode: String(phoneCode) }
+          );
+          await finishLogin();
+        } catch (e: any) {
+          const raw = String(e?.errorMessage || e?.message || '');
+          if (/SESSION_PASSWORD_NEEDED|PASSWORD_REQUIRED|2FA/i.test(raw)) {
+            if (password) {
+              try {
+                await (entry.client as any).signInUserWithPassword({ apiId, apiHash }, { password: String(password) });
+                await finishLogin();
+              } catch (e2: any) {
+                await sendError('Wrong 2FA password — try again.');
+              }
+            } else {
+              await coordinator.publishEvent(`tenant:${clientId}:events`, {
+                type: 'tg_password_needed',
+                clientId: Number(clientId),
+                channel: 'telegram',
+                slot: effectiveSlot,
+              });
+            }
+          } else if (/PHONE_CODE_INVALID/.test(raw)) {
+            await sendError('Wrong code — check the code Telegram sent and try again.');
+          } else if (/PHONE_CODE_EXPIRED/.test(raw)) {
+            await sendError('That code expired — request a new one from Connect.');
+          } else {
+            await sendError(raw || 'Sign-in failed — try again.');
+          }
+        }
+        channel.ack(msg);
+      } catch (err) {
+        console.error('[telegram] signin command failed:', err);
         channel.ack(msg);
       }
     });
@@ -398,6 +577,9 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
 
         await redis.del(`tg:qr:${clientId}:${effectiveSlot}`).catch(() => {});
         await redis.del(`tg:session:${clientId}:${effectiveSlot}`).catch(() => {});
+        await redis.del(`tg:codehash:${clientId}:${effectiveSlot}`).catch(() => {});
+        await redis.del(`tg:phone:${clientId}:${effectiveSlot}`).catch(() => {});
+        await redis.del(`tg:codesent:${clientId}:${effectiveSlot}`).catch(() => {});
         await publishChannelStatus(String(clientId), effectiveSlot, 'disconnected');
         await coordinator.publishEvent(`tenant:${clientId}:events`, {
           type: 'channel_status',

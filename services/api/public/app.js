@@ -3508,16 +3508,126 @@ function askConfirm(title, body, okLabel = 'Confirm', danger = false) {
   });
 }
 async function addAccount(channel) {
+  // Every Connect asks how first: QR scan or phone number. That choice is
+  // the premium part — the modal below never assumes a method.
+  const method = await askConnectMethod(channel);
+  if (!method) return; // cancelled
   const label = await askSlotLabel(channel);
   if (label === null) return; // cancelled
   const slot = (label.trim() || 'account').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || 'account';
-  try {
-    await api(`/api/clients/${state.clientId}/connectors/${channel}/connect`, {
-      method: 'POST',
-      body: JSON.stringify({ slot, label: label.trim() || slot }),
-    });
-  } catch (e) { return toast('Could not start: ' + e.message, 'err'); }
-  startQrConnect(channel, slot, label.trim() || slot);
+  const body = { slot, label: label.trim() || slot };
+  if (method === 'phone') {
+    const phoneNumber = await askPhoneNumber(channel);
+    if (!phoneNumber) return; // cancelled
+    body.method = 'phone';
+    body.phoneNumber = phoneNumber;
+    try {
+      await api(`/api/clients/${state.clientId}/connectors/${channel}/connect`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    } catch (e) { return toast('Could not start: ' + e.message, 'err'); }
+    startPhoneConnect(channel, slot, label.trim() || slot, phoneNumber);
+  } else {
+    try {
+      await api(`/api/clients/${state.clientId}/connectors/${channel}/connect`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    } catch (e) { return toast('Could not start: ' + e.message, 'err'); }
+    startQrConnect(channel, slot, label.trim() || slot);
+  }
+}
+// Connect method picker — QR scan or phone number. Promise-based, same
+// pattern as askSlotLabel/askConfirm (no native dialogs anywhere).
+function askConnectMethod(channel) {
+  return new Promise((resolve) => {
+    const modal = $('method-modal');
+    $('method-title').textContent = `Connect ${channel === 'whatsapp' ? 'WhatsApp' : 'Telegram'}`;
+    $('method-sub').textContent = channel === 'whatsapp'
+      ? 'Choose how you want to link this WhatsApp account'
+      : 'Choose how you want to link this Telegram account';
+    modal.classList.remove('hidden');
+    const done = (val) => {
+      modal.classList.add('hidden');
+      $('method-qr').onclick = $('method-phone').onclick = $('btn-method-cancel').onclick = modal.onclick = null;
+      resolve(val);
+    };
+    $('method-qr').onclick = () => done('qr');
+    $('method-phone').onclick = () => done('phone');
+    $('btn-method-cancel').onclick = () => done(null);
+    modal.onclick = (e) => { if (e.target === modal) done(null); };
+  });
+}
+// Phone number entry for phone login. Returns digits only (country code
+// included, no '+'), or null on cancel.
+function askPhoneNumber(channel) {
+  return new Promise((resolve) => {
+    const modal = $('phone-modal'), input = $('phone-number');
+    $('phone-title').textContent = `Your ${channel === 'whatsapp' ? 'WhatsApp' : 'Telegram'} number`;
+    $('phone-sub').textContent = channel === 'whatsapp'
+      ? 'The number of the WhatsApp account you want to link — with country code, digits only'
+      : 'The number of the Telegram account you want to link — with country code, digits only';
+    $('phone-err').textContent = '';
+    input.value = '';
+    modal.classList.remove('hidden');
+    setTimeout(() => input.focus(), 50);
+    const done = (val) => {
+      modal.classList.add('hidden');
+      $('btn-phone-ok').onclick = $('btn-phone-cancel').onclick = input.onkeydown = modal.onclick = null;
+      resolve(val);
+    };
+    const submit = () => {
+      const digits = input.value.replace(/[^0-9]/g, '');
+      if (!/^[0-9]{7,15}$/.test(digits)) {
+        $('phone-err').textContent = 'Enter a valid number with country code, digits only.';
+        return;
+      }
+      done(digits);
+    };
+    $('btn-phone-ok').onclick = submit;
+    $('btn-phone-cancel').onclick = () => done(null);
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') submit();
+      else if (e.key === 'Escape') done(null);
+    };
+    modal.onclick = (e) => { if (e.target === modal) done(null); };
+  });
+}
+// Shared lifecycle for the connect modal (QR + phone): poll the connector
+// status while the modal is open. SSE 'channel_status' can be missed
+// (reboot / dropped EventSource / modal opened late) which used to leave
+// the modal stuck even though the phone paired fine. Polling is the source
+// of truth; onPollExtra handles the method-specific arrival (QR image,
+// pairing code, code-sent flag). Auto-closes the moment the account
+// connects; hard-stops the poll after 3 minutes.
+function setupConnectModal(channel, slot, onPollExtra) {
+  state.qrChannel = channel;
+  state.qrSlot = slot;
+  if (state.qrPoll) { clearInterval(state.qrPoll); clearTimeout(state.qrPollKill); state.qrPoll = null; }
+  const pollSlot = slot, pollChannel = channel;
+  const closeQrModal = () => {
+    if (state.qrPoll) { clearInterval(state.qrPoll); clearTimeout(state.qrPollKill); state.qrPoll = null; }
+    $('qr-modal').classList.add('hidden');
+    state.qrChannel = null;
+    state.qrSlot = null;
+    state.qrMethod = null;
+    state.qrPhone = null;
+    if (state.view === 'settings') loadConnectors();
+  };
+  state.qrClose = closeQrModal;
+  state.qrPoll = setInterval(async () => {
+    try {
+      const s = await api(`/api/clients/${state.clientId}/connectors`);
+      const accounts = (pollChannel === 'whatsapp' ? (s.whatsapp && s.whatsapp.accounts) : (s.telegram && s.telegram.accounts)) || [];
+      const acct = accounts.find(a => (a.slot || 'default') === (pollSlot || 'default'));
+      if (acct && acct.status === 'connected') closeQrModal();
+      else if (acct && onPollExtra) onPollExtra(acct);
+    } catch {}
+  }, 3000);
+  state.qrPollKill = setTimeout(() => {
+    if (state.qrPoll) { clearInterval(state.qrPoll); state.qrPoll = null; }
+  }, 180000);
 }
 // QR image setter (single path for the poll + the SSE 'qr' event): the skeleton
 // shows while the code generates; on load the code fades/scales in over it.
@@ -3541,45 +3651,73 @@ async function startQrConnect(channel, slot = 'default', label = null) {
       await api(`/api/clients/${state.clientId}/connectors/${channel}/connect`, { method: 'POST' });
     } catch (e) { return toast('Could not start: ' + e.message, 'err'); }
   }
-  state.qrChannel = channel;
-  state.qrSlot = slot;
+  state.qrMethod = 'qr';
   $('qr-title').textContent = (channel === 'whatsapp' ? 'Scan with WhatsApp' : 'Scan with Telegram') + (label ? ` — ${label}` : '');
   $('qr-sub').textContent = channel === 'whatsapp'
     ? 'WhatsApp → ⋮ menu → Linked devices → Link a device'
     : 'Telegram → Settings → Devices → Link Desktop Device';
-  // Reset to the skeleton state: the code fades/scales in over it when it arrives.
+  // QR view on, phone view off; reset to the skeleton state: the code
+  // fades/scales in over it when it arrives.
+  $('qr-view').classList.remove('hidden');
+  $('phone-view').classList.add('hidden');
   $('qr-box').classList.remove('qr-ready');
   $('qr-status').textContent = 'Generating your secure code…';
   $('qr-img').removeAttribute('src');
   $('qr-modal').classList.remove('hidden');
-  // Poll the connector status while the modal is open. SSE 'channel_status'
-  // can be missed (reboot / dropped EventSource / modal opened late) which
-  // used to leave the modal stuck on "verifying" forever even though the
-  // phone paired fine. Polling is the source of truth.
-  if (state.qrPoll) { clearInterval(state.qrPoll); clearTimeout(state.qrPollKill); state.qrPoll = null; }
-  const pollSlot = slot, pollChannel = channel;
-  const closeQrModal = () => {
-    if (state.qrPoll) { clearInterval(state.qrPoll); clearTimeout(state.qrPollKill); state.qrPoll = null; }
-    $('qr-modal').classList.add('hidden');
-    state.qrChannel = null;
-    state.qrSlot = null;
-    if (state.view === 'settings') loadConnectors();
-  };
-  state.qrClose = closeQrModal;
-  state.qrPoll = setInterval(async () => {
-    try {
-      const s = await api(`/api/clients/${state.clientId}/connectors`);
-      const accounts = (pollChannel === 'whatsapp' ? (s.whatsapp && s.whatsapp.accounts) : (s.telegram && s.telegram.accounts)) || [];
-      const acct = accounts.find(a => (a.slot || 'default') === (pollSlot || 'default'));
-      if (acct && acct.status === 'connected') closeQrModal();
-      // SSE fallback: the status response carries the latest QR, so even if
-      // the 'qr' event was dropped the modal still shows the code.
-      else if (acct && acct.qr) setQrImage(acct.qr);
-    } catch {}
-  }, 3000);
-  state.qrPollKill = setTimeout(() => {
-    if (state.qrPoll) { clearInterval(state.qrPoll); state.qrPoll = null; }
-  }, 180000);
+  setupConnectModal(channel, slot, (acct) => { if (acct.qr) setQrImage(acct.qr); });
+}
+// Phone login modal: WhatsApp shows the big pairing code, Telegram shows
+// the 5-digit code entry. Same modal shell + poll/close lifecycle as the
+// QR flow — only the middle view differs.
+function startPhoneConnect(channel, slot = 'default', label = null, phoneNumber = '') {
+  state.qrMethod = 'phone';
+  state.qrPhone = phoneNumber;
+  $('qr-title').textContent = (channel === 'whatsapp' ? 'Connect WhatsApp' : 'Connect Telegram') + (label ? ` — ${label}` : '');
+  $('qr-sub').textContent = channel === 'whatsapp'
+    ? 'No scanning — enter the code on your phone'
+    : 'Enter the code Telegram just sent you';
+  $('qr-view').classList.add('hidden');
+  $('phone-view').classList.remove('hidden');
+  if (channel === 'whatsapp') {
+    $('pairing-wrap').classList.remove('hidden');
+    $('tg-code-wrap').classList.add('hidden');
+    $('pairing-wrap').classList.remove('code-ready');
+    $('pairing-code').textContent = '';
+    $('pairing-steps').textContent = 'WhatsApp → ⋮ menu → Linked devices → Link with phone number instead, then enter this code.';
+    $('btn-pairing-refresh').style.display = 'none';
+    $('qr-status').textContent = 'Requesting your pairing code…';
+    $('qr-modal').classList.remove('hidden');
+    setupConnectModal(channel, slot, (acct) => { if (acct.pairingCode) showPairingCode(acct.pairingCode); });
+  } else {
+    $('pairing-wrap').classList.add('hidden');
+    $('tg-code-wrap').classList.remove('hidden');
+    $('tg-code').value = '';
+    $('tg-pass').value = '';
+    $('tg-pass-row').classList.add('hidden');
+    $('tg-code-err').textContent = '';
+    $('btn-tg-verify').disabled = true;
+    $('qr-status').textContent = 'Sending your login code…';
+    $('qr-modal').classList.remove('hidden');
+    setupConnectModal(channel, slot, (acct) => { if (acct.phoneCodeSent) enableTgCodeForm(); });
+  }
+}
+// Pairing code arrival (SSE + poll share this path): the code fades/scales
+// in over the skeleton, exactly like the QR image does. Re-showing the
+// same code is a no-op (no flicker on repeated polls).
+function showPairingCode(code) {
+  const el = $('pairing-code');
+  if (!code || el.textContent === code) return;
+  el.textContent = code;
+  $('pairing-wrap').classList.add('code-ready');
+  $('qr-status').textContent = 'Enter this code in WhatsApp — it expires in about 2 minutes.';
+  $('btn-pairing-refresh').style.display = '';
+}
+// Telegram's code is on its way: enable the entry form.
+function enableTgCodeForm() {
+  if (!$('btn-tg-verify').disabled) return;
+  $('btn-tg-verify').disabled = false;
+  $('qr-status').textContent = 'Code sent — enter the 5-digit code from Telegram.';
+  setTimeout(() => $('tg-code').focus(), 50);
 }
 
 // ---------------- Meta OAuth ----------------
@@ -4415,9 +4553,41 @@ function connectSSE() {
           loadPayments();
         }
       } else if (evt.type === 'qr') {
+        // QR arrivals belong to QR mode only — in phone mode the modal
+        // shows the pairing code / code entry instead.
         if (String(evt.clientId) === String(state.clientId) && evt.channel === state.qrChannel
-          && (evt.slot || 'default') === (state.qrSlot || 'default')) {
+          && (evt.slot || 'default') === (state.qrSlot || 'default') && state.qrMethod !== 'phone') {
           setQrImage(evt.dataUrl);
+        }
+      } else if (evt.type === 'pairing_code') {
+        if (String(evt.clientId) === String(state.clientId) && evt.channel === state.qrChannel
+          && (evt.slot || 'default') === (state.qrSlot || 'default') && state.qrMethod === 'phone') {
+          showPairingCode(evt.code);
+        }
+      } else if (evt.type === 'pairing_error') {
+        if (String(evt.clientId) === String(state.clientId) && evt.channel === state.qrChannel
+          && (evt.slot || 'default') === (state.qrSlot || 'default') && state.qrMethod === 'phone') {
+          $('qr-status').textContent = evt.error || 'Could not request a pairing code.';
+          $('btn-pairing-refresh').style.display = '';
+        }
+      } else if (evt.type === 'tg_code_sent') {
+        if (String(evt.clientId) === String(state.clientId) && evt.channel === state.qrChannel
+          && (evt.slot || 'default') === (state.qrSlot || 'default') && state.qrMethod === 'phone') {
+          enableTgCodeForm();
+        }
+      } else if (evt.type === 'tg_code_error') {
+        if (String(evt.clientId) === String(state.clientId) && evt.channel === state.qrChannel
+          && (evt.slot || 'default') === (state.qrSlot || 'default') && state.qrMethod === 'phone') {
+          $('tg-code-err').textContent = evt.error || 'Something went wrong.';
+          $('btn-tg-verify').disabled = false;
+          $('qr-status').textContent = 'Code sent — enter the 5-digit code from Telegram.';
+        }
+      } else if (evt.type === 'tg_password_needed') {
+        if (String(evt.clientId) === String(state.clientId) && evt.channel === state.qrChannel
+          && (evt.slot || 'default') === (state.qrSlot || 'default') && state.qrMethod === 'phone') {
+          $('tg-pass-row').classList.remove('hidden');
+          $('tg-code-err').textContent = 'Two-step verification is on — enter your Telegram password too.';
+          setTimeout(() => $('tg-pass').focus(), 50);
         }
       } else if (evt.type === 'channel_status' || evt.type === 'connectors') {
         const cid = evt.clientId != null ? String(evt.clientId) : null;
@@ -4744,6 +4914,56 @@ document.addEventListener('DOMContentLoaded', () => {
   $('chan-pick-modal').onclick = (e) => { if (e.target.id === 'chan-pick-modal') e.target.classList.add('hidden'); };
   $('btn-save-kb').onclick = saveKnowledge;
   $('btn-close-qr').onclick = () => { if (state.qrClose) state.qrClose(); else { state.qrChannel = null; state.qrSlot = null; $('qr-modal').classList.add('hidden'); } };
+  // Phone login buttons (static in the connect modal — wired once here).
+  $('btn-tg-verify').onclick = async () => {
+    const code = $('tg-code').value.replace(/[^0-9]/g, '');
+    if (!/^[0-9]{5}$/.test(code)) { $('tg-code-err').textContent = 'Enter the 5-digit code.'; return; }
+    const password = !$('tg-pass-row').classList.contains('hidden') ? $('tg-pass').value : '';
+    $('tg-code-err').textContent = '';
+    $('btn-tg-verify').disabled = true;
+    $('qr-status').textContent = 'Verifying…';
+    try {
+      const res = await api(`/api/clients/${state.clientId}/connectors/telegram/signin`, {
+        method: 'POST',
+        body: JSON.stringify({ slot: state.qrSlot || 'default', code, password: password || undefined }),
+      });
+      if (res && res.error) {
+        $('tg-code-err').textContent = res.error;
+        $('btn-tg-verify').disabled = false;
+        $('qr-status').textContent = 'Code sent — enter the 5-digit code from Telegram.';
+      }
+      // Otherwise the worker answers over SSE: 'connected' closes the
+      // modal, 'tg_code_error' shows inline. Re-enable after 15s so a
+      // dropped event never leaves a dead button.
+      setTimeout(() => { if (!$('qr-modal').classList.contains('hidden')) $('btn-tg-verify').disabled = false; }, 15000);
+    } catch (e) {
+      $('tg-code-err').textContent = e.message || 'Could not verify — try again.';
+      $('btn-tg-verify').disabled = false;
+    }
+  };
+  // Typing the 5th digit submits — standard OTP behaviour.
+  $('tg-code').oninput = () => {
+    if ($('tg-code').value.replace(/[^0-9]/g, '').length === 5 && !$('btn-tg-verify').disabled) $('btn-tg-verify').click();
+  };
+  $('btn-pairing-refresh').onclick = async () => {
+    if (!state.qrPhone) return;
+    $('pairing-wrap').classList.remove('code-ready');
+    $('pairing-code').textContent = '';
+    $('btn-pairing-refresh').style.display = 'none';
+    $('qr-status').textContent = 'Requesting a new pairing code…';
+    try {
+      await api(`/api/clients/${state.clientId}/connectors/whatsapp/connect`, {
+        method: 'POST',
+        body: JSON.stringify({ slot: state.qrSlot || 'default', method: 'phone', phoneNumber: state.qrPhone }),
+      });
+    } catch (e) { $('qr-status').textContent = 'Could not request a new code: ' + e.message; }
+  };
+  $('pairing-code').onclick = () => {
+    const code = $('pairing-code').textContent.replace(/-/g, '');
+    if (!code) return;
+    if (navigator.clipboard) navigator.clipboard.writeText(code).catch(() => {});
+    toast('Pairing code copied');
+  };
 
   // admin
   document.querySelectorAll('#admin-tabs button').forEach(b => b.onclick = () => switchAdminTab(b.dataset.at));

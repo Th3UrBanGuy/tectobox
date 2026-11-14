@@ -134,6 +134,7 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
         clearPacerQueue(clientId, slot, new Error(`Connection closed for WhatsApp client ${clientId}:${slot}`));
         coordinator.releaseLease(leaseKey, token);
         await redis.del(`wa:qr:${clientId}:${slot}`).catch(() => {});
+        await redis.del(`wa:pairing:${clientId}:${slot}`).catch(() => {});
         await coordinator.publishEvent(`tenant:${clientId}:events`, {
           type: 'channel_status',
           clientId: Number(clientId),
@@ -145,6 +146,7 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
       } else if (connection === 'open') {
         console.log('[whatsapp] opened connection');
         await redis.del(`wa:qr:${clientId}:${slot}`).catch(() => {});
+        await redis.del(`wa:pairing:${clientId}:${slot}`).catch(() => {});
         await coordinator.publishEvent(`tenant:${clientId}:events`, {
           type: 'channel_status',
           clientId: Number(clientId),
@@ -333,7 +335,7 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
         return;
       }
 
-      const { clientId, slot } = payload || {};
+      const { clientId, slot, method, phoneNumber } = payload || {};
       if (!clientId) {
         console.warn('[whatsapp] connect command without clientId, dropping:', payload);
         channel.nack(msg, false, false);
@@ -344,6 +346,39 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
         const entry = await getSocketWithFencing(String(clientId), slot || 'default');
         if (entry) {
           console.log(`[whatsapp] connect command started session for ${clientId}:${slot || 'default'}`);
+          // Phone login: ask Baileys for an 8-char pairing code for this
+          // number instead of a QR. The user types it into their phone's
+          // WhatsApp (Linked devices -> Link with phone number instead).
+          // Same delivery as the QR: Redis (polled by the modal) + SSE.
+          if (method === 'phone' && phoneNumber) {
+            const effSlot = slot || 'default';
+            try {
+              if (typeof entry.sock.requestPairingCode !== 'function') {
+                throw new Error('This WhatsApp version does not support pairing codes');
+              }
+              const raw = String(await entry.sock.requestPairingCode(String(phoneNumber).replace(/[^0-9]/g, '')));
+              const code = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+              const shown = code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+              await redis.set(`wa:pairing:${clientId}:${effSlot}`, shown, 'EX', 120);
+              await coordinator.publishEvent(`tenant:${clientId}:events`, {
+                type: 'pairing_code',
+                clientId: Number(clientId),
+                channel: 'whatsapp',
+                slot: effSlot,
+                code: shown,
+              });
+              console.log(`[whatsapp] pairing code issued for ${clientId}:${effSlot}`);
+            } catch (e: any) {
+              console.warn(`[whatsapp] pairing code failed for ${clientId}:${effSlot}:`, e.message);
+              await coordinator.publishEvent(`tenant:${clientId}:events`, {
+                type: 'pairing_error',
+                clientId: Number(clientId),
+                channel: 'whatsapp',
+                slot: effSlot,
+                error: e.message || 'Could not request a pairing code',
+              });
+            }
+          }
         } else {
           console.warn(`[whatsapp] connect ${clientId}:${slot || 'default'} could not acquire a lease — re-tap Connect to retry`);
         }
@@ -411,6 +446,7 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
         } catch (e) {}
 
         await redis.del(`wa:qr:${clientId}:${effectiveSlot}`).catch(() => {});
+        await redis.del(`wa:pairing:${clientId}:${effectiveSlot}`).catch(() => {});
         await publishChannelStatus(String(clientId), effectiveSlot, 'disconnected');
         await coordinator.publishEvent(`tenant:${clientId}:events`, {
           type: 'channel_status',

@@ -79,10 +79,10 @@ describe('ConnectorsController.connectChannel — RC5 & RC6 triggers', () => {
     } as any;
     const ctrl = new ConnectorsController(pool, events);
     const res: any = await ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'b' });
-    expect(res).toEqual({ ok: true, channel: 'whatsapp', slot: 'b', status: 'connecting' });
+    expect(res).toEqual({ ok: true, channel: 'whatsapp', slot: 'b', status: 'connecting', method: 'qr' });
     expect(pool.queries.some((q) => q.sql.includes('INSERT INTO channel_sessions'))).toBe(true);
     expect(events.publishChannelConnect).toHaveBeenCalledTimes(1);
-    expect(events.publishChannelConnect).toHaveBeenCalledWith(69, 'b');
+    expect(events.publishChannelConnect).toHaveBeenCalledWith(69, 'b', { method: 'qr', phoneNumber: undefined });
   });
 
   it('telegram: upserts the row AND publishes a connect command to Telegram worker', async () => {
@@ -93,10 +93,10 @@ describe('ConnectorsController.connectChannel — RC5 & RC6 triggers', () => {
     } as any;
     const ctrl = new ConnectorsController(pool, events);
     const res: any = await ctrl.connectChannel(69, 69, 'telegram', { slot: 'hh', label: 'Primary TG' });
-    expect(res).toEqual({ ok: true, channel: 'telegram', slot: 'hh', status: 'connecting' });
+    expect(res).toEqual({ ok: true, channel: 'telegram', slot: 'hh', status: 'connecting', method: 'qr' });
     expect(pool.queries.some((q) => q.sql.includes('INSERT INTO channel_sessions'))).toBe(true);
     expect(events.publishChannelConnectTelegram).toHaveBeenCalledTimes(1);
-    expect(events.publishChannelConnectTelegram).toHaveBeenCalledWith(69, 'hh', 42, 'Primary TG');
+    expect(events.publishChannelConnectTelegram).toHaveBeenCalledWith(69, 'hh', 42, 'Primary TG', { method: 'qr', phoneNumber: undefined });
   });
 
   it('stores label in channel_sessions upsert when provided', async () => {
@@ -133,7 +133,7 @@ describe('ConnectorsController.connectChannel — RC5 & RC6 triggers', () => {
     const events = { publishChannelConnect: vi.fn(async () => false) } as any;
     const ctrl = new ConnectorsController(pool, events);
     const res: any = await ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'tt' });
-    expect(res).toEqual({ ok: true, channel: 'whatsapp', slot: 'tt', status: 'connecting' });
+    expect(res).toEqual({ ok: true, channel: 'whatsapp', slot: 'tt', status: 'connecting', method: 'qr' });
     expect(events.publishChannelConnect).toHaveBeenCalledTimes(1);
   });
 
@@ -142,7 +142,76 @@ describe('ConnectorsController.connectChannel — RC5 & RC6 triggers', () => {
     const events = { publishChannelConnect: vi.fn(async () => true) } as any;
     const ctrl = new ConnectorsController(pool, events);
     await ctrl.connectChannel(69, 69, 'whatsapp', {});
-    expect(events.publishChannelConnect).toHaveBeenCalledWith(69, 'default');
+    expect(events.publishChannelConnect).toHaveBeenCalledWith(69, 'default', { method: 'qr', phoneNumber: undefined });
+  });
+});
+
+describe('ConnectorsController.connectChannel — phone login', () => {
+  function fakePool() {
+    const queries: { sql: string; params?: any[] }[] = [];
+    return {
+      queries,
+      query: async (sql: string, params?: any[]) => {
+        queries.push({ sql, params });
+        return { rows: [{ id: 42, label: params?.[3] }] };
+      },
+    } as any;
+  }
+
+  it('whatsapp phone: passes method + digits-only number to the worker', async () => {
+    const pool = fakePool();
+    const events = {
+      publishChannelConnect: vi.fn(async () => true),
+      publishChannelConnectTelegram: vi.fn(async () => true),
+    } as any;
+    const ctrl = new ConnectorsController(pool, events);
+    const res: any = await ctrl.connectChannel(69, 69, 'whatsapp', {
+      slot: 'b', method: 'phone', phoneNumber: '+880 1712-345678',
+    });
+    expect(res).toEqual({ ok: true, channel: 'whatsapp', slot: 'b', status: 'connecting', method: 'phone' });
+    expect(events.publishChannelConnect).toHaveBeenCalledWith(69, 'b', { method: 'phone', phoneNumber: '8801712345678' });
+  });
+
+  it('telegram phone: passes method + number to the Telegram worker', async () => {
+    const pool = fakePool();
+    const events = {
+      publishChannelConnect: vi.fn(async () => true),
+      publishChannelConnectTelegram: vi.fn(async () => true),
+    } as any;
+    const ctrl = new ConnectorsController(pool, events);
+    const res: any = await ctrl.connectChannel(69, 69, 'telegram', {
+      slot: 'hh', method: 'phone', phoneNumber: '8801712345678',
+    });
+    expect(res).toEqual({ ok: true, channel: 'telegram', slot: 'hh', status: 'connecting', method: 'phone' });
+    expect(events.publishChannelConnectTelegram).toHaveBeenCalledWith(69, 'hh', 42, null, { method: 'phone', phoneNumber: '8801712345678' });
+  });
+
+  it('phone: rejects a bad number instead of publishing', async () => {
+    const pool = fakePool();
+    const events = {
+      publishChannelConnect: vi.fn(async () => true),
+      publishChannelConnectTelegram: vi.fn(async () => true),
+    } as any;
+    const ctrl = new ConnectorsController(pool, events);
+    await expect(ctrl.connectChannel(69, 69, 'whatsapp', { slot: 'b', method: 'phone', phoneNumber: 'abc' }))
+      .rejects.toThrow('valid phone number');
+    await expect(ctrl.connectChannel(69, 69, 'telegram', { slot: 'hh', method: 'phone' }))
+      .rejects.toThrow('valid phone number');
+    expect(events.publishChannelConnect).not.toHaveBeenCalled();
+    expect(events.publishChannelConnectTelegram).not.toHaveBeenCalled();
+  });
+
+  it('signin: telegram code goes to the worker; other channels and bad codes are rejected', async () => {
+    const pool = fakePool();
+    const events = { publishTelegramSignIn: vi.fn(async () => true) } as any;
+    const ctrl = new ConnectorsController(pool, events);
+    const res: any = await ctrl.signinChannel(69, 69, 'telegram', { slot: 'hh', code: '12345' });
+    expect(res).toEqual({ ok: true, channel: 'telegram', slot: 'hh', status: 'verifying' });
+    expect(events.publishTelegramSignIn).toHaveBeenCalledWith(69, 'hh', '12345', undefined);
+    await expect(ctrl.signinChannel(69, 69, 'whatsapp', { slot: 'b', code: '12345' }))
+      .rejects.toThrow('only for Telegram');
+    await expect(ctrl.signinChannel(69, 69, 'telegram', { slot: 'hh', code: '12' }))
+      .rejects.toThrow('5-digit code');
   });
 });
 describe('ConnectorsController.getConnectors — honest statuses (no demo data)', () => {
@@ -157,7 +226,7 @@ describe('ConnectorsController.getConnectors — honest statuses (no demo data)'
       },
     } as any;
   }
-  const events = { getQrCode: async () => null } as any;
+  const events = { getQrCode: async () => null, getPairingCode: async () => null, getPhoneCodeSent: async () => false } as any;
 
   it('empty workspace: no invented Primary accounts, everything disconnected', async () => {
     const ctrl = new ConnectorsController(

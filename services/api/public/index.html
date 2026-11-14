@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Tectobox">
-<link rel="stylesheet" href="/styles.css?v=20261114_qr_polish">
+<link rel="stylesheet" href="/styles.css?v=20261114_phone_login">
 <script src="/theme-init.js?v=20261107b"></script>
 </head>
 <body>
@@ -749,9 +749,56 @@
   <div class="modal" style="width:380px; text-align:center;">
     <h3 id="qr-title">Scan to connect</h3>
     <p class="msub" id="qr-sub">Open the app on your phone and scan</p>
-    <div class="qr-box" id="qr-box"><div class="qr-skeleton" id="qr-skeleton" aria-hidden="true"></div><img id="qr-img" alt="QR code"></div>
+    <div id="qr-view">
+      <div class="qr-box" id="qr-box"><div class="qr-skeleton" id="qr-skeleton" aria-hidden="true"></div><img id="qr-img" alt="QR code"></div>
+    </div>
+    <div id="phone-view" class="hidden">
+      <div class="pairing-wrap" id="pairing-wrap">
+        <div class="pairing-skeleton" aria-hidden="true"></div>
+        <div class="pairing-code" id="pairing-code" title="Tap to copy"></div>
+        <p class="small muted" id="pairing-steps" style="margin:4px 0 0;"></p>
+        <button class="btn-primary" id="btn-pairing-refresh" style="display:none; margin-top:12px;">Request a new code</button>
+      </div>
+      <div id="tg-code-wrap" class="hidden">
+        <div class="frow"><input id="tg-code" class="input no-icon code-input" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="12345" maxlength="5"></div>
+        <div class="frow hidden" id="tg-pass-row" style="margin-top:8px;"><input id="tg-pass" class="input no-icon" type="password" autocomplete="current-password" placeholder="Two-step verification password"></div>
+        <p class="small" id="tg-code-err" style="color:#e5484d; min-height:16px; margin:6px 0;"></p>
+        <button class="btn-primary" id="btn-tg-verify" style="width:100%;" disabled>Verify code</button>
+      </div>
+    </div>
     <p class="small muted" id="qr-status" style="margin-bottom:16px;">Generating your secure code…</p>
     <button class="btn-danger-soft" id="btn-close-qr">Cancel</button>
+  </div>
+</div>
+
+<div id="method-modal" class="modal-bg hidden">
+  <div class="modal" style="width:380px; text-align:center;">
+    <h3 id="method-title">Connect WhatsApp</h3>
+    <p class="msub" id="method-sub">Choose how you want to link this account</p>
+    <div class="method-pick">
+      <button class="method-opt" id="method-qr">
+        <span class="method-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM21 14v.01M14 21v.01M21 21v.01M18 18h.01"/></svg></span>
+        <span class="method-tx"><span class="method-t">Scan QR code</span><span class="method-s">Point your phone camera at the code</span></span>
+      </button>
+      <button class="method-opt" id="method-phone">
+        <span class="method-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/></svg></span>
+        <span class="method-tx"><span class="method-t">Use phone number</span><span class="method-s">Enter a code instead of scanning</span></span>
+      </button>
+    </div>
+    <button class="btn-danger-soft" id="btn-method-cancel">Cancel</button>
+  </div>
+</div>
+
+<div id="phone-modal" class="modal-bg hidden">
+  <div class="modal" style="width:360px; text-align:center;">
+    <h3 id="phone-title">Enter your phone number</h3>
+    <p class="msub" id="phone-sub">With country code, digits only — e.g. 8801XXXXXXXXX</p>
+    <div class="frow"><input id="phone-number" class="input no-icon" type="tel" inputmode="numeric" autocomplete="tel" placeholder="8801XXXXXXXXX" maxlength="15"></div>
+    <p class="small" id="phone-err" style="color:#e5484d; min-height:16px; margin:4px 0 8px;"></p>
+    <div class="frow" style="gap:8px;">
+      <button class="btn-primary" id="btn-phone-ok" style="flex:1;">Continue</button>
+      <button class="btn-danger-soft" id="btn-phone-cancel">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -1271,7 +1318,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=20261114_qr_polish"></script>
+<script src="/app.js?v=20261114_phone_login"></script>
     <div class="gs-overlay hidden" id="gs-overlay">
       <div class="gs-card" id="get-started" role="dialog" aria-label="Get started"></div>
     </div>
