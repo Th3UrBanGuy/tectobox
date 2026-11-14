@@ -613,6 +613,10 @@ async function loadBackupTab() {
     const id = backupId();
     if (!id) { say('Pick a workspace first.', true); return; }
     window.location = `/api/clients/${id}/backup/export-md`;
+    // A download produces no UI change — say so in the status line
+    // AND toast, or the click reads as dead (item-5).
+    say('Backup summary downloading…');
+    toast('Backup exported');
   };
   card.querySelector('[data-bk-import]').onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;

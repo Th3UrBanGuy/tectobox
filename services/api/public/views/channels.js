@@ -20,8 +20,8 @@ async function loadAdminConnectors() {
     resources = await api('/api/admin/resources');
   } catch (e) {
     $('chan-grid').innerHTML = `<div class="warm-empty"><b>Couldn't load channels</b><p>${esc(e.message || 'The connection hiccuped.')}</p><button class="btn-primary" id="btn-chan-retry" style="margin-top:6px;">Retry</button></div>`;
-    $('btn-chan-retry').onclick = () => loadConnectors();
-    return;
+    $('btn-chan-retry').onclick = () => retryChannels();
+    return false;
   }
   state.connectors = null;
   const anyConnected = resources.some((r) => r.status === 'connected');
@@ -38,6 +38,22 @@ async function loadAdminConnectors() {
       <div class="note" style="margin-top:8px;">Read-only — channels are managed from each workspace.</div>
     </div>`;
   }).join('') || '<div class="card"><p class="muted">No channel resources yet.</p></div>';
+  return true;
+}
+
+/**
+ * Channels Retry (item-5): the button only exists on the load-error
+ * card, and a re-load that fails again used to repaint the identical
+ * error — no visible change, so the click read as dead. The retry now
+ * shows a spinner label while it runs and always toasts the outcome,
+ * so the click is visibly answered even when the reload fails again.
+ */
+async function retryChannels() {
+  const btn = $('btn-chan-retry');
+  if (btn) { btn.disabled = true; btn.textContent = 'Retrying…'; }
+  const ok = await loadConnectors();
+  if (ok) toast('Channels refreshed');
+  else toast('Still could not load channels — check your connection and try again', 'err');
 }
 
 async function loadConnectors() {
@@ -71,8 +87,8 @@ async function loadConnectorsInner() {
   } catch (e) {
     $('chan-grid').innerHTML = `<div class="warm-empty"><b>Couldn't load channels</b><p>The connection hiccuped. Your channels are safe — let's try again.</p><button class="btn-primary" id="btn-chan-retry" style="margin-top:6px;">Retry</button></div>`;
     $('webhook-urls').innerHTML = '';
-    $('btn-chan-retry').onclick = () => loadConnectors();
-    return;
+    $('btn-chan-retry').onclick = () => retryChannels();
+    return false;
   }
   // P17: the Meta webhook URL is listed ALWAYS — the old code hid it
   // behind META_CONNECTORS_VISIBLE, so the channels view showed no
@@ -220,6 +236,7 @@ async function loadConnectorsInner() {
     loadConnectors();
   });
   if (state.view === 'settings') renderSetupChecklist();
+  return true;
 }
 
 // ---------------- FB comment automation panel ----------------

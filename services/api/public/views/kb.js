@@ -24,7 +24,20 @@ const kbCatOptions = sel => Object.entries(KB_CATS).map(([v, l]) =>
   `<option value="${v}"${v === sel ? ' selected' : ''}>${l}</option>`).join('');
 
 async function loadKnowledge() {
-  state.knowledge = await clientApi(`/api/clients/:clientId/knowledge`);
+  try {
+    state.knowledge = await clientApi(`/api/clients/:clientId/knowledge`);
+  } catch (e) {
+    // No workspace (admin with nothing picked, or a fresh account):
+    // show the message in the list instead of throwing — the view
+    // must never JS-error for a missing workspace (item-5: the
+    // click-audit's mock user has no real workspace).
+    state.knowledge = [];
+    const count = $('kb-count');
+    if (count) count.textContent = '';
+    const list = $('kb-list');
+    if (list) list.innerHTML = `<div class="card small muted">${esc(e.message || 'Could not load documents.')}</div>`;
+    return;
+  }
   // A non-array payload (backend hiccup) used to crash the whole KB view
   // with "state.knowledge.map is not a function" (2026-11-13 click audit).
   if (!Array.isArray(state.knowledge)) state.knowledge = [];
