@@ -32,7 +32,13 @@ COPY --from=builder /app/services/workers/dist ./services/workers/dist
 RUN pnpm install --prod --frozen-lockfile --config.ignore-scripts=true
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup \
-    && chown -R appuser:appgroup /app
+    && chown -R appuser:appgroup /app \
+    && mkdir -p /data/sessions && chown -R appuser:appgroup /data/sessions
+# NOTE (2026-11-14): /data/sessions must be appuser-owned in the image so a
+# FRESH infra_sessiondata volume inherits correct ownership. A pre-existing
+# root-owned volume is NOT fixed by this (the mount overlays it) — deploy.sh
+# chowns the live volume before every `up` for that case. Without either,
+# Baileys mkdir fails EACCES and no WhatsApp QR is ever produced.
 
 USER appuser
 

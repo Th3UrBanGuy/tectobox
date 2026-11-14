@@ -79,6 +79,16 @@ fi
 echo "[+] Pulling container images (tag: ${IMAGE_TAG})..."
 docker compose -f infra/docker-compose.prod.yml -p tectobox --project-directory "${DEPLOY_DIR}" pull
 
+# 2b. Session volume ownership (2026-11-14): the workers container runs as
+# non-root appuser (uid 100), but infra_sessiondata was created back when it
+# ran as root — Baileys mkdir then fails EACCES and no WhatsApp QR is ever
+# produced (rows stuck at 'connecting' forever). chown the live volume
+# before every deploy; idempotent once ownership is correct. Non-fatal:
+# the volume may not exist yet on a fresh install (compose creates it).
+docker compose -f infra/docker-compose.prod.yml -p tectobox --project-directory "${DEPLOY_DIR}" run --rm --no-deps -u 0 workers sh -c 'chown -R 100:101 /data/sessions' \
+  && echo "[+] Session volume ownership fixed (appuser:appgroup)" \
+  || echo "[!] WARNING: session volume chown failed (continuing — see 2026-11-14 QR incident)"
+
 # 3. Spin up / update containers in detached mode
 echo "[+] Orchestrating services via Docker Compose..."
 docker compose -f infra/docker-compose.prod.yml -p tectobox --project-directory "${DEPLOY_DIR}" up -d --remove-orphans
