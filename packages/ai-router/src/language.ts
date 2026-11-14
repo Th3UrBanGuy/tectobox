@@ -32,6 +32,19 @@ const BN_WORDS = new Set(
    'kothay kobe kokhon kikore ki kore kisher keno kisher jonno kar jonno').split(/\s+/)
 );
 
+// Distinctive Roman-Hindi (Hinglish) words. Short ambiguous particles that
+// also occur in English ("me", "do", "par", "ya", "ho") are deliberately
+// left out so English messages never score as Hindi. "ki" and "daam" sit
+// in both vocabularies and are resolved by the other words present.
+const HI_WORDS = new Set(
+  ('ki kya hai hain kaise kaisa kaisi kitna kitne kitni keemat kimat daam ' +
+   'karna karo karein karen mujhe mera meri mere aap aapka aapki aapko ' +
+   'tum tumhara tumhari chahiye chahie sakte sakta sakti kab kahan kaha kaun kyun kyu ' +
+   'batao bataiye dijiye lena lene khareedna kharidna dukaan dukan khula khulta khulna ' +
+   'band subah shaam raat aaj abhi yeh ye woh iska uska iski uski ka ke ko ne bhi ' +
+   'nahin nahi bahut acha achha theek samay paisa rupay rupaye bhugtan').split(/\s+/)
+);
+
 export function detectCustomerLanguage(rawText: string): 'bn' | 'banglish' | 'en' | 'hi' {
   const t = String(rawText || '');
   if (/[\u0980-\u09FF]/.test(t)) return 'bn'; // Bangla script
@@ -39,7 +52,16 @@ export function detectCustomerLanguage(rawText: string): 'bn' | 'banglish' | 'en
   const words = t.toLowerCase().split(/[^a-z]+/).filter(Boolean);
   if (!words.length) return 'en';
   let hits = 0;
-  for (const w of words) if (BN_WORDS.has(w)) hits++;
+  let hiHits = 0;
+  for (const w of words) {
+    if (BN_WORDS.has(w)) hits++;
+    if (HI_WORDS.has(w)) hiHits++;
+  }
+  // Roman Hindi (Hinglish): distinctive Hindi words in Latin letters.
+  // Checked before Banglish because "ki" sits in both vocabularies —
+  // Hindi wins only when Hindi-specific words (keemat/kya/hai/kaise/...)
+  // are present; a single Hindi word with no Banglish marker also counts.
+  if (hiHits >= 2 || (hiHits >= 1 && hits === 0)) return 'hi';
   if (hits >= 2 || (words.length <= 6 && hits >= 1)) return 'banglish';
   return 'en';
 }
