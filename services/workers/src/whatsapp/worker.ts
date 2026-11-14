@@ -6,15 +6,12 @@ import {
   DEFAULT_SLOT,
   DLX_EXCHANGE,
   EVENTS_EXCHANGE,
-  LEASE_TTL_SECONDS,
-  PAIRING_TTL_SECONDS,
   QR_TTL_SECONDS,
   RETRY_EXCHANGE,
   RETRY_TTL_MS,
   SSE_EVENT_TYPES,
   ChannelCommandWireMessageSchema,
   OutboundWireMessageSchema,
-  channelStatusRoutingKey,
   connectQueue,
   connectRoutingKey,
   disconnectQueue,
@@ -30,9 +27,18 @@ import {
   waQrKey,
   whatsappSessionKey,
 } from '@tectonic/contracts';
+import { createChannelStatusPublisher } from '../shared/channel-status.ts';
+import { FencedSessionRegistry } from '../shared/session-lease.ts';
+import {
+  runOutgoingMessage,
+  shouldAckOutgoing,
+} from '../shared/outgoing-consumer.ts';
+import {
+  requestWhatsappPairingCode,
+  whatsappSessionDir,
+} from './pairing.ts';
 import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
 import { pacedSend, clearPacerQueue } from './pacer.ts';
-import * as path from 'path';
 import * as fs from 'fs';
 import QRCode from 'qrcode';
 
@@ -57,56 +63,28 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
   const redis = deps.redis || new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
   const coordinator = deps.coordinator || new RedisCoordinator(redis);
 
-  const sockets = deps.initialSockets || new Map<string, { sock: any; token: number }>();
-  let consumerTag: string | null = null;
   const channel = mq.getChannel();
+  // Mutable holder for the outgoing consumer, read by the session
+  // registry at lease-loss fire time (the consumer registers below,
+  // after sessions are created).
+  const consumerHolder: { tag: string | null; channel: any } = { tag: null, channel };
 
-  // Best-effort channel status sync (worker -> API -> DB). Never throws:
-  // a missing API consumer (or a broker restart) must not break the
-  // socket's connection lifecycle.
-  const publishChannelStatus = async (clientId: string, slot: string, status: string) => {
-    try {
-      await mq.publish(channelStatusRoutingKey('whatsapp'), {
-        clientId: Number(clientId),
-        channel: 'whatsapp',
-        slot,
-        status,
-      });
-    } catch (e: any) {
-      console.warn('[whatsapp] channel status publish failed:', e.message);
-    }
-  };
-
-  const getSocketWithFencing = async (clientId: string, slot: string) => {
-    const key = whatsappSessionKey(clientId, slot);
-    const cached = sockets.get(key);
-    if (cached) {
-      // Validate lease ownership immediately before use
-      const valid = await coordinator.validateLease(leaseKey(key), cached.token);
-      if (valid) return cached;
-      sockets.delete(key);
-    }
-
-    const fencingLeaseKey = leaseKey(key);
-    const token = await coordinator.acquireLease(fencingLeaseKey, LEASE_TTL_SECONDS);
-    if (!token) {
-      console.log(`[whatsapp] could not acquire lease for ${key}`);
-      return null;
-    }
-    
-    let sock: any = null;
-    let isLeaseValid = true;
-    const renewInterval = setInterval(async () => {
-      const ok = await coordinator.renewLease(fencingLeaseKey, token, LEASE_TTL_SECONDS);
-      if (!ok) {
-        isLeaseValid = false;
-        clearInterval(renewInterval);
-        sockets.delete(key);
-
+  // Fenced session lifecycle (lease acquire/validate/renew + on-loss
+  // teardown) — shared with Telegram via FencedSessionRegistry. The
+  // registry wraps the injected map (or a fresh one), so tests that
+  // seed `initialSockets` keep driving the same instance.
+  const sessionRegistry = new FencedSessionRegistry<{ sock: any; token: number }>(
+    {
+      coordinator,
+      channel: 'whatsapp',
+      consumer: consumerHolder,
+      onLeaseLoss: async (entry, { key, clientId, slot }) => {
         // 1. Drain & abort queued pacer tasks
         clearPacerQueue(clientId, slot, new Error(`Lease lost for WhatsApp client ${clientId}:${slot}`));
 
-        // 2. Disconnect socket
+        // 2. Disconnect socket (may be null — the interval is created
+        // before makeWASocket returns, exactly as before).
+        const sock = entry?.sock;
         if (sock) {
           try {
             sock.end(new Error('Lease expired or fenced'));
@@ -114,21 +92,35 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
             console.error(`[whatsapp] error closing socket on lease loss for ${key}:`, e);
           }
         }
+      },
+    },
+    deps.initialSockets,
+  );
 
-        // 3. Stop consumer immediately upon lease renewal failure to prevent split-brain processing
-        if (consumerTag && channel) {
-          try {
-            await channel.cancel(consumerTag);
-            console.warn(`[whatsapp] consumer cancelled for ${consumerTag} due to lease loss`);
-          } catch (e) {
-            console.error('[whatsapp] error cancelling consumer on lease loss:', e);
-          }
-        }
-      }
-    }, 30000);
+  // Paired channel-status flip (SSE channel_status event + MQ
+  // channel.status.whatsapp publish) — shared with Telegram.
+  const publishChannelStatus = createChannelStatusPublisher({
+    mq,
+    coordinator,
+    channel: 'whatsapp',
+  });
 
-    const baseSessionDir = process.env.SESSION_DIR || path.join(process.cwd(), 'wa-auth');
-    const authDir = path.join(baseSessionDir, key);
+  const getSocketWithFencing = async (clientId: string, slot: string) => {
+    const key = whatsappSessionKey(clientId, slot);
+    const cached = await sessionRegistry.getCached(key);
+    if (cached) return cached;
+
+    const fencingLeaseKey = leaseKey(key);
+    const token = await sessionRegistry.acquire(key);
+    if (!token) {
+      console.log(`[whatsapp] could not acquire lease for ${key}`);
+      return null;
+    }
+
+    let sock: any = null;
+    sessionRegistry.track(key, () => (sock ? { sock, token } : null), token, { key, clientId, slot });
+
+    const authDir = whatsappSessionDir(clientId, slot);
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
     sock = makeWASocket({
@@ -167,31 +159,16 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
       if (connection === 'close') {
         const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
         console.log('[whatsapp] connection closed, reconnecting:', shouldReconnect);
-        clearInterval(renewInterval);
-        sockets.delete(key);
+        sessionRegistry.remove(key);
         clearPacerQueue(clientId, slot, new Error(`Connection closed for WhatsApp client ${clientId}:${slot}`));
         coordinator.releaseLease(fencingLeaseKey, token);
         await redis.del(waQrKey(clientId, slot)).catch(() => {});
         await redis.del(waPairingKey(clientId, slot)).catch(() => {});
-        await coordinator.publishEvent(tenantEventsChannel(clientId), {
-          type: SSE_EVENT_TYPES.CHANNEL_STATUS,
-          clientId: Number(clientId),
-          channel: 'whatsapp',
-          slot,
-          status: 'disconnected',
-        });
         await publishChannelStatus(clientId, slot, 'disconnected');
       } else if (connection === 'open') {
         console.log('[whatsapp] opened connection');
         await redis.del(waQrKey(clientId, slot)).catch(() => {});
         await redis.del(waPairingKey(clientId, slot)).catch(() => {});
-        await coordinator.publishEvent(tenantEventsChannel(clientId), {
-          type: SSE_EVENT_TYPES.CHANNEL_STATUS,
-          clientId: Number(clientId),
-          channel: 'whatsapp',
-          slot,
-          status: 'connected',
-        });
         await publishChannelStatus(clientId, slot, 'connected');
       }
     });
@@ -199,7 +176,7 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
     sock.ev.on('messages.upsert', async (m: any) => {
       for (const msg of m.messages) {
         if (!msg.message || msg.key.fromMe) continue;
-        
+
         await mq.publish(incomingRoutingKey('whatsapp'), {
           clientId,
           slot,
@@ -209,7 +186,7 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
     });
 
     const entry = { sock, token };
-    sockets.set(key, entry);
+    sessionRegistry.set(key, entry);
     return entry;
   };
 
@@ -224,138 +201,67 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
       retryQueue: retryQueue(outgoingQueue('whatsapp')),
       retryTtlMs: RETRY_TTL_MS,
     });
-    
+
     const consumeResult = await channel.consume(outgoingQueue('whatsapp'), async (msg: any) => {
       if (!msg) return;
 
-      let payload: any;
-      try {
-        payload = JSON.parse(msg.content.toString());
-      } catch (err) {
-        console.error('[whatsapp] malformed JSON payload, routing to DLQ:', err);
-        channel.nack(msg, false, false);
-        return;
-      }
-
-      // Outbound payloads are validated by OutboundWireMessageSchema,
-      // which encodes exactly the old `!clientId || !to || !text` gate
-      // (plus the Number() coercion for clientId). A failed message is
-      // nacked to the DLQ, as before.
-      const parsed = OutboundWireMessageSchema.safeParse(payload);
-      if (!parsed.success) {
-        console.warn('[whatsapp] missing required fields, routing to DLQ:', payload);
-        channel.nack(msg, false, false);
-        return;
-      }
-      const { clientId, slot, to, text, attempt } = parsed.data;
-
-      // Read retry attempt from message header if present (broker-managed retry) or payload
-      const headerAttempt = msg.properties?.headers?.['x-retry-count'];
-      const currentAttempt = Number(headerAttempt ?? attempt) || 1;
-      const MAX_RETRIES = 3;
-
-      // Never generate a different idempotency key for the same logical send on redelivery!
-      // If payload already has an idempotencyKey, preserve it deterministically.
-      // If not, derive deterministic key from clientId, slot, to, and message text hash/content.
-      const stableIdKey = parsed.data.idempotencyKey || `wa:${clientId}:${slot || 'default'}:${to}:${Buffer.from(text).toString('base64').slice(0, 32)}`;
-
-      // Atomic send-state claim via Redis Lua script
-      const claimResult = await coordinator.claimSendAttempt(stableIdKey);
-      if (!claimResult.claimed) {
-        if (claimResult.state === 'sent') {
-          console.log(`[whatsapp] message ${stableIdKey} already sent, acknowledging duplicate`);
-          channel.ack(msg);
-          return;
-        }
-        if (claimResult.state === 'outcome-unknown') {
-          console.warn(`[whatsapp] message ${stableIdKey} has ambiguous outcome from prior attempt; holding for manual reconciliation and routing to DLQ`);
-          channel.nack(msg, false, false);
-          return;
-        }
-        if (claimResult.state === 'sending') {
-          console.warn(`[whatsapp] message ${stableIdKey} is currently being sent concurrently; rejecting redelivery`);
-          channel.nack(msg, false, false);
-          return;
-        }
-      }
-
-      try {
-        await pacedSend(
-          String(clientId),
-          slot || 'default',
-          to,
-          text,
-          async (target, txt) => {
-            const entry = await getSocketWithFencing(String(clientId), slot || 'default');
-            if (!entry) {
-              throw new Error(`Failed to acquire active lease for WhatsApp ${clientId}:${slot || 'default'}`);
-            }
-
-            // Atomically validate lease and monotonic fencing token at the provider call boundary
-            const isValid = await coordinator.validateAndTouchLease(leaseKey(whatsappSessionKey(clientId, slot || DEFAULT_SLOT)), entry.token);
-            if (!isValid) {
-              throw new Error(`Stale fencing token ${entry.token} for WhatsApp ${clientId}:${slot || 'default'}; side-effect aborted`);
-            }
-
-            try {
-              const res = await entry.sock.sendMessage(target, { text: txt });
-              await coordinator.recordSendState(stableIdKey, 'sent');
-              return res;
-            } catch (err) {
-              // Ambiguous outcome if timeout or network failure occurred during send
-              await coordinator.recordSendState(stableIdKey, 'outcome-unknown');
-              throw err;
-            }
-          },
-          async (target, isTyping) => {
-            const entry = await getSocketWithFencing(String(clientId), slot || 'default');
-            if (entry) {
-              await entry.sock.sendPresenceUpdate(isTyping ? 'composing' : 'paused', target);
-            }
-          }
-        );
-
-        channel.ack(msg);
-      } catch (err) {
-        console.error(`[whatsapp] send error (attempt ${currentAttempt}/${MAX_RETRIES}):`, err);
-        const latestState = await coordinator.getSendState(stableIdKey);
-        if (latestState === 'outcome-unknown') {
-          console.warn(`[whatsapp] send encountered ambiguous outcome for ${to}, routing to DLQ without blind retry`);
-          channel.nack(msg, false, false);
-          return;
-        }
-
-        if (currentAttempt < MAX_RETRIES) {
-          // Broker-managed durable retry routing: publish to durable retry exchange with TTL and headers
-          const nextAttempt = currentAttempt + 1;
-          const nextPayload = { ...parsed.data, attempt: nextAttempt, idempotencyKey: stableIdKey };
-          const delayMs = Math.min(1000 * Math.pow(2, currentAttempt - 1), 10000);
-
-          try {
-            await mq.publish(
-              outgoingRoutingKey('whatsapp'),
-              nextPayload,
-              {
-                exchange: RETRY_EXCHANGE,
-                expiration: delayMs,
-                headers: { 'x-retry-count': nextAttempt },
-                mandatory: true,
+      const result = await runOutgoingMessage({
+        msg,
+        coordinator,
+        mq,
+        channel: 'whatsapp',
+        validate: (payload) => {
+          const parsed = OutboundWireMessageSchema.safeParse(payload);
+          return parsed.success
+            ? { ok: true as const, data: parsed.data }
+            : { ok: false as const };
+        },
+        buildIdempotencyKey: (data) =>
+          data.idempotencyKey ||
+          `wa:${data.clientId}:${data.slot || 'default'}:${data.to}:${Buffer.from(data.text).toString('base64').slice(0, 32)}`,
+        send: async (data, stableIdKey) => {
+          await pacedSend(
+            String(data.clientId),
+            data.slot || 'default',
+            data.to,
+            data.text,
+            async (target, txt) => {
+              const entry = await getSocketWithFencing(String(data.clientId), data.slot || 'default');
+              if (!entry) {
+                throw new Error(`Failed to acquire active lease for WhatsApp ${data.clientId}:${data.slot || 'default'}`);
               }
-            );
-            // Only ack original message after confirmed republish to retry queue
-            channel.ack(msg);
-          } catch (publishErr) {
-            console.error('[whatsapp] failed to publish to retry queue, routing original to DLQ:', publishErr);
-            channel.nack(msg, false, false);
-          }
-        } else {
-          console.error(`[whatsapp] max retries reached for ${to}, sending to DLQ`);
-          await coordinator.recordSendState(stableIdKey, 'failed');
-          channel.nack(msg, false, false); // Route to DLQ
-        }
-      }
+
+              // Atomically validate lease and monotonic fencing token at the provider call boundary
+              const isValid = await coordinator.validateAndTouchLease(leaseKey(whatsappSessionKey(data.clientId, data.slot || DEFAULT_SLOT)), entry.token);
+              if (!isValid) {
+                throw new Error(`Stale fencing token ${entry.token} for WhatsApp ${data.clientId}:${data.slot || 'default'}; side-effect aborted`);
+              }
+
+              try {
+                const res = await entry.sock.sendMessage(target, { text: txt });
+                await coordinator.recordSendState(stableIdKey, 'sent');
+                return res;
+              } catch (err) {
+                // Ambiguous outcome if timeout or network failure occurred during send
+                await coordinator.recordSendState(stableIdKey, 'outcome-unknown');
+                throw err;
+              }
+            },
+            async (target, isTyping) => {
+              const entry = await getSocketWithFencing(String(data.clientId), data.slot || 'default');
+              if (entry) {
+                await entry.sock.sendPresenceUpdate(isTyping ? 'composing' : 'paused', target);
+              }
+            }
+          );
+          return { outcome: 'sent' as const };
+        },
+      });
+
+      if (shouldAckOutgoing(result)) channel.ack(msg);
+      else channel.nack(msg, false, false);
     });
-    consumerTag = consumeResult?.consumerTag || null;
+    consumerHolder.tag = consumeResult?.consumerTag || null;
 
     // RC5: connect commands from the API (POST .../connectors/whatsapp/connect).
     // Starting the socket here is the whole trigger: Baileys emits a QR on
@@ -397,78 +303,16 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
           // WhatsApp (Linked devices -> Link with phone number instead).
           // Same delivery as the QR: Redis (polled by the modal) + SSE.
           if (method === 'phone' && phoneNumber) {
-            const effSlot = slot || 'default';
-            try {
-              if (typeof entry.sock.requestPairingCode !== 'function') {
-                throw new Error('This WhatsApp version does not support pairing codes');
-              }
-              // Baileys requestPairingCode sends the pairing stanza
-              // immediately — it does NOT wait for the Noise handshake.
-              // Called right after makeWASocket, it corrupts the handshake
-              // and the server drops the connection ("Connection Failure"
-              // at noise-handler decodeFrame). The handshake is done once
-              // the server emits the QR, so wait for the wa:qr key (the
-              // same key the QR modal polls) before asking for the code.
-              // If the socket dies mid-wait, stop at once instead of
-              // burning the whole window on a dead connection.
-              const waitMs = deps.pairingWaitMs ?? 20000;
-              const startedAt = Date.now();
-              const sockKey = whatsappSessionKey(clientId, effSlot);
-              let qrSeen = !!(await redis.get(waQrKey(clientId, effSlot)).catch(() => null));
-              let sockDead = false;
-              while (!qrSeen && Date.now() - startedAt < waitMs) {
-                await new Promise((r) => setTimeout(r, 500));
-                if (!sockets.has(sockKey)) { sockDead = true; break; }
-                qrSeen = !!(await redis.get(waQrKey(clientId, effSlot)).catch(() => null));
-              }
-              if (sockDead) {
-                throw new Error('WhatsApp closed the connection — tap "Request a new code" to try again.');
-              }
-              if (!qrSeen) {
-                throw new Error('WhatsApp did not answer in time — tap "Request a new code" to try again.');
-              }
-              const raw = String(await entry.sock.requestPairingCode(String(phoneNumber).replace(/[^0-9]/g, '')));
-              const code = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-              const shown = code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
-              await redis.set(waPairingKey(clientId, effSlot), shown, 'EX', PAIRING_TTL_SECONDS);
-              await coordinator.publishEvent(tenantEventsChannel(clientId), {
-                type: SSE_EVENT_TYPES.PAIRING_CODE,
-                clientId: Number(clientId),
-                channel: 'whatsapp',
-                slot: effSlot,
-                code: shown,
-              });
-              console.log(`[whatsapp] pairing code issued for ${clientId}:${effSlot}`);
-            } catch (e: any) {
-              const raw = e.message || 'Could not request a pairing code';
-              // Baileys drops the socket ("Connection Closed") when the
-              // number is not on WhatsApp or not in international format.
-              // The raw text tells the user nothing, so translate it.
-              const friendly = /connection closed/i.test(raw)
-                ? 'WhatsApp closed the connection — this number may not be on WhatsApp, or the country code is wrong. Check the number and try again.'
-                : raw;
-              console.warn(`[whatsapp] pairing code failed for ${clientId}:${effSlot}:`, raw);
-              await coordinator.publishEvent(tenantEventsChannel(clientId), {
-                type: SSE_EVENT_TYPES.PAIRING_ERROR,
-                clientId: Number(clientId),
-                channel: 'whatsapp',
-                slot: effSlot,
-                error: friendly,
-              });
-              // The failed request poisoned the saved session: Baileys
-              // stores the half-registered identity (creds.me +
-              // pairingCode) before sending, so the next socket load
-              // skips the QR flow and the server rejects it as logged
-              // out — no QR ever arrives and every retry times out.
-              // End the socket and wipe the slot's session dir so the
-              // next tap starts clean. Nothing was paired, so nothing
-              // is lost.
-              try { entry.sock.end?.(new Error('pairing failed, resetting session')); } catch {}
-              try {
-                const baseDir = process.env.SESSION_DIR || path.join(process.cwd(), 'wa-auth');
-                await fs.promises.rm(path.join(baseDir, whatsappSessionKey(clientId, effSlot)), { recursive: true, force: true });
-              } catch {}
-            }
+            await requestWhatsappPairingCode({
+              entry,
+              sockets: sessionRegistry.map,
+              redis,
+              coordinator,
+              clientId,
+              slot: slot || 'default',
+              phoneNumber,
+              pairingWaitMs: deps.pairingWaitMs,
+            });
           }
         } else {
           console.warn(`[whatsapp] connect ${clientId}:${slot || 'default'} could not acquire a lease — re-tap Connect to retry`);
@@ -514,9 +358,9 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
       const fencingLeaseKey = leaseKey(key);
 
       try {
-        const entry = sockets.get(key);
+        const entry = sessionRegistry.get(key);
         if (entry) {
-          sockets.delete(key);
+          sessionRegistry.delete(key);
           clearPacerQueue(String(clientId), effectiveSlot, new Error(`Session disconnected for WhatsApp client ${clientId}:${effectiveSlot}`));
           if (entry.sock) {
             try {
@@ -533,8 +377,7 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
         }
 
         // Remove auth/session data on disk and in Redis
-        const baseSessionDir = process.env.SESSION_DIR || path.join(process.cwd(), 'wa-auth');
-        const authDir = path.join(baseSessionDir, key);
+        const authDir = whatsappSessionDir(clientId, effectiveSlot);
         try {
           fs.rmSync(authDir, { recursive: true, force: true });
         } catch (e) {}
@@ -542,13 +385,6 @@ export async function startWhatsappWorker(deps: WhatsappWorkerDeps = {}) {
         await redis.del(waQrKey(clientId, effectiveSlot)).catch(() => {});
         await redis.del(waPairingKey(clientId, effectiveSlot)).catch(() => {});
         await publishChannelStatus(String(clientId), effectiveSlot, 'disconnected');
-        await coordinator.publishEvent(tenantEventsChannel(clientId), {
-          type: SSE_EVENT_TYPES.CHANNEL_STATUS,
-          clientId: Number(clientId),
-          channel: 'whatsapp',
-          slot: effectiveSlot,
-          status: 'disconnected',
-        });
 
         channel.ack(msg);
       } catch (err) {

@@ -17,6 +17,46 @@ import {
   retryQueue,
   sendAttemptErrorKey,
 } from '@tectonic/contracts';
+import {
+  runOutgoingMessage,
+  shouldAckOutgoing,
+  type OutgoingMessageOutcome,
+} from '../shared/outgoing-consumer.ts';
+
+/**
+ * Meta outgoing send — now a thin wrapper around the shared
+ * outgoing-consumer skeleton (Phase 2 of the modular restructure).
+ * The claim / retry / DLQ flow is identical to WhatsApp and Telegram;
+ * only the payload validation, the idempotency prefix (`meta:`), and
+ * the provider call (Facebook Graph API) differ.
+ *
+ * The `{ status, error? }` return contract is preserved exactly — the
+ * meta spec asserts it (H6 fake-send prevention).
+ */
+function outcomeToStatus(
+  result: OutgoingMessageOutcome,
+): { status: string; error?: string } {
+  switch (result.outcome) {
+    case 'ignored':
+      return { status: 'ignored' };
+    case 'malformed':
+      return { status: 'failed', error: 'malformed_json' };
+    case 'invalid':
+      return { status: 'failed', error: 'missing_required_fields' };
+    case 'duplicate-sent':
+      return { status: 'duplicate_sent' };
+    case 'outcome-unknown':
+      return { status: 'outcome_unknown' };
+    case 'in-flight':
+      return { status: 'in_flight' };
+    case 'sent':
+      return { status: 'sent' };
+    case 'retried':
+      return { status: 'retried' };
+    case 'failed':
+      return { status: 'failed', error: result.error };
+  }
+}
 
 export async function handleMetaOutgoingMessage(
   msg: any,
@@ -27,131 +67,75 @@ export async function handleMetaOutgoingMessage(
 ): Promise<{ status: string; error?: string }> {
   if (!msg) return { status: 'ignored' };
 
-  let payload: any;
-  try {
-    payload = JSON.parse(msg.content.toString());
-  } catch (err) {
-    console.error('[meta] malformed JSON payload, routing to DLQ:', err);
-    channel.nack(msg, false, false);
-    return { status: 'failed', error: 'malformed_json' };
-  }
+  const result = await runOutgoingMessage({
+    msg,
+    coordinator,
+    mq,
+    channel: 'meta',
+    validate: (payload) => {
+      const parsed = OutboundWireMessageSchema.safeParse(payload);
+      return parsed.success
+        ? { ok: true as const, data: parsed.data }
+        : { ok: false as const };
+    },
+    buildIdempotencyKey: (data) => {
+      const channelName = data.platform === 'instagram' ? 'instagram' : 'messenger';
+      return (
+        data.idempotencyKey ||
+        `meta:${data.clientId}:${channelName}:${data.to}:${Buffer.from(data.text).toString('base64').slice(0, 32)}`
+      );
+    },
+    send: async (data, stableIdKey) => {
+      const channelName = data.platform === 'instagram' ? 'instagram' : 'messenger';
 
-  // Outbound payloads are validated by OutboundWireMessageSchema, which
-  // encodes exactly the old `!clientId || !to || !text` gate. A failed
-  // message is nacked to the DLQ, as before.
-  const parsed = OutboundWireMessageSchema.safeParse(payload);
-  if (!parsed.success) {
-    console.warn('[meta] missing required fields, routing to DLQ:', payload);
-    channel.nack(msg, false, false);
-    return { status: 'failed', error: 'missing_required_fields' };
-  }
-
-  const { clientId, to, text, platform, attempt } = parsed.data;
-
-  const channelName = platform === 'instagram' ? 'instagram' : 'messenger';
-  const headerAttempt = msg.properties?.headers?.['x-retry-count'];
-  const currentAttempt = Number(headerAttempt ?? attempt) || 1;
-  const MAX_RETRIES = 3;
-
-  const stableIdKey =
-    parsed.data.idempotencyKey ||
-    `meta:${clientId}:${channelName}:${to}:${Buffer.from(text).toString('base64').slice(0, 32)}`;
-
-  const claimResult = await coordinator.claimSendAttempt(stableIdKey);
-  if (!claimResult.claimed) {
-    if (claimResult.state === 'sent') {
-      console.log(`[meta] message ${stableIdKey} already sent, acknowledging duplicate`);
-      channel.ack(msg);
-      return { status: 'duplicate_sent' };
-    }
-    if (claimResult.state === 'outcome-unknown') {
-      console.warn(`[meta] message ${stableIdKey} has ambiguous outcome; routing to DLQ`);
-      channel.nack(msg, false, false);
-      return { status: 'outcome_unknown' };
-    }
-    if (claimResult.state === 'sending') {
-      console.warn(`[meta] message ${stableIdKey} currently in-flight; rejecting redelivery`);
-      channel.nack(msg, false, false);
-      return { status: 'in_flight' };
-    }
-  }
-
-  try {
-    // Resolve page access token from Redis cache or fallback environment variable
-    let token = await redis.get(metaTokenKey(clientId, channelName));
-    if (!token) {
-      token = process.env.META_PAGE_ACCESS_TOKEN || null;
-    }
-
-    if (!token) {
-      const errMsg = 'meta_send_not_configured';
-      console.error(`[meta] no active Meta page token for client ${clientId} (${channelName}); ${errMsg}`);
-      await coordinator.recordSendState(stableIdKey, 'failed');
-      if (typeof redis.set === 'function') {
-        await redis.set(sendAttemptErrorKey(stableIdKey), errMsg, 'EX', SEND_ATTEMPT_TTL_SECONDS);
+      // Resolve page access token from Redis cache or fallback environment variable
+      let token = await redis.get(metaTokenKey(data.clientId, channelName));
+      if (!token) {
+        token = process.env.META_PAGE_ACCESS_TOKEN || null;
       }
-      channel.nack(msg, false, false);
-      return { status: 'failed', error: errMsg };
-    }
 
-    const graphUrl = `https://graph.facebook.com/v19.0/me/messages`;
-    const res = await fetch(graphUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        recipient: { id: to },
-        messaging_type: 'RESPONSE',
-        message: { text },
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (!res.ok) {
-      const errBody: any = await res.json().catch(() => ({}));
-      throw new Error(errBody?.error?.message || `Graph HTTP ${res.status}`);
-    }
-
-    await coordinator.recordSendState(stableIdKey, 'sent');
-    channel.ack(msg);
-    console.log(`[meta] message sent successfully to ${to} on ${channelName}`);
-    return { status: 'sent' };
-  } catch (err: any) {
-    console.error(`[meta] send error (attempt ${currentAttempt}/${MAX_RETRIES}):`, err.message);
-    const latestState = await coordinator.getSendState(stableIdKey);
-    if (latestState === 'outcome-unknown') {
-      channel.nack(msg, false, false);
-      return { status: 'failed', error: 'outcome-unknown' };
-    }
-
-    if (currentAttempt < MAX_RETRIES) {
-      const nextAttempt = currentAttempt + 1;
-      const nextPayload = { ...parsed.data, attempt: nextAttempt, idempotencyKey: stableIdKey };
-      const delayMs = Math.min(1000 * Math.pow(2, currentAttempt - 1), 10000);
-
-      try {
-        await mq.publish(outgoingRoutingKey('meta'), nextPayload, {
-          exchange: RETRY_EXCHANGE,
-          expiration: delayMs,
-          headers: { 'x-retry-count': nextAttempt },
-          mandatory: true,
-        });
-        channel.ack(msg);
-        return { status: 'retried' };
-      } catch (publishErr) {
-        console.error('[meta] failed to publish to retry queue:', publishErr);
-        channel.nack(msg, false, false);
-        return { status: 'failed', error: 'publish_retry_failed' };
+      if (!token) {
+        const errMsg = 'meta_send_not_configured';
+        console.error(`[meta] no active Meta page token for client ${data.clientId} (${channelName}); ${errMsg}`);
+        await coordinator.recordSendState(stableIdKey, 'failed');
+        if (typeof redis.set === 'function') {
+          await redis.set(sendAttemptErrorKey(stableIdKey), errMsg, 'EX', SEND_ATTEMPT_TTL_SECONDS);
+        }
+        // Terminal failure: never retried (the skeleton returns 'failed'
+        // without touching the retry path).
+        return { outcome: 'terminal-failed' as const, error: errMsg };
       }
-    } else {
-      console.error(`[meta] max retries reached for ${to}, sending to DLQ`);
-      await coordinator.recordSendState(stableIdKey, 'failed');
-      channel.nack(msg, false, false);
-      return { status: 'failed', error: 'max_retries' };
-    }
-  }
+
+      const graphUrl = `https://graph.facebook.com/v19.0/me/messages`;
+      const res = await fetch(graphUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          recipient: { id: data.to },
+          messaging_type: 'RESPONSE',
+          message: { text: data.text },
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!res.ok) {
+        const errBody: any = await res.json().catch(() => ({}));
+        throw new Error(errBody?.error?.message || `Graph HTTP ${res.status}`);
+      }
+
+      await coordinator.recordSendState(stableIdKey, 'sent');
+      console.log(`[meta] message sent successfully to ${data.to} on ${channelName}`);
+      return { outcome: 'sent' as const };
+    },
+  });
+
+  // The skeleton never acks/nacks; this handler owns the channel.
+  if (shouldAckOutgoing(result)) channel.ack(msg);
+  else channel.nack(msg, false, false);
+  return outcomeToStatus(result);
 }
 
 export async function startMetaWorker() {

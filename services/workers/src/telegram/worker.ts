@@ -6,16 +6,13 @@ import {
   DEFAULT_SLOT,
   DLX_EXCHANGE,
   EVENTS_EXCHANGE,
-  LEASE_TTL_SECONDS,
   QR_TTL_SECONDS,
   RETRY_EXCHANGE,
   RETRY_TTL_MS,
   SSE_EVENT_TYPES,
-  TELEGRAM_CODE_TTL_SECONDS,
   ChannelCommandWireMessageSchema,
   TelegramOutboundWireMessageSchema,
   TelegramSigninWireMessageSchema,
-  channelStatusRoutingKey,
   connectQueue,
   connectRoutingKey,
   disconnectQueue,
@@ -35,6 +32,16 @@ import {
   tgQrKey,
   tgSessionKey,
 } from '@tectonic/contracts';
+import { createChannelStatusPublisher } from '../shared/channel-status.ts';
+import { FencedSessionRegistry } from '../shared/session-lease.ts';
+import {
+  runOutgoingMessage,
+  shouldAckOutgoing,
+} from '../shared/outgoing-consumer.ts';
+import {
+  handleTelegramSignin,
+  requestTelegramLoginCode,
+} from './phone-login.ts';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import QRCode from 'qrcode';
@@ -58,21 +65,37 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
   const redis = deps.redis || new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
   const coordinator = deps.coordinator || new RedisCoordinator(redis);
 
-  const sessions = new Map<string, { client: TelegramClient; token: number }>();
-  const leaseRenewers = new Map<string, NodeJS.Timeout>();
+  const channel = mq.getChannel();
+  // Mutable holder for the outgoing consumer, read by the session
+  // registry at lease-loss fire time (the consumer registers below,
+  // after sessions are created).
+  const consumerHolder: { tag: string | null; channel: any } = { tag: null, channel };
 
-  const publishChannelStatus = async (clientId: string, slot: string, status: string) => {
-    try {
-      await mq.publish(channelStatusRoutingKey('telegram'), {
-        clientId: Number(clientId),
-        channel: 'telegram',
-        slot,
-        status,
-      });
-    } catch (e: any) {
-      console.warn('[telegram] channel status publish failed:', e.message);
-    }
-  };
+  // Fenced session lifecycle (lease acquire/validate/renew + on-loss
+  // teardown) — shared with WhatsApp via FencedSessionRegistry.
+  const sessionRegistry = new FencedSessionRegistry<{ client: TelegramClient; token: number }>({
+    coordinator,
+    channel: 'telegram',
+    consumer: consumerHolder,
+    unrefInterval: true,
+    onLeaseLoss: async (entry, { clientId }) => {
+      if (entry?.client) {
+        try {
+          await entry.client.disconnect();
+        } catch (e) {
+          console.error(`[telegram] error disconnecting on lease loss for ${clientId}:`, e);
+        }
+      }
+    },
+  });
+
+  // Paired channel-status flip (SSE channel_status event + MQ
+  // channel.status.telegram publish) — shared with WhatsApp.
+  const publishChannelStatus = createChannelStatusPublisher({
+    mq,
+    coordinator,
+    channel: 'telegram',
+  });
 
   const getClientWithFencing = async (clientId: string, sessionStringOrSlot?: string, explicitSlot?: string, opts?: { autoLogin?: 'qr' | 'none' }) => {
     // Support signature: (clientId, sessionString) or (clientId, slot, sessionString)
@@ -92,15 +115,11 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
     }
 
     const key = telegramSessionKey(clientId, slot);
-    const cached = sessions.get(key);
-    if (cached) {
-      const valid = await coordinator.validateLease(leaseKey(key), cached.token);
-      if (valid) return cached;
-      sessions.delete(key);
-    }
+    const cached = await sessionRegistry.getCached(key);
+    if (cached) return cached;
 
     const fencingLeaseKey = leaseKey(key);
-    const token = await coordinator.acquireLease(fencingLeaseKey, LEASE_TTL_SECONDS);
+    const token = await sessionRegistry.acquire(key);
     if (!token) {
       console.warn(`[telegram] unable to acquire distributed session lease for client ${clientId}`);
       return null;
@@ -108,7 +127,7 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
 
     const apiId = parseInt(process.env.TELEGRAM_API_ID || '0');
     const apiHash = process.env.TELEGRAM_API_HASH || '';
-    
+
     let client: TelegramClient;
     try {
       if (!sessionString) {
@@ -162,26 +181,12 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
             if (savedStr) {
               await redis.set(tgSessionKey(clientId, slot), savedStr);
             }
-            await coordinator.publishEvent(tenantEventsChannel(clientId), {
-              type: SSE_EVENT_TYPES.CHANNEL_STATUS,
-              clientId: Number(clientId),
-              channel: 'telegram',
-              slot,
-              status: 'connected',
-            });
             await publishChannelStatus(clientId, slot, 'connected');
           }).catch((err: any) => {
             console.error('[telegram] QR login failed:', err.message);
           });
         } else if (isAuth) {
           await redis.del(tgQrKey(clientId, slot)).catch(() => {});
-          await coordinator.publishEvent(tenantEventsChannel(clientId), {
-            type: SSE_EVENT_TYPES.CHANNEL_STATUS,
-            clientId: Number(clientId),
-            channel: 'telegram',
-            slot,
-            status: 'connected',
-          });
           await publishChannelStatus(clientId, slot, 'connected');
         }
       }
@@ -192,38 +197,13 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
     }
 
     // Set up lease renewal with heartbeat and teardown on loss
-    const renewInterval = setInterval(async () => {
-      const ok = await coordinator.renewLease(fencingLeaseKey, token, LEASE_TTL_SECONDS);
-      if (!ok) {
-        clearInterval(renewInterval);
-        leaseRenewers.delete(key);
-        sessions.delete(key);
-        try {
-          await client.disconnect();
-        } catch (e) {
-          console.error(`[telegram] error disconnecting on lease loss for ${clientId}:`, e);
-        }
-        // Stop consumer immediately upon lease renewal failure to prevent split-brain processing
-        if (consumerTag && channel) {
-          try {
-            await channel.cancel(consumerTag);
-            console.warn(`[telegram] consumer cancelled for ${consumerTag} due to lease loss`);
-          } catch (e) {
-            console.error('[telegram] error cancelling consumer on lease loss:', e);
-          }
-        }
-      }
-    }, 30000);
+    sessionRegistry.track(key, () => ({ client, token }), token, { key, clientId, slot });
 
-    renewInterval.unref?.();
-    leaseRenewers.set(key, renewInterval);
     const entry = { client, token };
-    sessions.set(key, entry);
+    sessionRegistry.set(key, entry);
     return entry;
   };
 
-  const channel = mq.getChannel();
-  let consumerTag: string | null = null;
   if (channel) {
     await channel.prefetch(1);
 
@@ -235,119 +215,54 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
       retryQueue: retryQueue(outgoingQueue('telegram')),
       retryTtlMs: RETRY_TTL_MS,
     });
-    
+
     const consumeResult = await channel.consume(outgoingQueue('telegram'), async (msg: any) => {
       if (!msg) return;
 
-      let payload: any;
-      try {
-        payload = JSON.parse(msg.content.toString());
-      } catch (err) {
-        console.error('[telegram] malformed JSON payload, routing to DLQ:', err);
-        channel.nack(msg, false, false);
-        return;
-      }
+      const result = await runOutgoingMessage({
+        msg,
+        coordinator,
+        mq,
+        channel: 'telegram',
+        validate: (payload) => {
+          const parsed = TelegramOutboundWireMessageSchema.safeParse(payload);
+          return parsed.success
+            ? { ok: true as const, data: parsed.data }
+            : { ok: false as const };
+        },
+        buildIdempotencyKey: (data) =>
+          data.idempotencyKey ||
+          `tg:${data.clientId}:${data.to}:${Buffer.from(data.text).toString('base64').slice(0, 32)}`,
+        send: async (data, stableIdKey) => {
+          const entry = await getClientWithFencing(String(data.clientId), data.sessionString);
+          if (!entry) {
+            throw new Error(`Failed to acquire active lease for Telegram client ${data.clientId}`);
+          }
 
-      // Outbound payloads are validated by TelegramOutboundWireMessageSchema,
-      // which encodes exactly the old `!clientId || !sessionString || !to
-      // || !text` gate. A failed message is nacked to the DLQ, as before.
-      const parsed = TelegramOutboundWireMessageSchema.safeParse(payload);
-      if (!parsed.success) {
-        console.warn('[telegram] missing required fields, routing to DLQ:', payload);
-        channel.nack(msg, false, false);
-        return;
-      }
-      const { clientId, sessionString, to, text, attempt } = parsed.data;
-
-      const headerAttempt = msg.properties?.headers?.['x-retry-count'];
-      const currentAttempt = Number(headerAttempt ?? attempt) || 1;
-      const MAX_RETRIES = 3;
-
-      // Never generate a different idempotency key for the same logical send on redelivery!
-      const stableIdKey = parsed.data.idempotencyKey || `tg:${clientId}:${to}:${Buffer.from(text).toString('base64').slice(0, 32)}`;
-
-      // Atomic send-state claim via Redis Lua script
-      const claimResult = await coordinator.claimSendAttempt(stableIdKey);
-      if (!claimResult.claimed) {
-        if (claimResult.state === 'sent') {
-          console.log(`[telegram] message ${stableIdKey} already sent, acknowledging duplicate`);
-          channel.ack(msg);
-          return;
-        }
-        if (claimResult.state === 'outcome-unknown') {
-          console.warn(`[telegram] message ${stableIdKey} has ambiguous outcome from prior attempt; holding for manual reconciliation and routing to DLQ`);
-          channel.nack(msg, false, false);
-          return;
-        }
-        if (claimResult.state === 'sending') {
-          console.warn(`[telegram] message ${stableIdKey} is currently being sent concurrently; rejecting redelivery`);
-          channel.nack(msg, false, false);
-          return;
-        }
-      }
-
-      try {
-        const entry = await getClientWithFencing(String(clientId), sessionString);
-        if (!entry) {
-          throw new Error(`Failed to acquire active lease for Telegram client ${clientId}`);
-        }
-
-        // Atomically validate fencing token and touch lease at provider boundary.
-        // Reproduces the current behaviour exactly: the DEFAULT-slot lease
-        // is validated for every slot (known latent bug for non-default
-        // slots — deliberately not fixed in Phase 1).
-        const isValid = await coordinator.validateAndTouchLease(leaseKey(telegramSessionKey(clientId, DEFAULT_SLOT)), entry.token);
-        if (!isValid) {
-          throw new Error(`Stale fencing token ${entry.token} for Telegram client ${clientId}; side-effect aborted`);
-        }
-
-        try {
-          await entry.client.sendMessage(to, { message: text });
-          await coordinator.recordSendState(stableIdKey, 'sent');
-          channel.ack(msg);
-        } catch (err) {
-          await coordinator.recordSendState(stableIdKey, 'outcome-unknown');
-          throw err;
-        }
-      } catch (err) {
-        console.error(`[telegram] send error (attempt ${currentAttempt}/${MAX_RETRIES}):`, err);
-        const latestState = await coordinator.getSendState(stableIdKey);
-        if (latestState === 'outcome-unknown') {
-          console.warn(`[telegram] send encountered ambiguous outcome for ${to}, routing to DLQ without blind retry`);
-          channel.nack(msg, false, false);
-          return;
-        }
-
-        if (currentAttempt < MAX_RETRIES) {
-          const nextAttempt = currentAttempt + 1;
-          const nextPayload = { ...parsed.data, attempt: nextAttempt, idempotencyKey: stableIdKey };
-          const delayMs = Math.min(1000 * Math.pow(2, currentAttempt - 1), 10000);
+          // Atomically validate fencing token and touch lease at provider boundary.
+          // Reproduces the current behaviour exactly: the DEFAULT-slot lease
+          // is validated for every slot (known latent bug for non-default
+          // slots — deliberately not fixed in Phase 1).
+          const isValid = await coordinator.validateAndTouchLease(leaseKey(telegramSessionKey(data.clientId, DEFAULT_SLOT)), entry.token);
+          if (!isValid) {
+            throw new Error(`Stale fencing token ${entry.token} for Telegram client ${data.clientId}; side-effect aborted`);
+          }
 
           try {
-            await mq.publish(
-              outgoingRoutingKey('telegram'),
-              nextPayload,
-              {
-                exchange: RETRY_EXCHANGE,
-                expiration: delayMs,
-                headers: { 'x-retry-count': nextAttempt },
-                mandatory: true,
-              }
-            );
-            // Only ack original message after confirmed republish to retry queue
-            channel.ack(msg);
-          } catch (publishErr) {
-            console.error('[telegram] failed to publish to retry queue, routing original to DLQ:', publishErr);
-            channel.nack(msg, false, false);
+            await entry.client.sendMessage(data.to, { message: data.text });
+            await coordinator.recordSendState(stableIdKey, 'sent');
+          } catch (err) {
+            await coordinator.recordSendState(stableIdKey, 'outcome-unknown');
+            throw err;
           }
-        } else {
-          console.error(`[telegram] max retries reached for message to ${to}, routing to DLQ`);
-          await coordinator.recordSendState(stableIdKey, 'failed');
-          channel.nack(msg, false, false);
-        }
-      }
+          return { outcome: 'sent' as const };
+        },
+      });
+
+      if (shouldAckOutgoing(result)) channel.ack(msg);
+      else channel.nack(msg, false, false);
     });
-    consumerTag = consumeResult?.consumerTag || null;
+    consumerHolder.tag = consumeResult?.consumerTag || null;
 
     // channel.connect.telegram consumer
     const connectQueueName = connectQueue('telegram');
@@ -378,62 +293,15 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
       const effectiveSlot = slot || 'default';
       try {
         if (method === 'phone' && phoneNumber) {
-          // Phone login: connect the client WITHOUT starting the QR flow,
-          // then ask Telegram to text the login code to this number. The
-          // code itself is typed by the user in the app (signin consumer).
-          const entry = await getClientWithFencing(String(clientId), effectiveSlot, undefined, { autoLogin: 'none' });
-          if (!entry) {
-            console.warn(`[telegram] phone connect ${clientId}:${effectiveSlot} could not acquire lease`);
-            channel.ack(msg);
-            return;
-          }
-          const alreadyAuth =
-            typeof (entry.client as any).checkAuthorization === 'function'
-              ? await (entry.client as any).checkAuthorization().catch(() => false)
-              : false;
-          if (alreadyAuth) {
-            // Saved session is alive — getClientWithFencing already
-            // published 'connected' via its isAuth branch.
-            console.log(`[telegram] phone connect ${clientId}:${effectiveSlot} already authorized`);
-            channel.ack(msg);
-            return;
-          }
-          const apiId = parseInt(process.env.TELEGRAM_API_ID || '0');
-          const apiHash = process.env.TELEGRAM_API_HASH || '';
-          try {
-            const sent: any = await (entry.client as any).sendCode(
-              { apiId, apiHash },
-              String(phoneNumber).replace(/[^0-9]/g, '')
-            );
-            const phoneCodeHash = sent?.phoneCodeHash || sent?.phone_code_hash || '';
-            if (!phoneCodeHash) throw new Error('Telegram did not return a code hash');
-            await redis.set(tgCodeHashKey(clientId, effectiveSlot), phoneCodeHash, 'EX', TELEGRAM_CODE_TTL_SECONDS);
-            await redis.set(tgPhoneKey(clientId, effectiveSlot), String(phoneNumber).replace(/[^0-9]/g, ''), 'EX', TELEGRAM_CODE_TTL_SECONDS);
-            await redis.set(tgCodeSentKey(clientId, effectiveSlot), '1', 'EX', TELEGRAM_CODE_TTL_SECONDS);
-            await coordinator.publishEvent(tenantEventsChannel(clientId), {
-              type: SSE_EVENT_TYPES.TG_CODE_SENT,
-              clientId: Number(clientId),
-              channel: 'telegram',
-              slot: effectiveSlot,
-            });
-            console.log(`[telegram] login code sent to ${clientId}:${effectiveSlot}`);
-          } catch (e: any) {
-            const raw = String(e?.errorMessage || e?.message || 'Could not send the code');
-            const flood = raw.match(/FLOOD_WAIT_(\d+)/);
-            const friendly = flood
-              ? `Too many tries — wait ${flood[1]}s and try again.`
-              : /PHONE_NUMBER_INVALID/.test(raw)
-                ? 'That phone number is not a Telegram number.'
-                : raw;
-            console.warn(`[telegram] sendCode failed for ${clientId}:${effectiveSlot}:`, raw);
-            await coordinator.publishEvent(tenantEventsChannel(clientId), {
-              type: SSE_EVENT_TYPES.TG_CODE_ERROR,
-              clientId: Number(clientId),
-              channel: 'telegram',
-              slot: effectiveSlot,
-              error: friendly,
-            });
-          }
+          await requestTelegramLoginCode({
+            getClient: getClientWithFencing,
+            redis,
+            coordinator,
+            publishChannelStatus,
+            clientId,
+            slot: effectiveSlot,
+            phoneNumber,
+          });
           channel.ack(msg);
           return;
         }
@@ -483,86 +351,18 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
       const { clientId, slot, phoneCode, password } = parsed.data;
 
       const effectiveSlot = slot || 'default';
-      const key = telegramSessionKey(clientId, effectiveSlot);
-      const sendError = async (error: string) => {
-        await coordinator.publishEvent(tenantEventsChannel(clientId), {
-          type: SSE_EVENT_TYPES.TG_CODE_ERROR,
-          clientId: Number(clientId),
-          channel: 'telegram',
-          slot: effectiveSlot,
-          error,
-        });
-      };
-
       try {
-        const entry = sessions.get(key);
-        if (!entry) {
-          await sendError('This login session expired — start again from Connect.');
-          channel.ack(msg);
-          return;
-        }
-        const phoneCodeHash = await redis.get(tgCodeHashKey(clientId, effectiveSlot));
-        const phoneNumber = await redis.get(tgPhoneKey(clientId, effectiveSlot));
-        if (!phoneCodeHash || !phoneNumber) {
-          await sendError('The code expired — request a new one from Connect.');
-          channel.ack(msg);
-          return;
-        }
-
-        const apiId = parseInt(process.env.TELEGRAM_API_ID || '0');
-        const apiHash = process.env.TELEGRAM_API_HASH || '';
-        const finishLogin = async () => {
-          const savedStr = typeof (entry.client.session as any)?.save === 'function' ? (entry.client.session as any).save() : '';
-          if (savedStr) {
-            await redis.set(tgSessionKey(clientId, effectiveSlot), savedStr);
-          }
-          await redis.del(tgQrKey(clientId, effectiveSlot)).catch(() => {});
-          await redis.del(tgCodeHashKey(clientId, effectiveSlot)).catch(() => {});
-          await redis.del(tgPhoneKey(clientId, effectiveSlot)).catch(() => {});
-          await redis.del(tgCodeSentKey(clientId, effectiveSlot)).catch(() => {});
-          await coordinator.publishEvent(tenantEventsChannel(clientId), {
-            type: SSE_EVENT_TYPES.CHANNEL_STATUS,
-            clientId: Number(clientId),
-            channel: 'telegram',
-            slot: effectiveSlot,
-            status: 'connected',
-          });
-          await publishChannelStatus(String(clientId), effectiveSlot, 'connected');
-          console.log(`[telegram] phone login succeeded for ${clientId}:${effectiveSlot}`);
-        };
-
-        try {
-          await (entry.client as any).signInUser(
-            { apiId, apiHash },
-            { phoneNumber, phoneCodeHash, phoneCode: String(phoneCode) }
-          );
-          await finishLogin();
-        } catch (e: any) {
-          const raw = String(e?.errorMessage || e?.message || '');
-          if (/SESSION_PASSWORD_NEEDED|PASSWORD_REQUIRED|2FA/i.test(raw)) {
-            if (password) {
-              try {
-                await (entry.client as any).signInUserWithPassword({ apiId, apiHash }, { password: String(password) });
-                await finishLogin();
-              } catch (e2: any) {
-                await sendError('Wrong 2FA password — try again.');
-              }
-            } else {
-              await coordinator.publishEvent(tenantEventsChannel(clientId), {
-                type: SSE_EVENT_TYPES.TG_PASSWORD_NEEDED,
-                clientId: Number(clientId),
-                channel: 'telegram',
-                slot: effectiveSlot,
-              });
-            }
-          } else if (/PHONE_CODE_INVALID/.test(raw)) {
-            await sendError('Wrong code — check the code Telegram sent and try again.');
-          } else if (/PHONE_CODE_EXPIRED/.test(raw)) {
-            await sendError('That code expired — request a new one from Connect.');
-          } else {
-            await sendError(raw || 'Sign-in failed — try again.');
-          }
-        }
+        await handleTelegramSignin({
+          getClient: getClientWithFencing,
+          sessions: sessionRegistry.map,
+          redis,
+          coordinator,
+          publishChannelStatus,
+          clientId,
+          slot: effectiveSlot,
+          phoneCode,
+          password,
+        });
         channel.ack(msg);
       } catch (err) {
         console.error('[telegram] signin command failed:', err);
@@ -601,15 +401,10 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
       const fencingLeaseKey = leaseKey(key);
 
       try {
-        const renewInterval = leaseRenewers.get(key);
-        if (renewInterval) {
-          clearInterval(renewInterval);
-          leaseRenewers.delete(key);
-        }
+        const entry = sessionRegistry.get(key);
+        sessionRegistry.remove(key);
 
-        const entry = sessions.get(key);
         if (entry) {
-          sessions.delete(key);
           if (entry.client) {
             try {
               if (typeof (entry.client as any).destroy === 'function') {
@@ -630,13 +425,6 @@ export async function startTelegramWorker(deps: TelegramWorkerDeps = {}) {
         await redis.del(tgPhoneKey(clientId, effectiveSlot)).catch(() => {});
         await redis.del(tgCodeSentKey(clientId, effectiveSlot)).catch(() => {});
         await publishChannelStatus(String(clientId), effectiveSlot, 'disconnected');
-        await coordinator.publishEvent(tenantEventsChannel(clientId), {
-          type: SSE_EVENT_TYPES.CHANNEL_STATUS,
-          clientId: Number(clientId),
-          channel: 'telegram',
-          slot: effectiveSlot,
-          status: 'disconnected',
-        });
 
         channel.ack(msg);
       } catch (err) {
