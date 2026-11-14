@@ -1,5 +1,5 @@
 # Production Dockerfile for Node Channel Workers (CI build only)
-FROM node:22-alpine AS builder
+FROM node:25-alpine AS builder
 
 WORKDIR /app
 
@@ -17,7 +17,7 @@ RUN pnpm --filter @tectonic/coordination run build
 RUN pnpm --filter @tectonic/ai-router run build
 RUN pnpm --filter @tectonic/workers run build
 
-FROM node:22-alpine AS runner
+FROM node:25-alpine AS runner
 
 WORKDIR /app
 ENV NODE_ENV=production
