@@ -78,6 +78,42 @@ describe('demoResponder (API)', () => {
     const reply = demoResponder('client1', 'What is your return policy?', [], [], knowledge);
     expect(reply).toContain('7 days');
   });
+
+  it('out-of-stock alternative prefers the same category, not the lowest-id product', () => {
+    const products = [
+      { name: 'chocklate', price_bdt: 700, stock: 50, category: 'food' },
+      { name: 'Wireless Earbuds Pro', price_bdt: 2499, stock: 25, category: 'electronics' },
+      { name: 'Smart Watch Fit X2', price_bdt: 3999, stock: 0, category: 'electronics' },
+    ];
+
+    const reply = demoResponder('client1', 'What is the Smart Watch price?', products, []);
+    expect(reply).toContain('Smart Watch Fit X2');
+    expect(reply).toContain('Wireless Earbuds Pro');
+    expect(reply).not.toContain('chocklate');
+  });
+
+  it('out-of-stock alternative falls back to any in-stock item when no same-category item exists', () => {
+    const products = [
+      { name: 'chocklate', price_bdt: 700, stock: 50, category: 'food' },
+      { name: 'Smart Watch Fit X2', price_bdt: 3999, stock: 0, category: 'electronics' },
+    ];
+
+    const reply = demoResponder('client1', 'What is the Smart Watch price?', products, []);
+    expect(reply).toContain('Smart Watch Fit X2');
+    expect(reply).toContain('chocklate');
+  });
+
+  it('out-of-stock reply has no alternative when nothing is in stock', () => {
+    const products = [
+      { name: 'Smart Watch Fit X2', price_bdt: 3999, stock: 0, category: 'electronics' },
+    ];
+
+    const reply = demoResponder('client1', 'What is the Smart Watch price?', products, []);
+    expect(reply).toContain('Smart Watch Fit X2');
+    expect(reply).not.toContain('Er bodle');
+    expect(reply).not.toContain('instead');
+    expect(reply).not.toContain('BDT');
+  });
 });
 
 describe('queryGoAIEngine (F1 bridge)', () => {

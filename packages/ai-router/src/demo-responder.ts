@@ -184,10 +184,22 @@ export function findProduct(sourceText: string, products: ProductItem[]): Produc
 
 /**
  * First in-stock product other than `exclude` — the alternative
- * offered when the ordered item is out of stock (W4).
+ * offered when the ordered item is out of stock (W4). Prefers an
+ * in-stock product from the SAME category as the requested item
+ * (e.g. another electronics item for an out-of-stock smart watch),
+ * so the suggestion is relevant instead of the lowest-id product
+ * in the catalog. Falls back to any in-stock item when no
+ * same-category item is available.
  */
 export function findInStockAlternative(products: ProductItem[], exclude: ProductItem): ProductItem | undefined {
-  return products.find((o) => o !== exclude && (o.stock ?? 0) > 0);
+  const inStock = products.filter((o) => o !== exclude && (o.stock ?? 0) > 0);
+  if (inStock.length === 0) return undefined;
+  const category = (exclude.category || '').trim().toLowerCase();
+  if (category) {
+    const sameCategory = inStock.find((o) => (o.category || '').trim().toLowerCase() === category);
+    if (sameCategory) return sameCategory;
+  }
+  return inStock[0];
 }
 
 /** Reply-variant picker for the module-level reply builders below. */

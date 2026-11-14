@@ -479,11 +479,27 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 	}
 
 	outOfStockReply := func(p *ProductItem) string {
+		// Prefer an in-stock product from the SAME category as the
+		// requested item, so the suggestion is relevant instead of
+		// the lowest-id product in the catalog. Falls back to any
+		// in-stock item when no same-category item is available.
 		var alt *ProductItem
-		for i := range products {
-			if products[i].Name != p.Name && products[i].Stock > 0 {
-				alt = &products[i]
-				break
+		category := strings.ToLower(strings.TrimSpace(p.Category))
+		if category != "" {
+			for i := range products {
+				if products[i].Name != p.Name && products[i].Stock > 0 &&
+					strings.ToLower(strings.TrimSpace(products[i].Category)) == category {
+					alt = &products[i]
+					break
+				}
+			}
+		}
+		if alt == nil {
+			for i := range products {
+				if products[i].Name != p.Name && products[i].Stock > 0 {
+					alt = &products[i]
+					break
+				}
 			}
 		}
 		altText := ""

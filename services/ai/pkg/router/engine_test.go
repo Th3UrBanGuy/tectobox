@@ -126,6 +126,38 @@ func TestDemoResponder_ChargerProductMatching_F4(t *testing.T) {
 	}
 }
 
+// Out-of-stock alternative prefers the same category as the requested
+// product instead of the lowest-id in-stock product (chocklate/food
+// must not be offered for an out-of-stock electronics smart watch).
+func TestDemoResponder_OutOfStockAlternativePrefersSameCategory(t *testing.T) {
+	products := []ProductItem{
+		{Name: "chocklate", PriceBDT: 700, Stock: 50, Category: "food"},
+		{Name: "Wireless Earbuds Pro", PriceBDT: 2499, Stock: 25, Category: "electronics"},
+		{Name: "Smart Watch Fit X2", PriceBDT: 3999, Stock: 0, Category: "electronics"},
+	}
+
+	reply := DemoResponder("en", "What is the Smart Watch price?", products, nil, nil)
+	if !strings.Contains(reply, "Smart Watch Fit X2") {
+		t.Fatalf("expected out-of-stock reply naming the watch, got: %s", reply)
+	}
+	if !strings.Contains(reply, "Wireless Earbuds Pro") {
+		t.Fatalf("expected same-category alternative (Earbuds), got: %s", reply)
+	}
+	if strings.Contains(reply, "chocklate") {
+		t.Fatalf("expected NO food alternative for an electronics item, got: %s", reply)
+	}
+
+	// Fallback: no same-category item in stock -> any in-stock item.
+	productsNoSameCat := []ProductItem{
+		{Name: "chocklate", PriceBDT: 700, Stock: 50, Category: "food"},
+		{Name: "Smart Watch Fit X2", PriceBDT: 3999, Stock: 0, Category: "electronics"},
+	}
+	replyFallback := DemoResponder("en", "What is the Smart Watch price?", productsNoSameCat, nil, nil)
+	if !strings.Contains(replyFallback, "chocklate") {
+		t.Fatalf("expected fallback to any in-stock item, got: %s", replyFallback)
+	}
+}
+
 // Acceptance criterion:
 // TestGenerateReply_KnowledgeIsolation: two workspaces, distinct knowledge,
 // sequential + concurrent + cached second call — every reply scoped to its own workspace.
