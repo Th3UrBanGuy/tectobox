@@ -124,6 +124,113 @@ function transliterateForMatch(text: string): string {
     .join(' ');
 }
 
+function matchWord(str: string, word: string): boolean {
+  if (!word) return false;
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`(?:^|[^\\p{L}\\p{M}\\p{N}_])${escaped}(?:[^\\p{L}\\p{M}\\p{N}_]|$)`, 'iu');
+  return pattern.test(str);
+}
+
+/** Score one product against the message. Full-name phrase = 10;
+ * each distinctive name word found = 2; a numeric token = 1.
+ * Generic words ("pro", "mini", ...) never score on their own, so
+ * "iPhone 15 Pro" does not match "Wireless Earbuds Pro". */
+function scoreProduct(p: ProductItem, matchText: string, rawText: string): number {
+  const normName = stripTestPrefix(p.name.toLowerCase());
+  if (matchWord(matchText, normName)) return 10;
+  let score = 0;
+  for (const w of productWords(p)) {
+    if (GENERIC_PRODUCT_WORDS.has(w)) continue;
+    if (w.length < 3) continue;
+    if (matchWord(matchText, w) || matchWord(rawText, w)) {
+      score += /^\d+$/.test(w) ? 1 : 2;
+      continue;
+    }
+    // Prefix/substring match for short keywords ("earbud" ~ "earbuds").
+    if (w.length >= 4) {
+      const tokens = matchText.split(/[^a-z0-9]+/).filter(Boolean);
+      for (const tok of tokens) {
+        if (tok.length >= 4 && (tok.startsWith(w) || w.startsWith(tok))) {
+          score += 2;
+          break;
+        }
+      }
+    }
+    if (w === 'charger' && matchWord(rawText, 'চার্জার')) score += 2;
+    if (w === 'চার্জার' && matchWord(rawText, 'charger')) score += 2;
+  }
+  return score;
+}
+
+/** Catalog products matching a message, best score first. */
+function matchProducts(sourceText: string, products: ProductItem[]): ProductItem[] {
+  const matchText = transliterateForMatch(sourceText);
+  return products
+    .map((p) => ({ p, score: scoreProduct(p, matchText, sourceText) }))
+    .filter((s) => s.score >= 2)
+    .sort((a, b) => b.score - a.score)
+    .map((s) => s.p);
+}
+
+/**
+ * Best-matching catalog product for a message, or undefined when
+ * nothing scores a real match. Exported so the order-creation flow
+ * identifies the SAME product the responder matched — one matcher,
+ * no second implementation (W3/W4).
+ */
+export function findProduct(sourceText: string, products: ProductItem[]): ProductItem | undefined {
+  return matchProducts(sourceText, products)[0];
+}
+
+/**
+ * First in-stock product other than `exclude` — the alternative
+ * offered when the ordered item is out of stock (W4).
+ */
+export function findInStockAlternative(products: ProductItem[], exclude: ProductItem): ProductItem | undefined {
+  return products.find((o) => o !== exclude && (o.stock ?? 0) > 0);
+}
+
+/** Reply-variant picker for the module-level reply builders below. */
+function pickReply(text: string, bn: string, banglish: string, en: string, hiDev: string, hiRoman: string): string {
+  const lang = detectCustomerLanguage(text);
+  const hasDevanagari = /[\u0900-\u097F]/.test(text);
+  switch (lang) {
+    case 'bn': return bn;
+    case 'banglish': return banglish;
+    case 'hi': return hasDevanagari ? hiDev : hiRoman;
+    default: return en;
+  }
+}
+
+/**
+ * "Out of stock" reply for a product, with an in-stock alternative
+ * when one exists. Module-level so the order service refuses
+ * out-of-stock orders with the SAME reply the responder gives (W4):
+ * the responder's order branch calls this, and the order service
+ * calls it when its pre-creation stock check fails.
+ */
+export function buildOutOfStockReply(text: string, p: ProductItem, products: ProductItem[]): string {
+  const alt = findInStockAlternative(products, p);
+  const altText = alt
+    ? pickReply(
+        text,
+        ` এর বদলে ${alt.name} (${alt.price_bdt} টাকা) নিতে পারেন — এটি স্টকে আছে।`,
+        ` Er bodle ${alt.name} (${alt.price_bdt} BDT) nite paren — eta stock e ache.`,
+        ` You could take ${alt.name} (${alt.price_bdt} BDT) instead — it is in stock.`,
+        ` आप इसके बजाय ${alt.name} (${alt.price_bdt} BDT) ले सकते हैं — यह स्टॉक में है।`,
+        ` Aap iske bajay ${alt.name} (${alt.price_bdt} BDT) le sakte hain — ye stock mein hai.`
+      )
+    : '';
+  return pickReply(
+    text,
+    `দুঃখিত, ${p.name} বর্তমানে স্টক আউট আছে।${altText}`,
+    `Dukkhito, ${p.name} ekhon stock out ache.${altText}`,
+    `Sorry, ${p.name} is currently out of stock.${altText}`,
+    `माफ़ कीजिए, ${p.name} अभी स्टॉक में नहीं है।${altText}`,
+    `Maaf kijiye, ${p.name} abhi stock mein nahi hai.${altText}`
+  );
+}
+
 /**
  * Extract name / phone / address / quantity from one customer message.
  * Exported so the order-creation flow can reuse it instead of re-asking
@@ -230,56 +337,11 @@ export function demoResponder(
     }
   }
 
-  function matchWord(str: string, word: string): boolean {
-    if (!word) return false;
-    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`(?:^|[^\\p{L}\\p{M}\\p{N}_])${escaped}(?:[^\\p{L}\\p{M}\\p{N}_]|$)`, 'iu');
-    return pattern.test(str);
-  }
-
-  /** Score one product against the message. Full-name phrase = 10;
-   * each distinctive name word found = 2; a numeric token = 1.
-   * Generic words ("pro", "mini", ...) never score on their own, so
-   * "iPhone 15 Pro" does not match "Wireless Earbuds Pro". */
-  function scoreProduct(p: ProductItem, matchText: string, rawText: string): number {
-    const normName = stripTestPrefix(p.name.toLowerCase());
-    if (matchWord(matchText, normName)) return 10;
-    let score = 0;
-    for (const w of productWords(p)) {
-      if (GENERIC_PRODUCT_WORDS.has(w)) continue;
-      if (w.length < 3) continue;
-      if (matchWord(matchText, w) || matchWord(rawText, w)) {
-        score += /^\d+$/.test(w) ? 1 : 2;
-        continue;
-      }
-      // Prefix/substring match for short keywords ("earbud" ~ "earbuds").
-      if (w.length >= 4) {
-        const tokens = matchText.split(/[^a-z0-9]+/).filter(Boolean);
-        for (const tok of tokens) {
-          if (tok.length >= 4 && (tok.startsWith(w) || w.startsWith(tok))) {
-            score += 2;
-            break;
-          }
-        }
-      }
-      if (w === 'charger' && matchWord(rawText, 'চার্জার')) score += 2;
-      if (w === 'চার্জার' && matchWord(rawText, 'charger')) score += 2;
-    }
-    return score;
-  }
-
-  function matchProducts(sourceText: string): ProductItem[] {
-    const matchText = transliterateForMatch(sourceText);
-    return products
-      .map((p) => ({ p, score: scoreProduct(p, matchText, sourceText) }))
-      .filter((s) => s.score >= 2)
-      .sort((a, b) => b.score - a.score)
-      .map((s) => s.p);
-  }
-
-  function matchProduct(sourceText: string): ProductItem | undefined {
-    return matchProducts(sourceText)[0];
-  }
+  // Module-level matcher (same scoring the responder uses): the
+  // order service imports findProduct so both agree on the product.
+  const matchProductsFor = (t: string): ProductItem[] => matchProducts(t, products);
+  const matchProduct = (t: string): ProductItem | undefined => findProduct(t, products);
+  const outOfStockReply = (p: ProductItem): string => buildOutOfStockReply(text, p, products);
 
   /** Closest alternative for a "we don't carry that" reply: any
    * product sharing even a generic token with the question ("Pro",
@@ -320,26 +382,6 @@ export function demoResponder(
       }
     }
     return bestScore > 0 ? best : undefined;
-  }
-
-  function outOfStockReply(p: ProductItem): string {
-    const alt = products.find((o) => o !== p && (o.stock ?? 0) > 0);
-    const altText = alt
-      ? pick(
-          ` এর বদলে ${alt.name} (${alt.price_bdt} টাকা) নিতে পারেন — এটি স্টকে আছে।`,
-          ` Er bodle ${alt.name} (${alt.price_bdt} BDT) nite paren — eta stock e ache.`,
-          ` You could take ${alt.name} (${alt.price_bdt} BDT) instead — it is in stock.`,
-          ` आप इसके बजाय ${alt.name} (${alt.price_bdt} BDT) ले सकते हैं — यह स्टॉक में है।`,
-          ` Aap iske bajay ${alt.name} (${alt.price_bdt} BDT) le sakte hain — ye stock mein hai.`
-        )
-      : '';
-    return pick(
-      `দুঃখিত, ${p.name} বর্তমানে স্টক আউট আছে।${altText}`,
-      `Dukkhito, ${p.name} ekhon stock out ache.${altText}`,
-      `Sorry, ${p.name} is currently out of stock.${altText}`,
-      `माफ़ कीजिए, ${p.name} अभी स्टॉक में नहीं है।${altText}`,
-      `Maaf kijiye, ${p.name} abhi stock mein nahi hai.${altText}`
-    );
   }
 
   function notFoundReply(): string {
@@ -585,7 +627,7 @@ export function demoResponder(
   // earbuds or the speaker?" — answer with the cheaper of the two.
   const reCompare = /(?:^|[^\p{L}\p{M}\p{N}_])(cheaper|compare|comparison|কম দাম|सस्ता)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
   if (reCompare.test(text)) {
-    const matched = matchProducts(text);
+    const matched = matchProductsFor(text);
     if (matched.length >= 2) {
       const [a, b] = matched;
       const cheaper = priceOf(a) <= priceOf(b) ? a : b;
@@ -736,7 +778,7 @@ export function demoResponder(
   if (rePrice.test(text) || matched) {
     if (matched) {
       if (/total/i.test(text)) {
-        const all = matchProducts(text);
+        const all = matchProductsFor(text);
         if (all.length >= 2) {
           const lines = all.map((p) => `${p.name} (${p.price_bdt} BDT)`).join(' + ');
           const total = all.reduce((s, p) => s + priceOf(p), 0);
