@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Tectobox — AI-Powered Social-Commerce Unified Inbox</title>
-<meta name="description" content="হোয়াটসঅ্যাপ, টেলিগ্রাম ও ওয়েবসাইট চ্যাট এক ইনবক্সে। এআই সেলস এজেন্ট, বিকাশ/নগদ পেমেন্ট ভেরিফিকেশন ও ১-ক্লিক কুরিয়ার অটোমেশন।">
+<meta name="description" content="হোয়াটসঅ্যাপ, টেলিগ্রাম ও ওয়েবসাইট চ্যাট এক ইনবক্সে। এআই সেলস এজেন্ট, বিকাশ/নগদ পেমেন্ট ভেরিফিকেশন ও ১‑ক্লিক কুরিয়ার অটোমেশন।">
 <link rel="icon" type="image/png" href="/img/tectobox-icon.png?v=20261006l">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -250,7 +250,9 @@ body {
 .hero-section {
   padding: 64px 0 48px;
   text-align: center;
+  transition: opacity .28s ease, transform .28s ease;
 }
+.hero-section.lang-switching { opacity: 0; transform: translateY(6px); }
 
 .hero-pill {
   display: inline-flex;
@@ -283,6 +285,7 @@ body {
   max-width: 860px;
   margin-left: auto;
   margin-right: auto;
+  text-wrap: balance; /* EN title wraps to even lines on phones instead of a lone last word */
 }
 
 .hero-accent {
@@ -696,7 +699,7 @@ body {
 
     <h1 class="hero-title" data-i18n="hero_title">
       সব কাস্টমার চ্যাট এক ইনবক্সে।<br>
-      <span class="hero-accent">স্বয়ংক্রিয় সেলস ও ১-ক্লিক কুরিয়ার।</span>
+      <span class="hero-accent">স্বয়ংক্রিয় সেলস ও ১‑ক্লিক কুরিয়ার।</span>
     </h1>
 
     <p class="hero-sub" data-i18n="hero_sub">
@@ -792,7 +795,7 @@ body {
       <div class="neo-card step-card">
         <div class="step-num">৩</div>
         <h3 class="step-title" data-i18n="step3_title">পেমেন্ট ও কুরিয়ার বুকিং</h3>
-        <p class="step-text" data-i18n="step3_text">বিকাশ/নগদ TrxID কনফার্ম হওয়া মাত্র ১-ক্লিকে Steadfast বা Pathao-তে বুকিং হয়ে যাবে এবং থার্মাল লেবেল তৈরি হবে।</p>
+        <p class="step-text" data-i18n="step3_text">বিকাশ/নগদ TrxID কনফার্ম হওয়া মাত্র ১‑ক্লিকে Steadfast বা Pathao-তে বুকিং হয়ে যাবে এবং থার্মাল লেবেল তৈরি হবে।</p>
       </div>
     </div>
   </section>
@@ -845,7 +848,7 @@ body {
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
         </div>
         <div class="feat-content">
-          <h3 data-i18n="feat4_title">১-ক্লিক কুরিয়ার ও থার্মাল লেবেল</h3>
+          <h3 data-i18n="feat4_title">১‑ক্লিক কুরিয়ার ও থার্মাল লেবেল</h3>
           <p data-i18n="feat4_desc">Steadfast ও Pathao কুরিয়ারে অটো-বুকিং এবং ৪×৬ ইঞ্চি সাইজের রেডি-টু-প্রিন্ট থার্মাল প্যাকেজিং স্টিকার তৈরি।</p>
         </div>
       </div>
@@ -888,7 +891,7 @@ const DICT = {
     nav_demo: 'লাইভ ডেমো',
     nav_login: 'লগইন করুন',
     hero_pill: 'এআই-পাওয়ার্ড সোশ্যাল কমার্স ককপিট',
-    hero_title: 'সব কাস্টমার চ্যাট এক ইনবক্সে।<br><span class="hero-accent">স্বয়ংক্রিয় সেলস ও ১-ক্লিক কুরিয়ার।</span>',
+    hero_title: 'সব কাস্টমার চ্যাট এক ইনবক্সে।<br><span class="hero-accent">স্বয়ংক্রিয় সেলস ও ১‑ক্লিক কুরিয়ার।</span>',
     hero_sub: 'হোয়াটসঅ্যাপ, টেলিগ্রাম ও ওয়েবসাইট চ্যাট এখন এক জায়গায়। এআই নিজে থেকেই পণ্যের দাম ও তথ্য দিয়ে অর্ডার নেয়, বিকাশ/নগদ পেমেন্ট ভেরিফাই করে এবং পাঠাও/স্টেডফাস্টে পার্সেল বুকিং পাঠায়।',
     btn_login_inbox: 'লগইন করে ইনবক্সে যান',
     btn_view_demo: 'লাইভ সিমুলেটর দেখুন',
@@ -907,7 +910,7 @@ const DICT = {
     step2_title: 'প্রোডাক্ট ও দাম শেখান',
     step2_text: 'আপনার প্রোডাক্টের নাম, দাম ও স্টক দিয়ে দিন। AI কোনো বানানো উত্তর না দিয়ে নির্ভুলভাবে কাস্টমারকে উত্তর দেবে।',
     step3_title: 'পেমেন্ট ও কুরিয়ার বুকিং',
-    step3_text: 'বিকাশ/নগদ TrxID কনফার্ম হওয়া মাত্র ১-ক্লিকে Steadfast বা Pathao-তে বুকিং হয়ে যাবে এবং থার্মাল লেবেল তৈরি হবে।',
+    step3_text: 'বিকাশ/নগদ TrxID কনফার্ম হওয়া মাত্র ১‑ক্লিকে Steadfast বা Pathao-তে বুকিং হয়ে যাবে এবং থার্মাল লেবেল তৈরি হবে।',
     feats_badge: 'ফিচারসমূহ',
     feats_title: 'ব্যবসায়ীদের জন্য পরিপূর্ণ সোশ্যাল কমার্স স্যুট',
     feats_desc: 'কাস্টমার চ্যাট থেকে ক্যাশ ইন ও কুরিয়ার ডেলিভারি—সব এক প্ল্যাটফর্মে।',
@@ -917,7 +920,7 @@ const DICT = {
     feat2_desc: 'বাংলা ও বাংলিশে সাবলীল উত্তর। কেবল আপনার আপলোড করা প্রোডাক্ট ডাটা থেকেই তথ্য দেয়, কোনো ভুল বা হ্যালুসিনেশন নেই।',
     feat3_title: 'লাইভ পেমেন্ট ট্র্যাকার (bKash / Nagad)',
     feat3_desc: 'কাস্টমার চ্যাটে TrxID দিলেই স্বয়ংক্রিয়ভাবে অডিট হয়। ফেক স্ক্রিনশট বা ডুপ্লিকেট TrxID স্ক্যাম বন্ধ করতে ফ্রড এলার্ট অ্যালগরিদম।',
-    feat4_title: '১-ক্লিক কুরিয়ার ও থার্মাল লেবেল',
+    feat4_title: '১‑ক্লিক কুরিয়ার ও থার্মাল লেবেল',
     feat4_desc: 'Steadfast ও Pathao কুরিয়ারে অটো-বুকিং এবং ৪×৬ ইঞ্চি সাইজের রেডি-টু-প্রিন্ট থার্মাল প্যাকেজিং স্টিকার তৈরি।',
     cta_title: 'আপনার সোশ্যাল সেলসকে স্বয়ংক্রিয় করতে প্রস্তুত?',
     cta_sub: 'এখনই লগইন করুন বা ডেমো দেখে সিদ্ধান্ত নিন। আপনার ব্যবসাকে দিন আধুনিক রূপ।',
@@ -932,7 +935,7 @@ const DICT = {
     nav_demo: 'Live Demo',
     nav_login: 'Sign In',
     hero_pill: 'AI-Powered Social Commerce Cockpit',
-    hero_title: 'All Customer Chats in One Inbox.<br><span class="hero-accent">Autonomous Sales &amp; 1-Click Courier.</span>',
+    hero_title: 'All Customer Chats in One Inbox.<br><span class="hero-accent">Autonomous Sales &amp; 1‑Click Courier.</span>',
     hero_sub: 'WhatsApp, Telegram, and Webchat unified in one place. AI answers inquiries strictly from your catalog, verifies bKash/Nagad TrxID payments, and dispatches parcels via Steadfast and Pathao.',
     btn_login_inbox: 'Sign In to Inbox',
     btn_view_demo: 'View Interactive Simulator',
@@ -961,7 +964,7 @@ const DICT = {
     feat2_desc: 'Natural conversations in Bengali, Banglish & English, strictly bound to verified product databases.',
     feat3_title: 'Live Payments Hub (bKash/Nagad)',
     feat3_desc: 'Instant TrxID parsing with duplicate fraud checks and instant dashboard reconciliation alerts.',
-    feat4_title: '1-Click Courier & Shipping Slips',
+    feat4_title: '1‑Click Courier & Shipping Slips',
     feat4_desc: 'Direct Steadfast and Pathao API booking with print-ready 4x6" thermal adhesive stickers.',
     cta_title: 'Ready to Automate Your Social Sales?',
     cta_sub: 'Sign in to your cockpit now or test the simulator. Modernize your store operations today.',
@@ -1064,12 +1067,21 @@ function applyLanguage(lang) {
   document.getElementById('btn-lang-bn').classList.toggle('active', lang === 'bn');
   document.getElementById('btn-lang-en').classList.toggle('active', lang === 'en');
 
-  const dict = DICT[lang] || DICT.bn;
-  document.querySelectorAll('[data-i18n]').forEach(el => {
-    const k = el.getAttribute('data-i18n');
-    if (dict[k]) el.innerHTML = dict[k];
-  });
-  updateScenario(currentScenario);
+  // Soft crossfade on the hero: the text swaps while it is faded out, so the
+  // reflow (3 lines BN ↔ 4 lines EN on phones) reads as intentional, not broken.
+  const swap = () => {
+    const dict = DICT[lang] || DICT.bn;
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const k = el.getAttribute('data-i18n');
+      if (dict[k]) el.innerHTML = dict[k];
+    });
+    updateScenario(currentScenario);
+  };
+  const hero = document.querySelector('.hero-section');
+  if (hero) {
+    hero.classList.add('lang-switching');
+    setTimeout(() => { swap(); hero.classList.remove('lang-switching'); }, 160);
+  } else swap();
 }
 
 document.querySelectorAll('.sim-tab-btn').forEach(btn => {

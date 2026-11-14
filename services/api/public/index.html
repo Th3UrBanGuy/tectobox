@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Tectobox">
-<link rel="stylesheet" href="/styles.css?v=20261114_brandbar">
+<link rel="stylesheet" href="/styles.css?v=20261114_qr_polish">
 <script src="/theme-init.js?v=20261107b"></script>
 </head>
 <body>
@@ -749,8 +749,8 @@
   <div class="modal" style="width:380px; text-align:center;">
     <h3 id="qr-title">Scan to connect</h3>
     <p class="msub" id="qr-sub">Open the app on your phone and scan</p>
-    <div class="qr-box"><img id="qr-img" alt="QR code"></div>
-    <p class="small muted" style="margin-bottom:16px;">Waiting for scan… the code refreshes automatically.</p>
+    <div class="qr-box" id="qr-box"><div class="qr-skeleton" id="qr-skeleton" aria-hidden="true"></div><img id="qr-img" alt="QR code"></div>
+    <p class="small muted" id="qr-status" style="margin-bottom:16px;">Generating your secure code…</p>
     <button class="btn-danger-soft" id="btn-close-qr">Cancel</button>
   </div>
 </div>
@@ -1271,7 +1271,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=20261114_brandbar"></script>
+<script src="/app.js?v=20261114_qr_polish"></script>
     <div class="gs-overlay hidden" id="gs-overlay">
       <div class="gs-card" id="get-started" role="dialog" aria-label="Get started"></div>
     </div>

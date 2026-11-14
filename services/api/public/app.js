@@ -3519,6 +3519,22 @@ async function addAccount(channel) {
   } catch (e) { return toast('Could not start: ' + e.message, 'err'); }
   startQrConnect(channel, slot, label.trim() || slot);
 }
+// QR image setter (single path for the poll + the SSE 'qr' event): the skeleton
+// shows while the code generates; on load the code fades/scales in over it.
+// Re-setting the same data URL is a no-op (no flicker on repeated polls).
+function setQrImage(src) {
+  if (!src) return;
+  const img = $('qr-img');
+  if (img.getAttribute('src') === src) return;
+  const box = $('qr-box');
+  box.classList.remove('qr-ready');
+  $('qr-status').textContent = 'Generating your secure code…';
+  img.onload = () => {
+    box.classList.add('qr-ready');
+    $('qr-status').textContent = 'Waiting for scan… the code refreshes automatically.';
+  };
+  img.src = src;
+}
 async function startQrConnect(channel, slot = 'default', label = null) {
   if (slot === 'default' && !label) {
     try {
@@ -3531,6 +3547,9 @@ async function startQrConnect(channel, slot = 'default', label = null) {
   $('qr-sub').textContent = channel === 'whatsapp'
     ? 'WhatsApp → ⋮ menu → Linked devices → Link a device'
     : 'Telegram → Settings → Devices → Link Desktop Device';
+  // Reset to the skeleton state: the code fades/scales in over it when it arrives.
+  $('qr-box').classList.remove('qr-ready');
+  $('qr-status').textContent = 'Generating your secure code…';
   $('qr-img').removeAttribute('src');
   $('qr-modal').classList.remove('hidden');
   // Poll the connector status while the modal is open. SSE 'channel_status'
@@ -3555,7 +3574,7 @@ async function startQrConnect(channel, slot = 'default', label = null) {
       if (acct && acct.status === 'connected') closeQrModal();
       // SSE fallback: the status response carries the latest QR, so even if
       // the 'qr' event was dropped the modal still shows the code.
-      else if (acct && acct.qr && !$('qr-img').getAttribute('src')) $('qr-img').src = acct.qr;
+      else if (acct && acct.qr) setQrImage(acct.qr);
     } catch {}
   }, 3000);
   state.qrPollKill = setTimeout(() => {
@@ -4398,7 +4417,7 @@ function connectSSE() {
       } else if (evt.type === 'qr') {
         if (String(evt.clientId) === String(state.clientId) && evt.channel === state.qrChannel
           && (evt.slot || 'default') === (state.qrSlot || 'default')) {
-          $('qr-img').src = evt.dataUrl;
+          setQrImage(evt.dataUrl);
         }
       } else if (evt.type === 'channel_status' || evt.type === 'connectors') {
         const cid = evt.clientId != null ? String(evt.clientId) : null;
