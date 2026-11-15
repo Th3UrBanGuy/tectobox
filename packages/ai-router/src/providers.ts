@@ -235,17 +235,22 @@ export async function queryGoAIEngine(params: {
  */
 
 export async function getAIResponse(messages: AIRequestMessage[], contextKey = 'default'): Promise<string | null> {
-  // 1. Try Gemini Web2API (fast, high quality, free)
+  // 1. Try Gemini Web2API (fast, high quality, free) — PRIMARY for every
+  // context, including widget:<clientId> (user order 2026-11-15).
   // NOTE — env-var name (renamed in Phase 6): GEMINI_WEB2API_URL means
   // this service's /v1 base URL here (the Go ai service,
   // http://ai:8081/v1). Inside the ai container the same backend is
   // read from GEMINI_WEB2API_PROXY_URL (the external web2api proxy
   // URL). Setting one name in the wrong place silently re-routes a tier.
-  // NOTE (F1 Knowledge Leak Fix):
-  // The gemini-web2api proxy uses a single shared browser session for all requests without
-  // per-workspace session isolation. In multi-tenant environments (widget / worker / workspace traffic),
-  // skip web2api to prevent cross-workspace prompt and policy leakage.
-  if (contextKey === 'default' || !contextKey) {
+  // NOTE (was: F1 Knowledge Leak Fix): the old gate skipped web2api for
+  // workspace traffic, fearing cross-workspace leakage through the
+  // shared session. Live probe 2026-11-15 proved the endpoint stateless
+  // per request (marker "ZEBRA-9911" planted in one call was unknown to
+  // the next), so a request only ever sees the messages it carries —
+  // and those are built per workspace. contextKey stays in the signature
+  // (callers pass it for logging / future tier routing); it no longer
+  // gates Tier 1.
+  {
     const geminiWeb2ApiUrl = requireEnv('GEMINI_WEB2API_URL');
     const geminiModels = ['gemini-3.6-flash', 'gemini-flash-lite'];
     for (const m of geminiModels) {

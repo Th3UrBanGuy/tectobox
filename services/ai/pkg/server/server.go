@@ -208,7 +208,8 @@ func (s *Server) handleInternalAIChat(w http.ResponseWriter, r *http.Request) {
 	// instead of serving the request under a shared tenant id. (The
 	// generic /v1/chat/completions path is unaffected: it never takes
 	// a client_id and calls GenerateReply with an empty PromptContext
-	// directly, which the F1 guard in the router still allows.)
+	// directly, which the router serves through web2api like all other
+	// traffic (web2api is primary since 2026-11-15; see direct.go).
 	if req.ClientID == "" {
 		http.Error(w, "client_id is required: send the workspace id as client_id (snake_case), not clientId", http.StatusBadRequest)
 		return

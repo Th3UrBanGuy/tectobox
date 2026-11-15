@@ -25,17 +25,25 @@ const (
 	web2apiDetachedTimeout = 20 * time.Second
 )
 
-// web2APIAllowed is the F1 tenant-isolation guard, as a named method.
-// The gemini-web2api proxy (GEMINI_WEB2API_URL) uses a single shared
-// browser session for all requests without per-workspace session
-// isolation. In multi-tenant environments, routing different workspaces
-// to the same web2api session causes cross-workspace prompt and
-// knowledge leakage (e.g. Shop 45 return policy leaking to other
-// workspaces). Because gemini-web2api does not support isolated
-// per-workspace sessions, Tier 3 web2api is skipped for workspace/widget
-// traffic (pctx.ClientID != ""), safely falling through to the
-// knowledge-grounded deterministic responder (Tier 4) or isolated
-// direct APIs.
+// web2APIAllowed — web2api is the PRIMARY backend for ALL traffic,
+// including workspace/widget traffic (user order 2026-11-15).
+//
+// The old F1 guard skipped web2api for workspaces on the belief that the
+// gemini-web2api proxy's single shared browser session would leak one
+// workspace's prompts/knowledge into another's. Live probe 2026-11-15
+// (marker test on the production :8083: REQ1 planted "ZEBRA-9911", a
+// fresh REQ2 with no history answered "I DON'T KNOW") proved the
+// endpoint is STATELESS per request — the server keeps no memory between
+// calls, so nothing can leak across requests. Isolation rests on the
+// caller, and the caller already scopes everything per workspace: the
+// system prompt is built only from this workspace's products +
+// knowledge (prompt.go), the reply cache key includes ClientID
+// (cache.go), and intake caps each workspace at 200 AI replies/day.
+//
+// Residual shared-account risks (NOT leaks): one Google account's quota
+// is shared by all workspaces, and the single cookie is a single point
+// of failure. A direct per-workspace Gemini API key remains the more
+// robust isolation; web2api stays primary until that is wired.
 //
 // NOTE — env-var name (renamed in Phase 6): this container reads the
 // *external web2api proxy URL* from GEMINI_WEB2API_PROXY_URL. The old
@@ -43,8 +51,8 @@ const (
 // it means *this service's /v1 base URL* (http://ai:8081/v1). The two
 // names must not be confused — setting the proxy URL under the old name
 // in this container silently re-routes a tier.
-func (e *Engine) web2APIAllowed(pctx PromptContext) bool {
-	return pctx.ClientID == ""
+func (e *Engine) web2APIAllowed(_ PromptContext) bool {
+	return true
 }
 
 func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPrompt, userMsg string) (string, string, error) {

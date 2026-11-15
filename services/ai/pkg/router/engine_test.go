@@ -2,6 +2,8 @@ package router
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -286,12 +288,45 @@ func TestGenerateReply_KnowledgeIsolation(t *testing.T) {
 	}
 }
 
-// TestTier3_SkipSharedWeb2APIForWorkspaceTraffic verifies that Tier 3 gemini-web2api
-// is bypassed for workspace traffic (pctx.ClientID != "") to eliminate cross-workspace
-// leaks through the unisolated shared web2api proxy session.
-func TestTier3_SkipSharedWeb2APIForWorkspaceTraffic(t *testing.T) {
-	t.Setenv("GEMINI_WEB2API_PROXY_URL", "http://127.0.0.1:9999/v1/chat/completions")
-	t.Setenv("GEMINI_WEB2API_KEY", "dummy-shared-key")
+// TestTier3_Web2APIPrimaryForWorkspaceTraffic verifies that Tier 3
+// gemini-web2api is the PRIMARY backend for workspace traffic too
+// (user order 2026-11-15). The old F1 guard skipped web2api for
+// workspaces fearing leaks through the shared session; live probe
+// 2026-11-15 proved the endpoint stateless per request (marker
+// "ZEBRA-9911" planted in one call was unknown to the next), so a
+// request only ever sees the messages it carries — and GenerateReply
+// builds those per workspace (prompt.go). The mock backend answers
+// only when the system prompt carries this workspace's knowledge, so
+// a web2api-model reply also proves the prompt was scoped correctly.
+func TestTier3_Web2APIPrimaryForWorkspaceTraffic(t *testing.T) {
+	// Mock web2api: reply grounded in the workspace's knowledge, but
+	// ONLY if the request's system prompt actually contains it — a
+	// reply without the marker means the prompt was not scoped.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		scoped := false
+		for _, m := range payload.Messages {
+			if strings.Contains(m.Content, "150 taka") {
+				scoped = true
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		if scoped {
+			w.Write([]byte(`{"choices":[{"message":{"content":"Mock Gemini: delivery is 150 taka nationwide."}}]}`))
+		} else {
+			w.Write([]byte(`{"choices":[{"message":{"content":"Mock Gemini: I do not know the delivery fee."}}]}`))
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("GEMINI_WEB2API_PROXY_URL", server.URL)
+	t.Setenv("GEMINI_WEB2API_KEY", "dummy-key")
 
 	engine := NewEngine()
 	ctx := context.Background()
@@ -307,14 +342,14 @@ func TestTier3_SkipSharedWeb2APIForWorkspaceTraffic(t *testing.T) {
 		},
 	}
 
-	// For workspace traffic with ClientID, tryDirectAPIs must skip the unisolated web2api endpoint
-	// and fall through to DemoResponder without hanging or attempting connection to port 9999.
+	// Workspace traffic must route through web2api and come back
+	// grounded in that workspace's own knowledge.
 	reply, _, model, _ := engine.GenerateReply(ctx, pctxWorkspace, "delivery charge", nil, "")
+	if model != "gemini-web2api:gemini-3.6-flash" {
+		t.Fatalf("workspace traffic must route through web2api (primary), got model: %s reply: %s", model, reply)
+	}
 	if !strings.Contains(reply, "150") {
 		t.Fatalf("expected workspace reply grounded in knowledge (150), got: %s (model: %s)", reply, model)
-	}
-	if model == "gemini-web2api:gemini-3.6-flash" {
-		t.Fatalf("workspace traffic must not route through shared web2api session")
 	}
 }
 
@@ -337,7 +372,7 @@ func TestTier3_Web2APITimeoutBounded(t *testing.T) {
 	ctx := context.Background()
 
 	pctx := PromptContext{
-		ClientID: "", // Tier 3 web2api runs when ClientID == ""
+		ClientID: "", // Tier 3 web2api runs for all traffic, including workspaces (primary since 2026-11-15); empty here keeps the test minimal.
 		Knowledge: []KnowledgeItem{
 			{
 				Title:   "Delivery Policy",
