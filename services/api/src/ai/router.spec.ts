@@ -114,6 +114,20 @@ describe('demoResponder (API)', () => {
     expect(reply).not.toContain('instead');
     expect(reply).not.toContain('BDT');
   });
+
+  it('farewell gets a closing reply, never the opening greeting', () => {
+    const reply = demoResponder('client1', 'Thank you, bye!', [], []);
+    expect(reply).toContain('welcome');
+    expect(reply).not.toContain('assist you');
+
+    const replyBn = demoResponder('client1', 'ধন্যবাদ, বিদায়!', [], []);
+    expect(replyBn).toContain('ধন্যবাদ');
+    expect(replyBn).not.toContain('সাহায্য করতে পারি');
+
+    // A plain greeting still gets the opening greeting.
+    const greeting = demoResponder('client1', 'Hello', [], []);
+    expect(greeting).toContain('assist you');
+  });
 });
 
 describe('queryGoAIEngine (F1 bridge)', () => {

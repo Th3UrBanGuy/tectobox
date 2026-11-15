@@ -1024,7 +1024,21 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 		return notFoundReply()
 	}
 
-	// 12. Greetings & general inquiry
+	// 12. Farewell & closing thanks — "Thank you, bye!" must get a
+	// closing reply, never the opening greeting below.
+	reFarewell := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(bye|goodbye|good bye|see you|take care|good night|tata|বিদায়|biday|আল্লাহ হাফেজ|allah hafez|अलविदा|alvida)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	reClosingThanks := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(thank(s| you)?|ধন্যবাদ|dhonnobad|dhanyabad|শুকরিয়া|shukriya|धन्यवाद)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	if reFarewell.MatchString(text) || reClosingThanks.MatchString(text) {
+		return pick(
+			"আপনাকেও ধন্যবাদ! ভালো থাকবেন।",
+			"Apnakeo dhonnobad! Valo thakben.",
+			"You're welcome! Have a great day!",
+			"आपका स्वागत है! आपका दिन शुभ हो!",
+			"Aapka swagat hai! Aapka din shubh ho!",
+		)
+	}
+
+	// 13. Greetings & general inquiry
 	return pick(
 		"ধন্যবাদ আমাদের সাথে যোগাযোগ করার জন্য! আমি আপনাকে কীভাবে সাহায্য করতে পারি?",
 		"Message korar jonno dhonnobad! Apnake kivabe shahajjo korte pari?",

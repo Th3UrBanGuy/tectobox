@@ -158,6 +158,31 @@ func TestDemoResponder_OutOfStockAlternativePrefersSameCategory(t *testing.T) {
 	}
 }
 
+// Farewell gets a closing reply, never the opening greeting.
+func TestDemoResponder_FarewellGetsClosingReply(t *testing.T) {
+	reply := DemoResponder("en", "Thank you, bye!", nil, nil, nil)
+	if !strings.Contains(reply, "welcome") {
+		t.Fatalf("expected farewell reply containing 'welcome', got: %s", reply)
+	}
+	if strings.Contains(reply, "assist you") {
+		t.Fatalf("expected NO opening greeting in a farewell reply, got: %s", reply)
+	}
+
+	replyBn := DemoResponder("bn", "ধন্যবাদ, বিদায়!", nil, nil, nil)
+	if !strings.Contains(replyBn, "ধন্যবাদ") {
+		t.Fatalf("expected Bengali farewell reply, got: %s", replyBn)
+	}
+	if strings.Contains(replyBn, "সাহায্য করতে পারি") {
+		t.Fatalf("expected NO opening greeting in a Bengali farewell reply, got: %s", replyBn)
+	}
+
+	// A plain greeting still gets the opening greeting.
+	greeting := DemoResponder("en", "Hello", nil, nil, nil)
+	if !strings.Contains(greeting, "assist you") {
+		t.Fatalf("expected greeting to keep the opening reply, got: %s", greeting)
+	}
+}
+
 // Acceptance criterion:
 // TestGenerateReply_KnowledgeIsolation: two workspaces, distinct knowledge,
 // sequential + concurrent + cached second call — every reply scoped to its own workspace.

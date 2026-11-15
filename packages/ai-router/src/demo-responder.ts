@@ -816,7 +816,21 @@ export function demoResponder(
     return notFoundReply();
   }
 
-  // 12. Greetings & general inquiry
+  // 12. Farewell & closing thanks — "Thank you, bye!" must get a
+  // closing reply, never the opening greeting below.
+  const reFarewell = /(?:^|[^\p{L}\p{M}\p{N}_])(bye|goodbye|good bye|see you|take care|good night|tata|বিদায়|biday|আল্লাহ হাফেজ|allah hafez|अलविदा|alvida)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
+  const reClosingThanks = /(?:^|[^\p{L}\p{M}\p{N}_])(thank(s| you)?|ধন্যবাদ|dhonnobad|dhanyabad|শুকরিয়া|shukriya|धन्यवाद)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
+  if (reFarewell.test(text) || reClosingThanks.test(text)) {
+    return pick(
+      'আপনাকেও ধন্যবাদ! ভালো থাকবেন।',
+      'Apnakeo dhonnobad! Valo thakben.',
+      "You're welcome! Have a great day!",
+      'आपका स्वागत है! आपका दिन शुभ हो!',
+      'Aapka swagat hai! Aapka din shubh ho!'
+    );
+  }
+
+  // 13. Greetings & general inquiry
   return pick(
     'ধন্যবাদ মেসেজ দেওয়ার জন্য! আমি আপনাকে কীভাবে সাহায্য করতে পারি?',
     'Message korar jonno dhonnobad! Apnake kivabe shahajjo korte pari?',
