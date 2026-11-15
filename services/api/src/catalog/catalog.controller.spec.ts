@@ -134,12 +134,6 @@ describe('CatalogController', () => {
   });
 
   it('forwards the image to the cPanel host and saves only the returned URL', async () => {
-    const { writeFileSync, existsSync } = await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    const tmpFile = join(tmpdir(), `pp-test-${Date.now()}.jpg`);
-    writeFileSync(tmpFile, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
-
     const prevSecret = process.env.PRODUCT_PAGES_UPLOAD_SECRET;
     process.env.PRODUCT_PAGES_UPLOAD_SECRET = 'test-secret';
     const fetchSpy = vi.fn(async () => ({
@@ -155,7 +149,7 @@ describe('CatalogController', () => {
 
     try {
       const res = await controller.uploadProductImage(10, 6, {
-        path: tmpFile, mimetype: 'image/jpeg', originalname: 'a.jpg', size: 4,
+        buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]), mimetype: 'image/jpeg', originalname: 'a.jpg', size: 4,
       });
       expect(res.ok).toBe(true);
       expect(res.product.image_url).toBe('https://tectobox.thsite.top/uploads/10/6/abc.jpg');
@@ -163,7 +157,6 @@ describe('CatalogController', () => {
       const [url, opts] = fetchSpy.mock.calls[0];
       expect(url).toBe('https://tectobox.thsite.top/api/upload.php');
       expect(opts.headers['X-Upload-Secret']).toBe('test-secret');
-      expect(existsSync(tmpFile)).toBe(false); // temp file cleaned up
       const updateCall = mockPool.query.mock.calls.find((c: any[]) => c[0].includes('UPDATE products SET image_url'));
       expect(updateCall[1][0]).toBe('https://tectobox.thsite.top/uploads/10/6/abc.jpg');
     } finally {
@@ -178,7 +171,7 @@ describe('CatalogController', () => {
     delete process.env.PRODUCT_PAGES_UPLOAD_SECRET;
     try {
       await expect(
-        controller.uploadProductImage(10, 6, { path: '/tmp/x', mimetype: 'image/jpeg', originalname: 'a.jpg', size: 4 }),
+        controller.uploadProductImage(10, 6, { buffer: Buffer.from('x'), mimetype: 'image/jpeg', originalname: 'a.jpg', size: 4 }),
       ).rejects.toThrow('Product image upload is not configured');
     } finally {
       if (prevSecret !== undefined) process.env.PRODUCT_PAGES_UPLOAD_SECRET = prevSecret;

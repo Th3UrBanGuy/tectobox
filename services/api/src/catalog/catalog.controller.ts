@@ -1,6 +1,5 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException, ServiceUnavailableException, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { readFile, unlink } from 'node:fs/promises';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
@@ -11,9 +10,11 @@ import { cleanProductVariants } from '@tectonic/contracts';
 const PRODUCT_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
 const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 
-/** The fields the image-upload proxy reads off the uploaded file. */
+/** The fields the image-upload proxy reads off the uploaded file.
+ * FileInterceptor's default storage is memory, so the file arrives as a
+ * buffer — there is no path on disk (readFile(file.path) 500s live). */
 interface UploadedImage {
-  path: string;
+  buffer: Buffer;
   mimetype: string;
   originalname: string;
   size: number;
@@ -177,12 +178,11 @@ export class CatalogController {
     );
     if (check.rows.length === 0) throw new NotFoundException('Product not found');
 
-    let buffer: Buffer;
-    try {
-      buffer = await readFile(file.path);
-    } finally {
-      await unlink(file.path).catch(() => undefined);
-    }
+    // Memory storage: the file is already a buffer; nothing on disk to read
+    // or clean up. (Earlier code read file.path — undefined with memory
+    // storage — and 500d on the first live upload.)
+    const buffer: Buffer = file.buffer;
+    if (!buffer || buffer.length === 0) throw new BadRequestException('No image uploaded');
 
     const form = new FormData();
     form.append('client_id', String(tenantId));
