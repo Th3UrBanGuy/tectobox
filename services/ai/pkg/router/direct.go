@@ -55,7 +55,7 @@ func (e *Engine) web2APIAllowed(_ PromptContext) bool {
 	return true
 }
 
-func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPrompt, userMsg string) (string, string, error) {
+func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPrompt, userMsg string, history []ChatMessage) (string, string, error) {
 	// 0. Gemini via local gemini-web2api-go (OpenAI-compatible endpoint).
 	// Runs first: it is the configured backend. web2api drives the Gemini
 	// web UI, so first replies take ~5s — the 2s Tier-3 context would
@@ -83,7 +83,7 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 				// (web2api drives the Gemini web UI), so log its elapsed time
 				// whenever it is actually attempted.
 				t3Start := time.Now()
-				reply, err := e.callOpenAICompatible(wCtx, url, key, model, sysPrompt, userMsg)
+				reply, err := e.callOpenAICompatible(wCtx, url, key, model, sysPrompt, userMsg, history)
 				log.Printf("[ai] tier3 web2api elapsed_ms=%d err=%v", time.Since(t3Start).Milliseconds(), err)
 				if err == nil && reply != "" {
 					return reply, "gemini-web2api:" + model, nil
@@ -94,18 +94,19 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 
 	// 1. OpenRouter
 	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
-		reply, err := e.callOpenAICompatible(ctx, "https://openrouter.ai/api/v1/chat/completions", key, "google/gemini-2.5-flash", sysPrompt, userMsg)
+		reply, err := e.callOpenAICompatible(ctx, "https://openrouter.ai/api/v1/chat/completions", key, "google/gemini-2.5-flash", sysPrompt, userMsg, history)
 		if err == nil && reply != "" {
 			return reply, "openrouter:gemini-2.5-flash", nil
 		}
 	}
 
-	// 2. Direct Gemini API
+	// 2. Direct Gemini API — one text prompt, so the history goes in as a
+	// transcript (same turns the OpenAI-compatible legs carry as messages).
 	if key := os.Getenv("GEMINI_API_KEY"); key != "" {
 		url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 		payload := map[string]interface{}{
 			"contents": []map[string]interface{}{
-				{"role": "user", "parts": []map[string]string{{"text": sysPrompt + "\n\nUser: " + userMsg}}},
+				{"role": "user", "parts": []map[string]string{{"text": sysPrompt + historyTranscript(history) + "\n\nUser: " + userMsg}}},
 			},
 		}
 		data, _ := json.Marshal(payload)
@@ -135,7 +136,7 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 
 	// 3. OpenAI
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
-		reply, err := e.callOpenAICompatible(ctx, "https://api.openai.com/v1/chat/completions", key, "gpt-4o-mini", sysPrompt, userMsg)
+		reply, err := e.callOpenAICompatible(ctx, "https://api.openai.com/v1/chat/completions", key, "gpt-4o-mini", sysPrompt, userMsg, history)
 		if err == nil && reply != "" {
 			return reply, "openai:gpt-4o-mini", nil
 		}
@@ -144,13 +145,18 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 	return "", "", fmt.Errorf("no direct APIs available or succeeded")
 }
 
-func (e *Engine) callOpenAICompatible(ctx context.Context, endpoint, token, model, sysPrompt, userMsg string) (string, error) {
+func (e *Engine) callOpenAICompatible(ctx context.Context, endpoint, token, model, sysPrompt, userMsg string, history []ChatMessage) (string, error) {
+	// History goes between the system prompt and the current message, as
+	// proper turns — this is what gives the reply conversational memory.
+	// (2026-11-16: before this, only system + current message were sent,
+	// so the live web2api path forgot every earlier turn.)
+	messages := make([]map[string]string, 0, len(history)+2)
+	messages = append(messages, map[string]string{"role": "system", "content": sysPrompt})
+	messages = append(messages, historyMessages(history)...)
+	messages = append(messages, map[string]string{"role": "user", "content": userMsg})
 	payload := map[string]interface{}{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": sysPrompt},
-			{"role": "user", "content": userMsg},
-		},
+		"model":    model,
+		"messages": messages,
 		"temperature": 0.4,
 		"max_tokens":  600,
 	}
@@ -185,4 +191,52 @@ func (e *Engine) callOpenAICompatible(ctx context.Context, endpoint, token, mode
 	}
 
 	return "", fmt.Errorf("empty choice from OpenAI compatible endpoint")
+}
+
+// historyMessages converts stored turns into OpenAI-compatible chat
+// messages. System turns are dropped (the system prompt already carries
+// the shop context) and empty turns are dropped. The current user message
+// is appended by the caller, so history never duplicates it.
+func historyMessages(history []ChatMessage) []map[string]string {
+	out := make([]map[string]string, 0, len(history))
+	for _, h := range history {
+		content := strings.TrimSpace(h.Content)
+		if content == "" {
+			continue
+		}
+		role := "user"
+		if h.Role == "assistant" || h.Role == "model" {
+			role = "assistant"
+		} else if h.Role == "system" {
+			continue
+		}
+		out = append(out, map[string]string{"role": role, "content": content})
+	}
+	return out
+}
+
+// historyTranscript renders the same turns as plain text for the direct
+// Gemini API leg, which takes one text prompt instead of a messages
+// array. Empty string when there is no history.
+func historyTranscript(history []ChatMessage) string {
+	var sb strings.Builder
+	wrote := false
+	for _, h := range history {
+		content := strings.TrimSpace(h.Content)
+		if content == "" {
+			continue
+		}
+		role := "Customer"
+		if h.Role == "assistant" || h.Role == "model" {
+			role = "Assistant"
+		} else if h.Role == "system" {
+			continue
+		}
+		if !wrote {
+			sb.WriteString("\n\n=== RECENT CONVERSATION HISTORY (PAST TURNS) ===\n")
+			wrote = true
+		}
+		sb.WriteString(role + ": " + content + "\n")
+	}
+	return sb.String()
 }

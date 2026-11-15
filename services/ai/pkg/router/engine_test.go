@@ -353,6 +353,67 @@ func TestTier3_Web2APIPrimaryForWorkspaceTraffic(t *testing.T) {
 	}
 }
 
+// TestTier3_Web2APIReceivesHistory verifies the web2api request carries
+// the conversation history (2026-11-16 fix). Before this, GenerateReply
+// built the history into fullPrompt but tryDirectAPIs only received the
+// system prompt + current message, so Gemini forgot every earlier turn
+// (the name given one message earlier was already gone). The mock answers
+// with the name ONLY when an earlier turn carried it — a reply with the
+// name proves the history reached the backend.
+func TestTier3_Web2APIReceivesHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		// The name lives ONLY in an earlier turn, never in the current
+		// message — if it is in the request, history was sent.
+		sawName := false
+		for _, m := range payload.Messages {
+			if m.Role != "system" && strings.Contains(m.Content, "Rahima Khatun") {
+				sawName = true
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		if sawName {
+			w.Write([]byte(`{"choices":[{"message":{"content":"Mock Gemini: your name is Rahima Khatun."}}]}`))
+		} else {
+			w.Write([]byte(`{"choices":[{"message":{"content":"Mock Gemini: I do not know your name."}}]}`))
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("GEMINI_WEB2API_PROXY_URL", server.URL)
+	t.Setenv("GEMINI_WEB2API_KEY", "dummy-key")
+
+	engine := NewEngine()
+	ctx := context.Background()
+
+	pctx := PromptContext{
+		ClientID:   "workspace-tenant-99",
+		ClientName: "Shop 99",
+		Knowledge: []KnowledgeItem{
+			{Title: "Delivery Policy", Content: "Delivery fee is 150 taka nationwide."},
+		},
+	}
+	history := []ChatMessage{
+		{Role: "user", Content: "My name is Rahima Khatun."},
+		{Role: "assistant", Content: "Thanks Rahima! How can I help you today?"},
+	}
+
+	reply, _, model, _ := engine.GenerateReply(ctx, pctx, "What is my name?", history, "")
+	if model != "gemini-web2api:gemini-3.6-flash" {
+		t.Fatalf("expected web2api model, got model: %s reply: %s", model, reply)
+	}
+	if !strings.Contains(reply, "Rahima Khatun") {
+		t.Fatalf("expected the reply to use the name from history, got: %s (model: %s)", reply, model)
+	}
+}
+
 // TestTier3_Web2APITimeoutBounded verifies that when web2api backend is slow / hangs,
 // the bounded timeout fires and falls through to Tier 4 demo responder.
 func TestTier3_Web2APITimeoutBounded(t *testing.T) {

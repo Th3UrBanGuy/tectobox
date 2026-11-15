@@ -1,5 +1,5 @@
 /* Tectobox Webchat — one-line embed.
- * <script src="https://box.tect0nic.com/widget.js?v=20261001i" data-client="WIDGET_KEY"></script>
+ * <script src="https://box.tect0nic.com/widget.js?v=20261116a" data-client="WIDGET_KEY"></script>
  * Appearance (title, greeting, color, avatar, position…) is configured in the
  * dashboard and fetched automatically — data-* attributes override it:
  *   data-color, data-title, data-greeting, data-subtitle, data-avatar,
@@ -362,7 +362,14 @@
         }).catch(function () {});
       } catch (e) {}
       renderIdentity();
-      if (!greeted) { greeted = true; addMsg('in', 'Thanks ' + visitorName.split(' ')[0] + '! ' + GREETING); }
+      if (!greeted) {
+        if (!historyLoaded) {
+          historyLoaded = true;
+          loadHistory().then(function (had) {
+            if (!had && !greeted) { greeted = true; addMsg('in', 'Thanks ' + visitorName.split(' ')[0] + '! ' + GREETING); }
+          });
+        } else { greeted = true; addMsg('in', 'Thanks ' + visitorName.split(' ')[0] + '! ' + GREETING); }
+      }
       setTimeout(function () { input.focus(); }, 250);
     }
     introStart.addEventListener('click', submitIntro);
@@ -377,7 +384,7 @@
     });
     renderIdentity();
 
-    var open = false, greeted = false, sending = false, lastSeenId = 0, unread = 0;
+    var open = false, greeted = false, sending = false, lastSeenId = 0, unread = 0, historyLoaded = false;
     var seenIds = {};
 
     function richText(t) {
@@ -462,6 +469,34 @@
     }
 
     var everSent = false;
+    // History: the server stores every message, but the widget never asked
+    // for them on open — so a refresh showed an empty chat even though the
+    // conversation was intact. Load the full backfill once (since_id=0),
+    // then the poll continues from the newest id. (2026-11-16)
+    async function loadHistory() {
+      try {
+        var res = await fetch(API + '/api/widget/' + encodeURIComponent(KEY) +
+          '/messages?visitor_id=' + encodeURIComponent(visitorId) + '&since_id=0');
+        if (!res.ok) return false;
+        var data = await res.json();
+        var list = data.messages || [];
+        list.forEach(function (m) {
+          lastSeenId = Math.max(lastSeenId, m.id);
+          // direction 'in' = the visitor's own message (right),
+          // 'out' = bot/operator reply (left).
+          if (m.direction === 'in') addMsg('out', m.text, 'srv-' + m.id);
+          else addMsg('in', m.text, 'srv-' + m.id);
+        });
+        if (list.length > 0) { everSent = true; greeted = true; return true; }
+        return false;
+      } catch (e) { return false; }
+    }
+    // Greet only when there is no history to show and the visitor has not
+    // already sent a message in this page load — the greeting must never
+    // land below newer messages.
+    function maybeGreet(hadHistory) {
+      if (!hadHistory && !greeted && !everSent) { greeted = true; addMsg('in', GREETING); }
+    }
     function setOpen(v) {
       open = v;
       panel.classList.toggle('tc-open', v);
@@ -471,7 +506,12 @@
         unread = 0; badge.style.display = 'none';
         askNotifPerm();
         var needIntro = REQUIRE_INTRO && !identified;
-        if (!greeted && !needIntro) { greeted = true; addMsg('in', GREETING); }
+        if (!greeted && !needIntro) {
+          if (!historyLoaded) {
+            historyLoaded = true;
+            loadHistory().then(maybeGreet);
+          } else { greeted = true; addMsg('in', GREETING); }
+        }
         setTimeout(function () { (needIntro ? introName : input).focus(); }, 250);
       }
     }

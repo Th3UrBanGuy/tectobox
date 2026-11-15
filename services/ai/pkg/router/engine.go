@@ -149,7 +149,7 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 
 	// Tier 3: Direct APIs (OpenRouter / OpenAI / Gemini API if configured)
 	t3Ctx, t3Cancel := context.WithTimeout(ctx, tier3Timeout)
-	if reply, modelName, err := e.tryDirectAPIs(t3Ctx, pctx, sysPrompt, cleanMsg); err == nil && len(reply) > 0 {
+	if reply, modelName, err := e.tryDirectAPIs(t3Ctx, pctx, sysPrompt, cleanMsg, history); err == nil && len(reply) > 0 {
 		t3Cancel()
 		e.cache.Set(cKey, reply, tierCacheTTL)
 		return reply, lang, modelName, false

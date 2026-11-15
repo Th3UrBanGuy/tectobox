@@ -175,11 +175,14 @@ export class AiReplyService {
         prodsRows = prodsRes.rows;
         kbRows = kbRes.rows;
 
-        // Retrieve past messages for conversational memory & multi-turn dialog context
+        // Retrieve past messages for conversational memory & multi-turn dialog context.
+        // Window is 20 messages (10 turns): the whole active session should be
+        // remembered, and the Go engine now threads these turns into the
+        // web2api request (2026-11-16 — before that, Tier 3 dropped them).
         const recentHistoryRes = await this.pool.query(
           `SELECT direction, text FROM messages
            WHERE conversation_id = $1 AND id < $2
-           ORDER BY id DESC LIMIT 8`,
+           ORDER BY id DESC LIMIT 20`,
           [conv.id, msg.id]
         );
         history.push(...recentHistoryRes.rows.reverse().map(r => ({

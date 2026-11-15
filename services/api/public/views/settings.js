@@ -227,7 +227,7 @@ function webchatCard() {
   // Honest status: the embed is "ready" once a real widget key exists —
   // never a hardcoded "connected" (2026-11-12: no demo data in prod).
   const wcStatus = (state.connectors && state.connectors.webchat && state.connectors.webchat.status) || 'disconnected';
-  const snippet = `<script src="${location.origin}/widget.js?v=20261006w" data-client="${w.widget_key || ''}"></script>`;
+  const snippet = `<script src="${location.origin}/widget.js?v=20261116a" data-client="${w.widget_key || ''}"></script>`;
   return `<div class="chan-card fade-in">
     <div class="top"><span class="plat-badge p-webchat">WC</span>
       <span class="nm">Webchat</span>
@@ -243,7 +243,7 @@ function webchatCard() {
 }
 function wireWebchatCard() {
   const w = state.webchat || {};
-  const snippet = `<script src="${location.origin}/widget.js?v=20261006w" data-client="${w.widget_key || ''}"></script>`;
+  const snippet = `<script src="${location.origin}/widget.js?v=20261116a" data-client="${w.widget_key || ''}"></script>`;
   const copyBtn = $('wc-copy');
   if (copyBtn) copyBtn.onclick = async () => {
     try { await navigator.clipboard.writeText(snippet); wcToast('Embed code copied ✓'); }
@@ -253,7 +253,7 @@ function wireWebchatCard() {
   if (testBtn) testBtn.onclick = () => {
     if (document.querySelector('script[data-wc-test]')) { wcToast('Test widget already on this page — check the corner'); return; }
     const s = document.createElement('script');
-    s.src = `${location.origin}/widget.js?v=20261006w`;
+    s.src = `${location.origin}/widget.js?v=20261116a`;
     s.setAttribute('data-client', w.widget_key || '');
     s.setAttribute('data-wc-test', '1');
     document.body.appendChild(s);
@@ -345,7 +345,7 @@ async function loadAppearanceTab() {
     try { state.webchat = await api('/api/webchat/config'); } catch { state.webchat = {}; }
   }
   const w = state.webchat || {};
-  const snippet = `<script src="${location.origin}/widget.js?v=20261006w" data-client="${w.widget_key || ''}"></script>`;
+  const snippet = `<script src="${location.origin}/widget.js?v=20261116a" data-client="${w.widget_key || ''}"></script>`;
 
   $('appearance-card').innerHTML = `${adminPicker}
     <div style="background:var(--active); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:20px;">
@@ -380,7 +380,7 @@ async function loadAppearanceTab() {
       return;
     }
     const s = document.createElement('script');
-    s.src = `${location.origin}/widget.js?v=20261006w`;
+    s.src = `${location.origin}/widget.js?v=20261116a`;
     s.setAttribute('data-client', w.widget_key || '');
     s.setAttribute('data-wc-test', '1');
     document.body.appendChild(s);
