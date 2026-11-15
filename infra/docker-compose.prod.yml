@@ -181,6 +181,10 @@ services:
       GEMINI_WEB2API_URL: http://ai:8081/v1
       JWT_SECRET: ${JWT_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      # Product pages (2026-11-15): shared secret for the cPanel image
+      # upload endpoint. The top-level .env alone does NOT reach the
+      # container - compose only substitutes ${...} here.
+      PRODUCT_PAGES_UPLOAD_SECRET: ${PRODUCT_PAGES_UPLOAD_SECRET:-}
       NODE_ENV: production
       # Public base URL for inbound webhook URLs (Connect Channels page).
       BASE_URL: https://${DOMAIN:-box.tect0nic.com}
