@@ -8,6 +8,7 @@ import { WidgetIntakeService } from './intake.service.js';
 import { AiReplyService } from './ai-reply.service.js';
 import { PaymentClaimService } from './payment-claim.service.js';
 import { OrderService } from './order.service.js';
+import { assertProductPagesEnabled } from '../product-pages/product-pages-enabled.js';
 
 /**
  * Overall widget-request budget (Seg-D, W1). The Go-engine fetch is
@@ -191,12 +192,14 @@ export class WidgetController {
    * 2026-11-15). Scoped by the client's public widget key — a product only
    * resolves when it belongs to that widget's client, otherwise 404.
    * No auth: the widget key is the same public key the webchat already uses.
+   * OFF by default (PRODUCT_PAGES_ENABLED) — see product-pages-enabled.ts.
    */
   @Get(':widgetKey/product/:id')
   async getPublicProduct(
     @Param('widgetKey') widgetKey: string,
     @Param('id', ParseIntPipe) id: number,
   ) {
+    assertProductPagesEnabled();
     const clientRes = await this.pool.query(
       'SELECT id, name, whatsapp_number FROM clients WHERE widget_key = $1 LIMIT 1',
       [widgetKey],

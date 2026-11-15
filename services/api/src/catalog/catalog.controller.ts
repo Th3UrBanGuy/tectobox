@@ -5,6 +5,7 @@ import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
 import { cleanProductVariants } from '@tectonic/contracts';
+import { assertProductPagesEnabled } from '../product-pages/product-pages-enabled.js';
 
 /** Image types the cPanel upload endpoint accepts (mirrored there). */
 const PRODUCT_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -153,6 +154,7 @@ export class CatalogController {
    * it and returns a public URL — only that URL is saved in image_url.
    * The shared secret lives in PRODUCT_PAGES_UPLOAD_SECRET (VPS .env) and
    * in the cPanel secret.php; it is never logged or returned.
+   * OFF by default (PRODUCT_PAGES_ENABLED) — see product-pages-enabled.ts.
    */
   @Post('products/:id/image')
   @UseInterceptors(FileInterceptor('image', {
@@ -167,6 +169,7 @@ export class CatalogController {
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file?: UploadedImage,
   ) {
+    assertProductPagesEnabled();
     if (!file) throw new BadRequestException('No image uploaded');
     const secret = process.env.PRODUCT_PAGES_UPLOAD_SECRET;
     const host = process.env.PRODUCT_PAGES_HOST || 'tectobox.thsite.top';

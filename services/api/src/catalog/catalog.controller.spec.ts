@@ -135,7 +135,9 @@ describe('CatalogController', () => {
 
   it('forwards the image to the cPanel host and saves only the returned URL', async () => {
     const prevSecret = process.env.PRODUCT_PAGES_UPLOAD_SECRET;
+    const prevFlag = process.env.PRODUCT_PAGES_ENABLED;
     process.env.PRODUCT_PAGES_UPLOAD_SECRET = 'test-secret';
+    process.env.PRODUCT_PAGES_ENABLED = 'true';
     const fetchSpy = vi.fn(async () => ({
       ok: true,
       json: async () => ({ ok: true, url: 'https://tectobox.thsite.top/uploads/10/6/abc.jpg' }),
@@ -163,11 +165,15 @@ describe('CatalogController', () => {
       vi.unstubAllGlobals();
       if (prevSecret === undefined) delete process.env.PRODUCT_PAGES_UPLOAD_SECRET;
       else process.env.PRODUCT_PAGES_UPLOAD_SECRET = prevSecret;
+      if (prevFlag === undefined) delete process.env.PRODUCT_PAGES_ENABLED;
+      else process.env.PRODUCT_PAGES_ENABLED = prevFlag;
     }
   });
 
   it('refuses the image upload when the shared secret is not configured', async () => {
     const prevSecret = process.env.PRODUCT_PAGES_UPLOAD_SECRET;
+    const prevFlag = process.env.PRODUCT_PAGES_ENABLED;
+    process.env.PRODUCT_PAGES_ENABLED = 'true';
     delete process.env.PRODUCT_PAGES_UPLOAD_SECRET;
     try {
       await expect(
@@ -175,6 +181,20 @@ describe('CatalogController', () => {
       ).rejects.toThrow('Product image upload is not configured');
     } finally {
       if (prevSecret !== undefined) process.env.PRODUCT_PAGES_UPLOAD_SECRET = prevSecret;
+      if (prevFlag === undefined) delete process.env.PRODUCT_PAGES_ENABLED;
+      else process.env.PRODUCT_PAGES_ENABLED = prevFlag;
+    }
+  });
+
+  it('503s the image upload when the product pages module is switched off', async () => {
+    const prevFlag = process.env.PRODUCT_PAGES_ENABLED;
+    delete process.env.PRODUCT_PAGES_ENABLED;
+    try {
+      await expect(
+        controller.uploadProductImage(10, 6, { buffer: Buffer.from('x'), mimetype: 'image/jpeg', originalname: 'a.jpg', size: 4 }),
+      ).rejects.toThrow('Product pages are disabled');
+    } finally {
+      if (prevFlag !== undefined) process.env.PRODUCT_PAGES_ENABLED = prevFlag;
     }
   });
 });

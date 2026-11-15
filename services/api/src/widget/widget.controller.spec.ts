@@ -116,6 +116,13 @@ describe('WidgetController.handleWidgetMessage — Knowledge Injection into demo
 });
 
 describe('WidgetController.getPublicProduct — shareable product pages', () => {
+  const prevFlag = process.env.PRODUCT_PAGES_ENABLED;
+  beforeEach(() => { process.env.PRODUCT_PAGES_ENABLED = 'true'; });
+  afterEach(() => {
+    if (prevFlag === undefined) delete process.env.PRODUCT_PAGES_ENABLED;
+    else process.env.PRODUCT_PAGES_ENABLED = prevFlag;
+  });
+
   const makePool = (clientRow: any, productRow: any) => ({
     query: vi.fn(async (sql: string) => {
       const q = sql.toLowerCase();
@@ -123,6 +130,13 @@ describe('WidgetController.getPublicProduct — shareable product pages', () => 
       if (q.includes('from products where id')) return { rows: productRow ? [productRow] : [] };
       return { rows: [] };
     }),
+  });
+
+  it('503s when the product pages module is switched off', async () => {
+    delete process.env.PRODUCT_PAGES_ENABLED;
+    const mockPool = makePool({ id: 45, name: 'Shop 45', whatsapp_number: null }, null);
+    const controller = new WidgetController(mockPool as any);
+    await expect(controller.getPublicProduct('key-1', 7)).rejects.toThrow('Product pages are disabled');
   });
 
   it('returns the product with cleaned variants + shop whatsapp', async () => {

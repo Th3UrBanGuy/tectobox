@@ -185,6 +185,11 @@ services:
       # upload endpoint. The top-level .env alone does NOT reach the
       # container - compose only substitutes ${...} here.
       PRODUCT_PAGES_UPLOAD_SECRET: ${PRODUCT_PAGES_UPLOAD_SECRET:-}
+      # Product pages module switch (2026-11-15, user-ordered OFF): the
+      # public product endpoint + image upload 503 unless this is 'true'.
+      # InfinityFree blocks the VPS's server-to-server calls, so the
+      # module stays off until the hosting route changes.
+      PRODUCT_PAGES_ENABLED: ${PRODUCT_PAGES_ENABLED:-false}
       NODE_ENV: production
       # Public base URL for inbound webhook URLs (Connect Channels page).
       BASE_URL: https://${DOMAIN:-box.tect0nic.com}
