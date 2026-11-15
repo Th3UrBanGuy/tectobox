@@ -126,6 +126,10 @@ services:
       # now means the Go /v1 base in the api/workers containers). Empty by
       # default — the Go engine skips the web2api tier when unset.
       GEMINI_WEB2API_PROXY_URL: ${GEMINI_WEB2API_PROXY_URL:-}
+      # The Bearer key the proxy checks (lives in the VPS .env; compose
+      # only passes it through, never holds the value). Without it the
+      # web2api tier is skipped even when the URL is set.
+      GEMINI_WEB2API_KEY: ${GEMINI_WEB2API_KEY:-}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health"]
       interval: 10s
