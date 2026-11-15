@@ -1,8 +1,23 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, Inject, ParseIntPipe, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, Inject, ParseIntPipe, NotFoundException, BadRequestException, ServiceUnavailableException, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { readFile, unlink } from 'node:fs/promises';
 import { TenantGuard } from '../tenant/tenant.guard.js';
 import { CurrentTenant } from '../tenant/current-tenant.decorator.js';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
+import { cleanProductVariants } from '@tectonic/contracts';
+
+/** Image types the cPanel upload endpoint accepts (mirrored there). */
+const PRODUCT_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
+/** The fields the image-upload proxy reads off the uploaded file. */
+interface UploadedImage {
+  path: string;
+  mimetype: string;
+  originalname: string;
+  size: number;
+}
 
 @Controller(['api', 'api/catalog'])
 @UseGuards(TenantGuard)
@@ -31,35 +46,43 @@ export class CatalogController {
     const total = parseInt(countRes.rows[0]?.total || '0', 10);
 
     const queryParams = [...params, limit, offset];
-    const dataSql = `SELECT id, client_id, sku, name, category, price_bdt, stock, image_url
+    const dataSql = `SELECT id, client_id, sku, name, category, price_bdt, stock, image_url, variants_json
                      FROM products
                      ${whereSql}
                      ORDER BY id ASC
                      LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`;
     const result = await this.pool.query(dataSql, queryParams);
 
-    const res: any = result.rows;
+    const products = result.rows.map((row: any) => this.toProduct(row));
+    const res: any = products;
     res.success = true;
     res.tenantId = tenantId;
-    res.products = result.rows;
+    res.products = products;
     res.total = total;
     res.limit = limit;
     res.offset = offset;
     return res;
   }
 
+  /** One row → public shape: variants_json becomes the cleaned `variants`. */
+  private toProduct(row: any) {
+    const { variants_json, ...rest } = row;
+    return { ...rest, variants: cleanProductVariants(variants_json) };
+  }
+
   @Post('products')
   async createProduct(
     @CurrentTenant() tenantId: number,
-    @Body() body: { sku: string; name: string; priceBdt?: number; price_bdt?: number; stock?: number; category?: string; imageUrl?: string; image_url?: string }
+    @Body() body: { sku: string; name: string; priceBdt?: number; price_bdt?: number; stock?: number; category?: string; imageUrl?: string; image_url?: string; variants?: unknown }
   ) {
     const price = body.priceBdt ?? body.price_bdt ?? 0;
     const img = body.imageUrl ?? body.image_url ?? null;
+    const variants = cleanProductVariants(body.variants);
 
     const result = await this.pool.query(
-      `INSERT INTO products (client_id, sku, name, category, price_bdt, stock, image_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, client_id, sku, name, category, price_bdt, stock, image_url`,
+      `INSERT INTO products (client_id, sku, name, category, price_bdt, stock, image_url, variants_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, client_id, sku, name, category, price_bdt, stock, image_url, variants_json`,
       [
         tenantId,
         body.sku,
@@ -68,10 +91,11 @@ export class CatalogController {
         price,
         body.stock || 0,
         img,
+        JSON.stringify(variants),
       ]
     );
 
-    const product = result.rows[0];
+    const product = this.toProduct(result.rows[0]);
     return {
       ...product,
       success: true,
@@ -84,7 +108,7 @@ export class CatalogController {
   async updateProduct(
     @CurrentTenant() tenantId: number,
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { sku?: string; name?: string; priceBdt?: number; price_bdt?: number; stock?: number; category?: string; imageUrl?: string; image_url?: string }
+    @Body() body: { sku?: string; name?: string; priceBdt?: number; price_bdt?: number; stock?: number; category?: string; imageUrl?: string; image_url?: string; variants?: unknown }
   ) {
     const check = await this.pool.query(
       'SELECT * FROM products WHERE id = $1 AND client_id = $2',
@@ -101,22 +125,90 @@ export class CatalogController {
     const price = body.priceBdt ?? body.price_bdt ?? current.price_bdt;
     const stock = body.stock ?? current.stock;
     const img = body.imageUrl ?? body.image_url ?? current.image_url;
+    const variants = body.variants !== undefined
+      ? cleanProductVariants(body.variants)
+      : cleanProductVariants(current.variants_json);
 
     const result = await this.pool.query(
       `UPDATE products
-       SET sku = $1, name = $2, category = $3, price_bdt = $4, stock = $5, image_url = $6
-       WHERE id = $7 AND client_id = $8
-       RETURNING id, client_id, sku, name, category, price_bdt, stock, image_url`,
-      [sku, name, category, price, stock, img, id, tenantId]
+       SET sku = $1, name = $2, category = $3, price_bdt = $4, stock = $5, image_url = $6, variants_json = $7
+       WHERE id = $8 AND client_id = $9
+       RETURNING id, client_id, sku, name, category, price_bdt, stock, image_url, variants_json`,
+      [sku, name, category, price, stock, img, JSON.stringify(variants), id, tenantId]
     );
 
-    const updated = result.rows[0];
+    const updated = this.toProduct(result.rows[0]);
     return {
       ...updated,
       success: true,
       tenantId,
       product: { ...updated },
     };
+  }
+
+  /**
+   * Product image upload (product pages, 2026-11-15). The bytes never land
+   * on this VPS: the file is forwarded to the cPanel PHP host, which stores
+   * it and returns a public URL — only that URL is saved in image_url.
+   * The shared secret lives in PRODUCT_PAGES_UPLOAD_SECRET (VPS .env) and
+   * in the cPanel secret.php; it is never logged or returned.
+   */
+  @Post('products/:id/image')
+  @UseInterceptors(FileInterceptor('image', {
+    limits: { fileSize: PRODUCT_IMAGE_MAX_BYTES },
+    fileFilter: (_req, file, cb) => {
+      if (PRODUCT_IMAGE_MIMES.includes(file.mimetype)) cb(null, true);
+      else cb(new BadRequestException('Only JPG, PNG or WebP images are allowed'), false);
+    },
+  }))
+  async uploadProductImage(
+    @CurrentTenant() tenantId: number,
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file?: UploadedImage,
+  ) {
+    if (!file) throw new BadRequestException('No image uploaded');
+    const secret = process.env.PRODUCT_PAGES_UPLOAD_SECRET;
+    const host = process.env.PRODUCT_PAGES_HOST || 'tectobox.thsite.top';
+    if (!secret) throw new ServiceUnavailableException('Product image upload is not configured');
+
+    const check = await this.pool.query(
+      'SELECT id FROM products WHERE id = $1 AND client_id = $2',
+      [id, tenantId],
+    );
+    if (check.rows.length === 0) throw new NotFoundException('Product not found');
+
+    let buffer: Buffer;
+    try {
+      buffer = await readFile(file.path);
+    } finally {
+      await unlink(file.path).catch(() => undefined);
+    }
+
+    const form = new FormData();
+    form.append('client_id', String(tenantId));
+    form.append('product_id', String(id));
+    form.append('image', new Blob([new Uint8Array(buffer)], { type: file.mimetype }), file.originalname);
+
+    let upRes: Response;
+    try {
+      upRes = await fetch(`https://${host}/api/upload.php`, {
+        method: 'POST',
+        headers: { 'X-Upload-Secret': secret },
+        body: form,
+      });
+    } catch {
+      throw new ServiceUnavailableException('Image host did not answer');
+    }
+    const up: any = await upRes.json().catch(() => null);
+    if (!upRes.ok || !up?.ok || typeof up?.url !== 'string') {
+      throw new ServiceUnavailableException('Image upload failed');
+    }
+
+    const updated = await this.pool.query(
+      'UPDATE products SET image_url = $1 WHERE id = $2 AND client_id = $3 RETURNING id, image_url',
+      [up.url, id, tenantId],
+    );
+    return { ok: true, success: true, product: updated.rows[0] };
   }
 
   @Delete('products/:id')

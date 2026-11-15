@@ -114,3 +114,43 @@ describe('WidgetController.handleWidgetMessage — Knowledge Injection into demo
     expect(outCalls[0][1][1]).not.toContain('60');
   });
 });
+
+describe('WidgetController.getPublicProduct — shareable product pages', () => {
+  const makePool = (clientRow: any, productRow: any) => ({
+    query: vi.fn(async (sql: string) => {
+      const q = sql.toLowerCase();
+      if (q.includes('from clients where widget_key')) return { rows: clientRow ? [clientRow] : [] };
+      if (q.includes('from products where id')) return { rows: productRow ? [productRow] : [] };
+      return { rows: [] };
+    }),
+  });
+
+  it('returns the product with cleaned variants + shop whatsapp', async () => {
+    const mockPool = makePool(
+      { id: 45, name: 'Shop 45', whatsapp_number: '8801712345678' },
+      {
+        id: 7, client_id: 45, sku: 'TSH-1', name: 'T-Shirt', category: 'Apparel',
+        price_bdt: 500, stock: 5, image_url: 'https://img.test/t.jpg',
+        variants_json: [{ name: 'M', price_bdt: 550, stock: 2 }, { name: '' }, { price_bdt: 1 }],
+      },
+    );
+    const controller = new WidgetController(mockPool as any);
+    const res = await controller.getPublicProduct('key-1', 7);
+    expect(res.ok).toBe(true);
+    expect(res.product.name).toBe('T-Shirt');
+    expect(res.product.variants).toEqual([{ name: 'M', price_bdt: 550, stock: 2 }]);
+    expect(res.shop.whatsapp).toBe('8801712345678');
+  });
+
+  it('404s when the product belongs to another client', async () => {
+    const mockPool = makePool({ id: 45, name: 'Shop 45', whatsapp_number: null }, null);
+    const controller = new WidgetController(mockPool as any);
+    await expect(controller.getPublicProduct('key-1', 7)).rejects.toThrow('Product not found');
+  });
+
+  it('404s on an unknown widget key', async () => {
+    const mockPool = makePool(null, null);
+    const controller = new WidgetController(mockPool as any);
+    await expect(controller.getPublicProduct('nope', 7)).rejects.toThrow('Product not found');
+  });
+});

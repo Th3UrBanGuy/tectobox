@@ -85,9 +85,103 @@ describe('CatalogController', () => {
     expect(res.product.sku).toBe('CAP-RED');
 
     const [sqlQuery, sqlParams] = mockPool.query.mock.calls[0];
-    expect(sqlQuery).toContain('INSERT INTO products (client_id, sku, name, category, price_bdt, stock, image_url)');
+    expect(sqlQuery).toContain('INSERT INTO products (client_id, sku, name, category, price_bdt, stock, image_url, variants_json)');
     expect(sqlQuery).not.toContain('created_at');
     expect(sqlQuery).not.toContain('updated_at');
-    expect(sqlParams).toEqual([10, 'CAP-RED', 'Red Cap', 'Accessories', 350, 50, null]);
+    expect(sqlParams).toEqual([10, 'CAP-RED', 'Red Cap', 'Accessories', 350, 50, null, '[]']);
+  });
+
+  it('stores cleaned variants on create, dropping malformed ones', async () => {
+    mockPool.query.mockResolvedValueOnce({
+      rows: [
+        {
+          id: 6, client_id: 10, sku: 'TSH-M', name: 'T-Shirt', category: 'Apparel',
+          price_bdt: 500, stock: 5, image_url: null,
+          variants_json: [{ name: 'M', price_bdt: 550, stock: 2 }],
+        },
+      ],
+    });
+
+    const res = await controller.createProduct(10, {
+      sku: 'TSH-M',
+      name: 'T-Shirt',
+      priceBdt: 500,
+      stock: 5,
+      variants: [{ name: 'M', price_bdt: 550, stock: 2 }, { name: '' }, { price_bdt: 1 }],
+    });
+
+    expect(res.product.variants).toEqual([{ name: 'M', price_bdt: 550, stock: 2 }]);
+    const [, sqlParams] = mockPool.query.mock.calls[0];
+    expect(sqlParams[7]).toBe(JSON.stringify([{ name: 'M', price_bdt: 550, stock: 2 }]));
+  });
+
+  it('keeps existing variants on update when none are sent', async () => {
+    const current = {
+      id: 6, client_id: 10, sku: 'TSH-M', name: 'T-Shirt', category: 'Apparel',
+      price_bdt: 500, stock: 5, image_url: null,
+      variants_json: [{ name: 'L', price_bdt: null, stock: null }],
+    };
+    mockPool.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT * FROM products')) return { rows: [current] };
+      return { rows: [{ ...current, price_bdt: 600 }] };
+    });
+
+    const res = await controller.updateProduct(10, 6, { priceBdt: 600 });
+    expect(res.product.price_bdt).toBe(600);
+    expect(res.product.variants).toEqual([{ name: 'L', price_bdt: null, stock: null }]);
+    const updateCall = mockPool.query.mock.calls.find((c: any[]) => c[0].includes('UPDATE products'));
+    expect(updateCall[1][6]).toBe(JSON.stringify([{ name: 'L', price_bdt: null, stock: null }]));
+  });
+
+  it('forwards the image to the cPanel host and saves only the returned URL', async () => {
+    const { writeFileSync, existsSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmpFile = join(tmpdir(), `pp-test-${Date.now()}.jpg`);
+    writeFileSync(tmpFile, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+
+    const prevSecret = process.env.PRODUCT_PAGES_UPLOAD_SECRET;
+    process.env.PRODUCT_PAGES_UPLOAD_SECRET = 'test-secret';
+    const fetchSpy = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true, url: 'https://tectobox.thsite.top/uploads/10/6/abc.jpg' }),
+    }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    mockPool.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM products')) return { rows: [{ id: 6 }] };
+      return { rows: [{ id: 6, image_url: 'https://tectobox.thsite.top/uploads/10/6/abc.jpg' }] };
+    });
+
+    try {
+      const res = await controller.uploadProductImage(10, 6, {
+        path: tmpFile, mimetype: 'image/jpeg', originalname: 'a.jpg', size: 4,
+      });
+      expect(res.ok).toBe(true);
+      expect(res.product.image_url).toBe('https://tectobox.thsite.top/uploads/10/6/abc.jpg');
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const [url, opts] = fetchSpy.mock.calls[0];
+      expect(url).toBe('https://tectobox.thsite.top/api/upload.php');
+      expect(opts.headers['X-Upload-Secret']).toBe('test-secret');
+      expect(existsSync(tmpFile)).toBe(false); // temp file cleaned up
+      const updateCall = mockPool.query.mock.calls.find((c: any[]) => c[0].includes('UPDATE products SET image_url'));
+      expect(updateCall[1][0]).toBe('https://tectobox.thsite.top/uploads/10/6/abc.jpg');
+    } finally {
+      vi.unstubAllGlobals();
+      if (prevSecret === undefined) delete process.env.PRODUCT_PAGES_UPLOAD_SECRET;
+      else process.env.PRODUCT_PAGES_UPLOAD_SECRET = prevSecret;
+    }
+  });
+
+  it('refuses the image upload when the shared secret is not configured', async () => {
+    const prevSecret = process.env.PRODUCT_PAGES_UPLOAD_SECRET;
+    delete process.env.PRODUCT_PAGES_UPLOAD_SECRET;
+    try {
+      await expect(
+        controller.uploadProductImage(10, 6, { path: '/tmp/x', mimetype: 'image/jpeg', originalname: 'a.jpg', size: 4 }),
+      ).rejects.toThrow('Product image upload is not configured');
+    } finally {
+      if (prevSecret !== undefined) process.env.PRODUCT_PAGES_UPLOAD_SECRET = prevSecret;
+    }
   });
 });

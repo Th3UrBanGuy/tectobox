@@ -1,8 +1,8 @@
-import { Controller, Get, Post, Body, Param, Query, Inject, NotFoundException, BadRequestException, HttpException, ServiceUnavailableException, Optional } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Inject, NotFoundException, BadRequestException, HttpException, ServiceUnavailableException, Optional, ParseIntPipe } from '@nestjs/common';
 import pg from 'pg';
 import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
-import { SSE_EVENT_TYPES } from '@tectonic/contracts';
+import { SSE_EVENT_TYPES, cleanProductVariants } from '@tectonic/contracts';
 import { LicensingService } from '../licensing/licensing.service.js';
 import { WidgetIntakeService } from './intake.service.js';
 import { AiReplyService } from './ai-reply.service.js';
@@ -183,6 +183,51 @@ export class WidgetController {
       position: c.wc_position || 'bottom-right',
       avatar: c.wc_avatar || '',
       requireIntro: c.wc_require_intro !== false,
+    };
+  }
+
+  /**
+   * Public product read for the shareable product pages (cPanel PHP module,
+   * 2026-11-15). Scoped by the client's public widget key — a product only
+   * resolves when it belongs to that widget's client, otherwise 404.
+   * No auth: the widget key is the same public key the webchat already uses.
+   */
+  @Get(':widgetKey/product/:id')
+  async getPublicProduct(
+    @Param('widgetKey') widgetKey: string,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const clientRes = await this.pool.query(
+      'SELECT id, name, whatsapp_number FROM clients WHERE widget_key = $1 LIMIT 1',
+      [widgetKey],
+    );
+    if (clientRes.rows.length === 0) throw new NotFoundException('Product not found');
+    const client = clientRes.rows[0];
+
+    const prodRes = await this.pool.query(
+      `SELECT id, client_id, sku, name, category, price_bdt, stock, image_url, variants_json
+       FROM products WHERE id = $1 AND client_id = $2`,
+      [id, client.id],
+    );
+    if (prodRes.rows.length === 0) throw new NotFoundException('Product not found');
+    const p = prodRes.rows[0];
+
+    return {
+      ok: true,
+      product: {
+        id: p.id,
+        sku: p.sku,
+        name: p.name,
+        category: p.category,
+        price_bdt: p.price_bdt,
+        stock: p.stock,
+        image_url: p.image_url,
+        variants: cleanProductVariants(p.variants_json),
+      },
+      shop: {
+        name: client.name,
+        whatsapp: client.whatsapp_number ?? null,
+      },
     };
   }
 
