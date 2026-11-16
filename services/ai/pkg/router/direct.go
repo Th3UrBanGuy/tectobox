@@ -21,10 +21,15 @@ const (
 	// web2apiDetachedTimeout is the context given to the gemini-web2api
 	// proxy call. It is detached from the Tier-3 context on purpose:
 	// web2api drives the Gemini web UI, so first replies take ~5s and
-	// the 2s Tier-3 context would always time out. 10s (was 20s): a
-	// healthy first reply fits, and a saturated session's tail is
-	// halved — the breaker below takes over from there.
-	web2apiDetachedTimeout = 10 * time.Second
+	// the 2s Tier-3 context would always time out. 20s: measured live
+	// 2026-11-16, a healthy web2api call takes 15-17s (two direct
+	// probes: 17.25s, 15.70s), and the scenario audit's own S7 data
+	// showed p95 15.72s — so the 10s value set by the audit starved
+	// EVERY call, the breaker opened permanently, and the webchat fell
+	// back to templates for every free-form question. 20s fits under
+	// the TS upstream fetch timeout (25s); never lower it below the
+	// measured p95 again.
+	web2apiDetachedTimeout = 20 * time.Second
 
 	// web2apiBreakerThreshold / web2apiBreakerCooldown: under load the
 	// single shared web2api session serializes requests and the tail
