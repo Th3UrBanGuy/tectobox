@@ -131,3 +131,44 @@ describe('PaymentsController (M5)', () => {
     });
   });
 });
+
+describe('PaymentsController payment-config (2026-11-16 Fix 5)', () => {
+  let controller: PaymentsController;
+  let mockPool: any;
+
+  beforeEach(() => {
+    mockPool = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+    controller = new PaymentsController(mockPool, { broadcastTenantEvent: vi.fn() } as any);
+  });
+
+  it('GET returns the parsed config from the clients row', async () => {
+    mockPool.query.mockResolvedValueOnce({
+      rows: [{ payment_modes: 'both', advance_required_bdt: 100, bkash_number: '01700000000', nagad_number: null, rocket_number: null }],
+    });
+    const res = await controller.getPaymentConfig(69);
+    expect(res.ok).toBe(true);
+    expect(res.config).toEqual({ modes: 'both', advanceBdt: 100, bkash: '01700000000', nagad: null, rocket: null });
+  });
+
+  it('POST validates modes + advance and cleans numbers before saving', async () => {
+    mockPool.query
+      .mockResolvedValueOnce({ rows: [{ payment_modes: 'cod', advance_required_bdt: 0, bkash_number: null, nagad_number: null, rocket_number: null }] })
+      .mockResolvedValueOnce({ rows: [{ payment_modes: 'both', advance_required_bdt: 100, bkash_number: '01700000000', nagad_number: null, rocket_number: null }] });
+    const res = await controller.savePaymentConfig(69, {
+      payment_modes: 'both',
+      advance_required_bdt: 100,
+      bkash_number: '0170-000-0000',
+    });
+    expect(res.ok).toBe(true);
+    expect(res.config.bkash).toBe('01700000000');
+    const updateCall = mockPool.query.mock.calls[1];
+    expect(updateCall[1]).toEqual(['both', 100, '01700000000', null, null, 69]);
+  });
+
+  it('POST rejects an invalid mode and an out-of-range advance', async () => {
+    mockPool.query.mockResolvedValue({ rows: [{ payment_modes: 'cod', advance_required_bdt: 0, bkash_number: null, nagad_number: null, rocket_number: null }] });
+    await expect(controller.savePaymentConfig(69, { payment_modes: 'card' })).rejects.toThrow();
+    await expect(controller.savePaymentConfig(69, { advance_required_bdt: 100001 })).rejects.toThrow();
+    await expect(controller.savePaymentConfig(69, { bkash_number: '123' })).rejects.toThrow();
+  });
+});

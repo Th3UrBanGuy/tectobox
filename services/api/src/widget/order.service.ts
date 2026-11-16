@@ -6,9 +6,11 @@ import {
   extractCustomerDetails,
   findInStockAlternative,
   findProduct,
+  parsePaymentConfig,
+  paymentLineForConfirmation,
   toBengaliDigits,
 } from '../ai/router.js';
-import type { ProductItem } from '../ai/router.js';
+import type { PaymentConfig, ProductItem } from '../ai/router.js';
 
 export interface OrderAttemptContext {
   client: any;
@@ -104,7 +106,7 @@ export class OrderService {
     // low-stock refusal instead of looping on the old quantity.
     let quantity = quantity0;
     const confirmQty = text.match(
-      /(?:confirm|confirmed|yes|yeah|ok|okay|haa+|ha|done|thik|ঠিক|হ্যাঁ|হ্যা)\D{0,10}?(\d{1,2})\s*$/iu
+      /(?:confirm|confirmed|yes|yeah|ok|okay|haa+|ha|done|thik|ঠিক|হ্যাঁ|হ্যা|হে|হুম|আচ্ছা|দাও|নিলাম)\D{0,10}?(\d{1,2})\s*$/iu
     );
     if (confirmQty) {
       const q = parseInt(confirmQty[1], 10);
@@ -183,6 +185,10 @@ export class OrderService {
 
     const productRef = (product as any).id ?? (product as any).sku ?? product.name;
     const idempotencyKey = `webchat:${conv.id}:${String(productRef).slice(0, 80)}:qty:${quantity}`;
+    // The shop's payment config (migration 007 columns on clients):
+    // the advance the customer must pay, quoted in the confirmation
+    // reply and stored on the order row.
+    const paymentCfg = parsePaymentConfig(client);
     const itemsJson = [
       {
         product_id: (product as any).id ?? null,
@@ -208,8 +214,8 @@ export class OrderService {
       db = await this.pool.connect();
       await db.query('BEGIN');
       const inserted = await db.query(
-        `INSERT INTO orders (client_id, conversation_id, items_json, subtotal_bdt, delivery_charge_bdt, total_bdt, customer_name, customer_phone, customer_address, payment_status, status, idempotency_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 'confirmed', $10)
+        `INSERT INTO orders (client_id, conversation_id, items_json, subtotal_bdt, delivery_charge_bdt, total_bdt, advance_required_bdt, customer_name, customer_phone, customer_address, payment_status, status, idempotency_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', 'confirmed', $11)
          ON CONFLICT (client_id, idempotency_key) DO NOTHING
          RETURNING *`,
         [
@@ -219,6 +225,7 @@ export class OrderService {
           subtotal,
           deliveryCharge,
           total,
+          paymentCfg.advanceBdt,
           details.name,
           details.phone,
           details.address,
@@ -244,7 +251,7 @@ export class OrderService {
         // it without committing anything.
         await db.query('ROLLBACK');
         const lang = detectCustomerLanguage(text);
-        const replyText = this.confirmationReply(lang, order, product, quantity, total, true);
+        const replyText = this.confirmationReply(lang, order, product, quantity, total, true, paymentCfg);
         return { status: 'already_exists', order, replyText, modelUsed: 'order:already-exists' };
       }
       if (productId !== null && stock !== null) {
@@ -280,6 +287,18 @@ export class OrderService {
           };
         }
       }
+      // Created path only: the visitor's lead becomes a confirmed
+      // order — status 'confirmed', stage 'won' — so the leads board
+      // reflects the sale at order time (the re-analyze mapping
+      // status confirmed → stage won was unreachable via orders
+      // before this). No matching lead row = a no-op update.
+      if (conv.platform && conv.platform_user_id) {
+        await db.query(
+          `UPDATE leads SET status='confirmed', stage='won', updated_at=NOW()
+           WHERE client_id=$1 AND platform=$2 AND platform_user_id=$3`,
+          [client.id, conv.platform, conv.platform_user_id]
+        );
+      }
       await db.query('COMMIT');
       // ORDER_CREATED (item-3): emitted only for a genuinely created
       // order, after the commit — never for a double confirm.
@@ -292,7 +311,7 @@ export class OrderService {
         }
       }
       const lang = detectCustomerLanguage(text);
-      const replyText = this.confirmationReply(lang, order, product, quantity, total, false);
+      const replyText = this.confirmationReply(lang, order, product, quantity, total, false, paymentCfg);
       return { status: 'created', order, replyText, modelUsed: 'order:created' };
     } catch (err: any) {
       // A failed insert/decrement must never become a false
@@ -339,32 +358,40 @@ export class OrderService {
     product: ProductItem,
     quantity: number,
     total: number,
-    alreadyExists: boolean
+    alreadyExists: boolean,
+    paymentCfg?: PaymentConfig
   ): string {
     const totalStr = lang === 'bn' ? `৳${toBengaliDigits(total)}` : `৳${total}`;
     const line = `${product.name} x ${quantity}`;
+    // The payment step, quoted from the shop's real config: advance
+    // amount + number, or nothing when the shop never configured it
+    // (an empty line is never appended — no invented method).
+    const payLine = paymentCfg
+      ? paymentLineForConfirmation(paymentCfg, total, lang === 'hi' ? 'hiRoman' : lang)
+      : '';
+    const pay = payLine ? ` ${payLine}` : '';
     if (alreadyExists) {
       if (lang === 'bn') {
-        return `আপনার অর্ডারটি ইতিমধ্যে কনফার্ম হয়েছে — অর্ডার নম্বর #${order.id} (${line}, মোট ${totalStr})। নতুন করে অর্ডার করা হয়নি।`;
+        return `আপনার অর্ডারটি ইতিমধ্যে কনফার্ম হয়েছে — অর্ডার নম্বর #${order.id} (${line}, মোট ${totalStr})। নতুন করে অর্ডার করা হয়নি।${pay}`;
       }
       if (lang === 'banglish') {
-        return `Apnar order-ta agei confirm hoye geche — order number #${order.id} (${line}, mot ${totalStr}). Notun kore order kora hoy ni.`;
+        return `Apnar order-ta agei confirm hoye geche — order number #${order.id} (${line}, mot ${totalStr}). Notun kore order kora hoy ni.${pay}`;
       }
       if (lang === 'hi') {
-        return `Aapka order pehle se confirm hai — order number #${order.id} (${line}, kul ${totalStr})। Dobara order nahi kiya gaya hai.`;
+        return `Aapka order pehle se confirm hai — order number #${order.id} (${line}, kul ${totalStr})। Dobara order nahi kiya gaya hai.${pay}`;
       }
-      return `Your order is already confirmed — order #${order.id} (${line}, total ${totalStr}). No duplicate order was placed.`;
+      return `Your order is already confirmed — order #${order.id} (${line}, total ${totalStr}). No duplicate order was placed.${pay}`;
     }
     if (lang === 'bn') {
-      return `আপনার অর্ডারটি কনফার্ম হয়েছে! অর্ডার নম্বর #${order.id} — ${line}, মোট ${totalStr} (ডেলিভারি চার্জ সহ)। শীঘ্রই ডেলিভারি করা হবে।`;
+      return `আপনার অর্ডারটি কনফার্ম হয়েছে! অর্ডার নম্বর #${order.id} — ${line}, মোট ${totalStr} (ডেলিভারি চার্জ সহ)। শীঘ্রই ডেলিভারি করা হবে।${pay}`;
     }
     if (lang === 'banglish') {
-      return `Apnar order confirm hoye geche! Order number #${order.id} — ${line}, mot ${totalStr} (delivery charge shoho). Shighroi delivery kora hobe.`;
+      return `Apnar order confirm hoye geche! Order number #${order.id} — ${line}, mot ${totalStr} (delivery charge shoho). Shighroi delivery kora hobe.${pay}`;
     }
     if (lang === 'hi') {
-      return `Aapka order confirm ho gaya hai! Order number #${order.id} — ${line}, kul ${totalStr} (delivery charge sahit)। Jald hi delivery ki jayegi.`;
+      return `Aapka order confirm ho gaya hai! Order number #${order.id} — ${line}, kul ${totalStr} (delivery charge sahit)। Jald hi delivery ki jayegi.${pay}`;
     }
-    return `Your order is confirmed! Order #${order.id} — ${line}, total ${totalStr} (including delivery charge). It will be delivered soon.`;
+    return `Your order is confirmed! Order #${order.id} — ${line}, total ${totalStr} (including delivery charge). It will be delivered soon.${pay}`;
   }
 
   /**
@@ -398,7 +425,7 @@ export class OrderService {
 
 /** Explicit confirmation words (word-boundaried, all 4 languages). */
 const CONFIRM_RE =
-  /(?:^|[^\p{L}\p{M}\p{N}_])(confirm|confirmed|yes|yeah|ok|okay|haa+|ha|done|thik|ঠিক|হ্যাঁ|হ্যা|confirm korlam|kore dao|করে দিন)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
+  /(?:^|[^\p{L}\p{M}\p{N}_])(confirm|confirmed|yes|yeah|ok|okay|haa+|ha|done|thik|ঠিক|হ্যাঁ|হ্যা|হে|হুম|আচ্ছা|দাও|নিলাম|confirm korlam|kore dao|করে দিন)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
 
 /** Order-intent words (same vocabulary as the responder's order branch). */
 const ORDER_INTENT_RE =

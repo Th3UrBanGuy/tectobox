@@ -408,7 +408,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('btn-save-config').onclick = saveAdminConfig;
 
   // modal backdrop click closes (except QR which cancels the flow explicitly)
-  for (const id of ['lead-modal', 'product-modal', 'user-modal', 'pw-modal', 'meta-pick-modal', 'assign-modal', 'courier-modal', 'courier-book-modal', 'thermal-label-modal', 'quickreplies-modal', 'orders-modal']) {
+  for (const id of ['lead-modal', 'product-modal', 'user-modal', 'pw-modal', 'meta-pick-modal', 'assign-modal', 'courier-modal', 'courier-book-modal', 'payment-config-modal', 'thermal-label-modal', 'quickreplies-modal', 'orders-modal']) {
     const el = $(id);
     if (el) el.addEventListener('click', e => { if (e.target.id === id) el.classList.add('hidden'); });
   }
@@ -416,6 +416,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // wire operational modals
   if ($('btn-close-courier')) $('btn-close-courier').onclick = () => $('courier-modal').classList.add('hidden');
   if ($('btn-save-courier')) $('btn-save-courier').onclick = saveCourierConfig;
+  if ($('btn-close-payment-config')) $('btn-close-payment-config').onclick = () => $('payment-config-modal').classList.add('hidden');
+  if ($('btn-save-payment-config')) $('btn-save-payment-config').onclick = savePaymentConfig;
   if ($('btn-close-cbook')) $('btn-close-cbook').onclick = () => $('courier-book-modal').classList.add('hidden');
   if ($('btn-confirm-cbook')) $('btn-confirm-cbook').onclick = confirmCourierBooking;
   if ($('btn-close-thermal')) $('btn-close-thermal').onclick = () => $('thermal-label-modal').classList.add('hidden');

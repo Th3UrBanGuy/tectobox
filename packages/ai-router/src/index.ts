@@ -19,3 +19,4 @@ export * from './providers.js';
 export * from './demo-responder.js';
 export * from './payment-claim.js';
 export * from './payment-claim-gate.js';
+export * from './payment-config.js';

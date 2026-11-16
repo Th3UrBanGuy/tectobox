@@ -85,10 +85,10 @@ describe('CatalogController', () => {
     expect(res.product.sku).toBe('CAP-RED');
 
     const [sqlQuery, sqlParams] = mockPool.query.mock.calls[0];
-    expect(sqlQuery).toContain('INSERT INTO products (client_id, sku, name, category, price_bdt, stock, image_url, variants_json)');
+    expect(sqlQuery).toContain('INSERT INTO products (client_id, sku, name, category, price_bdt, stock, image_url, variants_json, aliases_json)');
     expect(sqlQuery).not.toContain('created_at');
     expect(sqlQuery).not.toContain('updated_at');
-    expect(sqlParams).toEqual([10, 'CAP-RED', 'Red Cap', 'Accessories', 350, 50, null, '[]']);
+    expect(sqlParams).toEqual([10, 'CAP-RED', 'Red Cap', 'Accessories', 350, 50, null, '[]', '[]']);
   });
 
   it('stores cleaned variants on create, dropping malformed ones', async () => {
@@ -131,6 +131,47 @@ describe('CatalogController', () => {
     expect(res.product.variants).toEqual([{ name: 'L', price_bdt: null, stock: null }]);
     const updateCall = mockPool.query.mock.calls.find((c: any[]) => c[0].includes('UPDATE products'));
     expect(updateCall[1][6]).toBe(JSON.stringify([{ name: 'L', price_bdt: null, stock: null }]));
+  });
+
+  it('stores cleaned aliases on create (Fix 3: Bengali-script brand names)', async () => {
+    mockPool.query.mockResolvedValueOnce({
+      rows: [
+        {
+          id: 78, client_id: 10, sku: 'KIT-1', name: 'Kitkat', category: 'Food',
+          price_bdt: 900, stock: 75, image_url: null,
+          variants_json: [], aliases_json: ['কিটক্যাট'],
+        },
+      ],
+    });
+
+    const res = await controller.createProduct(10, {
+      sku: 'KIT-1',
+      name: 'Kitkat',
+      priceBdt: 900,
+      stock: 75,
+      aliases: ['কিটক্যাট', '  ', 'কিটক্যাট'],
+    });
+
+    expect(res.product.aliases).toEqual(['কিটক্যাট']);
+    const [, sqlParams] = mockPool.query.mock.calls[0];
+    expect(sqlParams[8]).toBe(JSON.stringify(['কিটক্যাট']));
+  });
+
+  it('keeps existing aliases on update when none are sent', async () => {
+    const current = {
+      id: 78, client_id: 10, sku: 'KIT-1', name: 'Kitkat', category: 'Food',
+      price_bdt: 900, stock: 75, image_url: null,
+      variants_json: [], aliases_json: ['কিটক্যাট'],
+    };
+    mockPool.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT * FROM products')) return { rows: [current] };
+      return { rows: [{ ...current, price_bdt: 950 }] };
+    });
+
+    const res = await controller.updateProduct(10, 78, { priceBdt: 950 });
+    expect(res.product.aliases).toEqual(['কিটক্যাট']);
+    const updateCall = mockPool.query.mock.calls.find((c: any[]) => c[0].includes('UPDATE products'));
+    expect(updateCall[1][7]).toBe(JSON.stringify(['কিটক্যাট']));
   });
 
   it('forwards the image to the cPanel host and saves only the returned URL', async () => {

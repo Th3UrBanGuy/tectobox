@@ -60,6 +60,7 @@ async function renderMore() {
         subtitle: 'Products, Orders & Courier Delivery',
         items: [
           { icon: 'card', t: 'Live Payments Hub', s: 'Instant bKash/Nagad verification & fraud alerts', go: () => openPaymentsModal() },
+          { icon: 'card', t: 'Payment Settings', s: 'COD / online, advance amount & bKash-Nagad-Rocket numbers the AI quotes', go: () => openPaymentConfigModal() },
           { icon: 'boxsm', t: 'My Products', s: 'What you sell — prices & stock', go: () => showView('products') },
           { icon: 'box', t: 'Courier Logistics', s: 'Steadfast & Pathao courier setup & auto-booking', go: () => openCourierConfigModal() },
           { icon: 'sheets', t: 'Orders & Shipping Slips', s: 'Customer orders & 4x6" thermal labels', go: () => openOrdersModal() },

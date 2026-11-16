@@ -1,3 +1,5 @@
+import { paymentConfigured, type PaymentConfig } from './payment-config.js';
+
 /**
  * Prompt building — @tectonic/ai-router (Phase 4 of the modular
  * restructure). The api and the workers each had their own copy of the
@@ -22,6 +24,8 @@ export interface ProductItem {
   price_bdt: number | string;
   stock?: number;
   category?: string;
+  /** Owner-entered alternate names (e.g. Bengali "কিটক্যাট" for "Kitkat") — the matcher scores them like the name. */
+  aliases?: string[];
 }
 
 export interface KnowledgeItem {
@@ -46,11 +50,38 @@ export function toBengaliDigits(value: number): string {
   return String(value).replace(/[0-9]/g, (d) => BENGALI_DIGITS[Number(d)]);
 }
 
+/** PAYMENT section for the system prompt: the real config, or an explicit "not configured" (never invented methods/numbers). */
+function paymentSection(payment?: PaymentConfig): string {
+  if (!payment || !paymentConfigured(payment)) {
+    return '(payment methods not configured — do NOT claim any method, number, or advance amount; tell the customer the shop will share payment details)';
+  }
+  const methods =
+    payment.modes === 'cod'
+      ? 'Cash on Delivery'
+      : payment.modes === 'online'
+        ? 'Online payment'
+        : 'Cash on Delivery or online payment';
+  const numbers = [
+    payment.bkash ? `bKash ${payment.bkash}` : '',
+    payment.nagad ? `Nagad ${payment.nagad}` : '',
+    payment.rocket ? `Rocket ${payment.rocket}` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+  const advance =
+    payment.advanceBdt > 0
+      ? ` Advance required per order: ${payment.advanceBdt} BDT.`
+      : ' No advance required.';
+  return `${methods}.${numbers ? ` Numbers: ${numbers}.` : ''}${advance}`;
+}
+
 export interface PromptContext {
   clientName?: string;
   businessType?: 'physical' | 'digital';
   products?: ProductItem[];
   knowledge?: KnowledgeItem[];
+  /** Shop payment config (migration 007) — rendered as a PAYMENT section; absent = "not configured". */
+  payment?: import('./payment-config.js').PaymentConfig;
 }
 
 /** Options for {@link buildSystemPrompt}. */
@@ -92,11 +123,15 @@ ${prodLines}
 SHOP KNOWLEDGE & POLICIES:
 ${kbLines}
 
+PAYMENT METHODS — use ONLY what is listed here, never invent a method or a number:
+${paymentSection(context.payment)}
+
 RULES:
 1. Always be polite, helpful, and concise (1-3 sentences).
 2. Prices and product specs must be exact from the catalog.
 3. If delivery charge is asked and not specified in knowledge, default to ${DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka} BDT inside Dhaka and ${DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka} BDT outside Dhaka.
-4. If a customer wants to buy or order, ask for their name, phone number, and delivery address.`;
+4. If a customer wants to buy or order, ask for their name, phone number, and delivery address.
+5. NEVER tell a customer their order is confirmed, placed, or created. Only the system confirms orders — you cannot. If a customer confirms an order, ask for any missing name/phone/address and tell them to reply "confirm"; never claim the order is placed.`;
 
   if (!options?.includeSecurityDirective) return base;
 

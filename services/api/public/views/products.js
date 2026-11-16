@@ -49,6 +49,9 @@ function openProductModal(id) {
   $('pm-category').value = p ? (p.category || '') : '';
   $('pm-price').value = p ? p.price_bdt : ''; $('pm-stock').value = p ? p.stock : '';
   $('pm-image').value = p ? (p.image_url || '') : '';
+  // Aliases (2026-11-16): alternate names the AI matches — stored as an
+  // array by the API, edited here as a comma-separated list.
+  $('pm-aliases').value = p ? ((p.aliases || []).join(', ')) : '';
   $('product-modal').classList.remove('hidden');
 }
 async function saveProductModal() {
@@ -57,6 +60,7 @@ async function saveProductModal() {
   if (!sku || !name || !($('pm-price').value.trim()) || isNaN(price)) return toast('SKU, name and price are required', 'err');
   const sanitizedPrice = Math.max(0, price);
   const sanitizedStock = Math.max(0, Number($('pm-stock').value) || 0);
+  const aliases = $('pm-aliases').value.split(',').map(a => a.trim()).filter(Boolean);
   try {
     if (state.editingProductId) {
       await api('/api/products/' + state.editingProductId, {
@@ -65,6 +69,7 @@ async function saveProductModal() {
           sku, name, category: $('pm-category').value.trim() || null,
           price_bdt: sanitizedPrice, stock: sanitizedStock,
           image_url: $('pm-image').value.trim() || null,
+          aliases,
         }),
       });
     } else {
@@ -74,6 +79,7 @@ async function saveProductModal() {
           sku, name, category: $('pm-category').value.trim() || null,
           price_bdt: sanitizedPrice, stock: sanitizedStock,
           image_url: $('pm-image').value.trim() || null,
+          aliases,
         }),
       });
     }

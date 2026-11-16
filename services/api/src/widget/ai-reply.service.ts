@@ -9,6 +9,7 @@ import {
   demoResponder,
   languageDirective,
   parsePaymentClaim,
+  parsePaymentConfig,
   isActualPaymentStatement,
   detectCustomerLanguage,
 } from '../ai/router.js';
@@ -31,6 +32,16 @@ const GENERIC_FALLBACK_REPLIES: Record<string, string> = {
   hi: 'माफ़ कीजिए, अभी जवाब देने में परेशानी हो रही है। कृपया थोड़ी देर में फिर कोशिश करें।',
   en: "Sorry, we're having trouble replying right now. Please try again in a moment.",
 };
+
+/**
+ * Confirmation language an LLM reply must never claim without a real
+ * order row (Fix 4, 2026-11-16 audit). Deliberately narrow: a *request*
+ * to confirm ("অর্ডারটি কনফার্ম করতে নাম দিন") does NOT match — only a
+ * completed claim ("অর্ডার সফলভাবে নিশ্চিত করা হয়েছে", "order is
+ * confirmed", "order #123").
+ */
+const CONFIRMATION_CLAIM_RE =
+  /(অর্ডার(টি)?\s+(সফলভাবে\s+)?(নিশ্চিত|কনফার্ম|সম্পন্ন)\s*(করা\s+)?(হয়েছে|হয়ে\s+গেছে|হয়েছি)|অর্ডার\s*নম্বর|order\s+#\s*\d+|order\s+(is\s+)?(confirmed|placed|created)|your\s+order\s+(has\s+been\s+|is\s+)?(confirmed|placed|created)|order\s+successfully\s+(placed|confirmed|created))/iu;
 
 /**
  * AI reply generation (steps 5–7 of `handleWidgetMessage`): the
@@ -153,6 +164,14 @@ export class AiReplyService {
         let prodsRows: any[] = [];
         let kbRows: any[] = [];
         const history: Array<{ role: string; content: string }> = [];
+        // The shop's payment config (migration 007 columns on clients,
+        // selected by intake): quoted by the prompt, the Go engine and
+        // the deterministic responder — never an invented method list.
+        const paymentCfg = parsePaymentConfig(client);
+        // The catalog rows as the matcher consumes them: the DB column
+        // is aliases_json, the matcher reads `aliases`.
+        const withAliases = (rows: any[]) =>
+          rows.map((r: any) => ({ ...r, aliases: Array.isArray(r.aliases_json) ? r.aliases_json : [] }));
         const dbStarted = Date.now();
         try {
         // Enforce daily AI budget cap
@@ -170,10 +189,11 @@ export class AiReplyService {
 
         const budgetExceeded = cap > 0 && used >= cap;
 
-        const prodsRes = await this.pool.query('SELECT id, name, sku, price_bdt, stock FROM products WHERE client_id = $1 ORDER BY id ASC', [client.id]);
+        const prodsRes = await this.pool.query('SELECT id, name, sku, price_bdt, stock, aliases_json FROM products WHERE client_id = $1 ORDER BY id ASC', [client.id]);
         const kbRes = await this.pool.query('SELECT title, content, category FROM knowledge WHERE client_id = $1 ORDER BY id ASC', [client.id]);
         prodsRows = prodsRes.rows;
         kbRows = kbRes.rows;
+        const products = withAliases(prodsRes.rows);
 
         // Retrieve past messages for conversational memory & multi-turn dialog context.
         // Window is 20 messages (10 turns): the whole active session should be
@@ -198,7 +218,7 @@ export class AiReplyService {
         // bKash number?") still parses into a claim object, but it must
         // NEVER reach handlePaymentClaim — it falls through to the normal
         // AI reply (payment methods / merchant number) instead.
-        const paymentClaim = parsePaymentClaim(text, prodsRes.rows, history);
+        const paymentClaim = parsePaymentClaim(text, products, history);
         // 6.2 Order placement (W3/W4): a customer confirmation with
         // name + phone + address on file creates exactly one `orders`
         // row (idempotent) — or refuses with the out-of-stock reply
@@ -217,7 +237,7 @@ export class AiReplyService {
                 text,
                 name: ctx.name,
                 phone: ctx.phone,
-                products: prodsRes.rows,
+                products,
                 history,
               })
             : null;
@@ -234,7 +254,7 @@ export class AiReplyService {
             text,
             name: ctx.name,
             phone: ctx.phone,
-            products: prodsRes.rows,
+            products,
             history,
             paymentClaim,
           });
@@ -245,7 +265,7 @@ export class AiReplyService {
           modelUsed = (orderOutcome as { modelUsed: string }).modelUsed;
         } else if (budgetExceeded) {
           // Graceful fallback to deterministic catalog responder without consuming LLM budget
-          replyText = demoResponder(client.id, text, prodsRes.rows, history, kbRes.rows);
+          replyText = demoResponder(client.id, text, products, history, kbRes.rows, paymentCfg);
           modelUsed = 'budget-fallback:deterministic';
         } else {
           // Licence credit: atomic reserve-a-credit before generating. If
@@ -256,7 +276,7 @@ export class AiReplyService {
             ? await this.licensing.consumeAiCredit(client.id)
             : false;
           if (!creditOk) {
-            replyText = demoResponder(client.id, text, prodsRes.rows, history, kbRes.rows);
+            replyText = demoResponder(client.id, text, products, history, kbRes.rows, paymentCfg);
             modelUsed = 'budget-fallback:deterministic';
           } else {
             // Ultra-fast path: Go AI Engine with native language detection & in-memory caching
@@ -267,8 +287,9 @@ export class AiReplyService {
               businessType: client.business_type,
               text: text,
               history: history,
-              products: prodsRes.rows,
+              products,
               knowledge: kbRes.rows,
+              payment: paymentCfg,
             });
             timings.goMs = Date.now() - goStarted;
 
@@ -282,8 +303,9 @@ export class AiReplyService {
               const sysPrompt = buildSystemPrompt({
                 clientName: client.name,
                 businessType: client.business_type,
-                products: prodsRes.rows,
+                products,
                 knowledge: kbRes.rows,
+                payment: paymentCfg,
               }, langDir, { includeSecurityDirective: true });
 
               const promptMessages: any[] = [
@@ -295,9 +317,30 @@ export class AiReplyService {
               replyText = await getAIResponse(promptMessages, `widget:${client.id}`);
 
               if (!replyText || replyText.trim().length === 0) {
-                replyText = demoResponder(client.id, text, prodsRes.rows, history, kbRes.rows);
+                replyText = demoResponder(client.id, text, products, history, kbRes.rows, paymentCfg);
               }
               timings.fallbackMs = Date.now() - fallbackStarted;
+            }
+
+            // Fix 4 (2026-11-16 audit): the LLM once told a customer
+            // their order was confirmed when NO order row existed.
+            // The prompt now forbids it, but a model can still
+            // hallucinate it — so any LLM reply claiming a
+            // confirmation is verified against the orders table
+            // before it is stored/sent. No order for this
+            // conversation = replace with the deterministic
+            // responder, which never confirms orders. (An order
+            // from an earlier turn makes the claim legitimate.)
+            if (replyText && CONFIRMATION_CLAIM_RE.test(replyText)) {
+              const existing = await this.pool.query(
+                'SELECT 1 FROM orders WHERE conversation_id = $1 LIMIT 1',
+                [conv.id]
+              );
+              if (existing.rowCount === 0) {
+                console.warn('[widget-ai-reply] LLM claimed an order confirmation with no order row — replacing with deterministic reply');
+                replyText = demoResponder(client.id, text, products, history, kbRows, paymentCfg);
+                modelUsed = 'guard:deterministic';
+              }
             }
 
             // Increment daily used counter
@@ -312,7 +355,7 @@ export class AiReplyService {
           // from the deterministic responder with whatever catalog data was
           // loaded instead of dropping the customer's reply (Seg-D, W1).
           console.warn('[widget-ai-reply] AI chain failed, deterministic fallback:', err?.message || err);
-          replyText = demoResponder(client.id, text, prodsRows, history, kbRows);
+          replyText = demoResponder(client.id, text, withAliases(prodsRows), history, kbRows, paymentCfg);
           modelUsed = 'error-fallback:deterministic';
         }
       }

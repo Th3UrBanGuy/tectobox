@@ -32,6 +32,7 @@ describe('WidgetController.handleWidgetMessage — Knowledge Injection into demo
         sku: 'TSH-1',
         price_bdt: 500,
         stock: 5,
+        aliases: [],
       },
     ];
 

@@ -21,6 +21,7 @@ import type {
   AIRequestMessage,
   KnowledgeItem,
   PaymentClaim,
+  PaymentConfig,
   ProductItem,
   PromptContext,
 } from '@tectonic/ai-router';
@@ -38,6 +39,8 @@ export {
   GO_AI_TIMEOUT_MS,
   languageDirective,
   parsePaymentClaim,
+  parsePaymentConfig,
+  paymentLineForConfirmation,
   isActualPaymentStatement,
   queryGoAIEngine,
   resetGoAiCircuitBreaker,
@@ -50,6 +53,7 @@ export type {
   AIRequestMessage,
   KnowledgeItem,
   PaymentClaim,
+  PaymentConfig,
   ProductItem,
   PromptContext,
 } from '@tectonic/ai-router';

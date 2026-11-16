@@ -15,11 +15,15 @@ export class LeadsController {
     @CurrentTenant() tenantId: number,
     @Query('status') status?: string,
     @Query('stage') stage?: string,
-    @Query('temp') temperature?: string,
+    @Query('temperature') temperature?: string,
     @Query('platform') platform?: string,
     @Query('q') query?: string,
     @Query('limit') limitStr?: string,
-    @Query('offset') offsetStr?: string
+    @Query('offset') offsetStr?: string,
+    // `temp` is the legacy name for the same filter — it goes LAST so
+    // existing positional callers (specs) keep binding correctly;
+    // NestJS binds by decorator, not by position.
+    @Query('temp') temp?: string,
   ) {
     const limit = Math.min(200, Math.max(1, parseInt(limitStr || '', 10) || 50));
     const offset = Math.max(0, parseInt(offsetStr || '', 10) || 0);
@@ -35,8 +39,12 @@ export class LeadsController {
       params.push(stage);
       whereSql += ` AND stage = $${params.length}`;
     }
-    if (temperature && temperature !== 'all') {
-      params.push(temperature);
+    // The panel sends `temperature=`; older callers send `temp=` —
+    // accept both (2026-11-16 audit: the filter was dead because the
+    // controller only read `temp`).
+    const temperatureFilter = temperature ?? temp;
+    if (temperatureFilter && temperatureFilter !== 'all') {
+      params.push(temperatureFilter);
       whereSql += ` AND temperature = $${params.length}`;
     }
     if (platform && platform !== 'all') {

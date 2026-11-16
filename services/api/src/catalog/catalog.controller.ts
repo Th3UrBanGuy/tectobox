@@ -21,6 +21,22 @@ interface UploadedImage {
   size: number;
 }
 
+/**
+ * Aliases (migration 007, 2026-11-16 audit Fix 3): alternate names for
+ * a product — e.g. "কিটক্যাট" for "Kitkat" — that the catalog matcher
+ * scores as a full phrase. Accepts an array or a comma-separated
+ * string; drops empties/dupes, caps at 20 aliases, 80 chars each.
+ */
+function cleanAliases(v: unknown): string[] {
+  const list: string[] = Array.isArray(v) ? v : typeof v === 'string' ? v.split(',') : [];
+  const out: string[] = [];
+  for (const a of list) {
+    const s = String(a).trim().slice(0, 80);
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out.slice(0, 20);
+}
+
 @Controller(['api', 'api/catalog'])
 @UseGuards(TenantGuard)
 export class CatalogController {
@@ -48,7 +64,7 @@ export class CatalogController {
     const total = parseInt(countRes.rows[0]?.total || '0', 10);
 
     const queryParams = [...params, limit, offset];
-    const dataSql = `SELECT id, client_id, sku, name, category, price_bdt, stock, image_url, variants_json
+    const dataSql = `SELECT id, client_id, sku, name, category, price_bdt, stock, image_url, variants_json, aliases_json
                      FROM products
                      ${whereSql}
                      ORDER BY id ASC
@@ -66,25 +82,26 @@ export class CatalogController {
     return res;
   }
 
-  /** One row → public shape: variants_json becomes the cleaned `variants`. */
+  /** One row → public shape: variants_json becomes the cleaned `variants`, aliases_json the cleaned `aliases`. */
   private toProduct(row: any) {
-    const { variants_json, ...rest } = row;
-    return { ...rest, variants: cleanProductVariants(variants_json) };
+    const { variants_json, aliases_json, ...rest } = row;
+    return { ...rest, variants: cleanProductVariants(variants_json), aliases: cleanAliases(aliases_json) };
   }
 
   @Post('products')
   async createProduct(
     @CurrentTenant() tenantId: number,
-    @Body() body: { sku: string; name: string; priceBdt?: number; price_bdt?: number; stock?: number; category?: string; imageUrl?: string; image_url?: string; variants?: unknown }
+    @Body() body: { sku: string; name: string; priceBdt?: number; price_bdt?: number; stock?: number; category?: string; imageUrl?: string; image_url?: string; variants?: unknown; aliases?: unknown }
   ) {
     const price = body.priceBdt ?? body.price_bdt ?? 0;
     const img = body.imageUrl ?? body.image_url ?? null;
     const variants = cleanProductVariants(body.variants);
+    const aliases = cleanAliases(body.aliases);
 
     const result = await this.pool.query(
-      `INSERT INTO products (client_id, sku, name, category, price_bdt, stock, image_url, variants_json)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, client_id, sku, name, category, price_bdt, stock, image_url, variants_json`,
+      `INSERT INTO products (client_id, sku, name, category, price_bdt, stock, image_url, variants_json, aliases_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id, client_id, sku, name, category, price_bdt, stock, image_url, variants_json, aliases_json`,
       [
         tenantId,
         body.sku,
@@ -94,6 +111,7 @@ export class CatalogController {
         body.stock || 0,
         img,
         JSON.stringify(variants),
+        JSON.stringify(aliases),
       ]
     );
 
@@ -110,7 +128,7 @@ export class CatalogController {
   async updateProduct(
     @CurrentTenant() tenantId: number,
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { sku?: string; name?: string; priceBdt?: number; price_bdt?: number; stock?: number; category?: string; imageUrl?: string; image_url?: string; variants?: unknown }
+    @Body() body: { sku?: string; name?: string; priceBdt?: number; price_bdt?: number; stock?: number; category?: string; imageUrl?: string; image_url?: string; variants?: unknown; aliases?: unknown }
   ) {
     const check = await this.pool.query(
       'SELECT * FROM products WHERE id = $1 AND client_id = $2',
@@ -130,13 +148,16 @@ export class CatalogController {
     const variants = body.variants !== undefined
       ? cleanProductVariants(body.variants)
       : cleanProductVariants(current.variants_json);
+    const aliases = body.aliases !== undefined
+      ? cleanAliases(body.aliases)
+      : cleanAliases(current.aliases_json);
 
     const result = await this.pool.query(
       `UPDATE products
-       SET sku = $1, name = $2, category = $3, price_bdt = $4, stock = $5, image_url = $6, variants_json = $7
-       WHERE id = $8 AND client_id = $9
-       RETURNING id, client_id, sku, name, category, price_bdt, stock, image_url, variants_json`,
-      [sku, name, category, price, stock, img, JSON.stringify(variants), id, tenantId]
+       SET sku = $1, name = $2, category = $3, price_bdt = $4, stock = $5, image_url = $6, variants_json = $7, aliases_json = $8
+       WHERE id = $9 AND client_id = $10
+       RETURNING id, client_id, sku, name, category, price_bdt, stock, image_url, variants_json, aliases_json`,
+      [sku, name, category, price, stock, img, JSON.stringify(variants), JSON.stringify(aliases), id, tenantId]
     );
 
     const updated = this.toProduct(result.rows[0]);

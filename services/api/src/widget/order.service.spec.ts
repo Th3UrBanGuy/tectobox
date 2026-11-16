@@ -40,6 +40,8 @@ describe('OrderService.tryCreateOrder — W3/W4', () => {
       [2, 0], // watch
       [3, 1], // tshirt
       [4, 10], // bottle
+      [78, 75], // Kitkat (2026-11-16 audit fixture)
+      [81, 10], // লাল জামদানি শাড়ি (2026-11-16 audit fixture)
     ]);
     let nextId = 1;
     // Transaction snapshot: BEGIN saves the maps, ROLLBACK restores
@@ -67,7 +69,10 @@ describe('OrderService.tryCreateOrder — W3/W4', () => {
         return { rows: [] };
       }
       if (q.includes('insert into orders')) {
-        const key = params[9];
+        // Params mirror the live INSERT (order.service.ts): [6] is the
+        // advance from the shop's payment config (migration 007), [10]
+        // is the idempotency key.
+        const key = params[10];
         if (s.has(key)) return { rows: [] }; // ON CONFLICT DO NOTHING
         const row = {
           id: nextId++,
@@ -77,9 +82,10 @@ describe('OrderService.tryCreateOrder — W3/W4', () => {
           subtotal_bdt: params[3],
           delivery_charge_bdt: params[4],
           total_bdt: params[5],
-          customer_name: params[6],
-          customer_phone: params[7],
-          customer_address: params[8],
+          advance_required_bdt: params[6],
+          customer_name: params[7],
+          customer_phone: params[8],
+          customer_address: params[9],
           payment_status: 'pending',
           status: 'confirmed',
           idempotency_key: key,
@@ -152,9 +158,11 @@ describe('OrderService.tryCreateOrder — W3/W4', () => {
     expect(params[3]).toBe(1500); // subtotal = catalog price x 1
     expect(params[4]).toBe(60); // inside Dhaka
     expect(params[5]).toBe(1560); // total
-    expect(params[6]).toBe('Fahim');
-    expect(params[7]).toBe('01712345678');
-    expect(params[9]).toBe('webchat:101:1:qty:1'); // deterministic key
+    expect(params[6]).toBe(0); // advance: shop has no payment config
+    expect(params[7]).toBe('Fahim');
+    expect(params[8]).toBe('01712345678');
+    expect(params[9]).toBe('Dhanmondi Dhaka');
+    expect(params[10]).toBe('webchat:101:1:qty:1'); // deterministic key
     expect(store.size).toBe(1);
     const row = [...store.values()][0];
     expect(row.payment_status).toBe('pending');
@@ -392,7 +400,7 @@ describe('OrderService.tryCreateOrder — W3/W4', () => {
     expect(params[3]).toBe(3000); // 2 x 1500 catalog price
     expect(params[4]).toBe(60);
     expect(params[5]).toBe(3060);
-    expect(params[9]).toBe('webchat:101:1:qty:2');
+    expect(params[10]).toBe('webchat:101:1:qty:2');
     if (result.status === 'created') {
       expect(result.replyText).toMatch(/3060/);
       expect(result.replyText).toMatch(/x 2/);
@@ -449,5 +457,95 @@ describe('OrderService.tryCreateOrder — W3/W4', () => {
     const result = await failing.tryCreateOrder(baseCtx());
     expect(result.status).toBe('error');
     expect(insertCalls()).toHaveLength(0);
+  });
+
+  // 2026-11-16 order/payment audit fixes (Fix 1/2/3/5): the exact
+  // flows that silently died in production — "হে" as a confirm, "নাম
+  // করিম" + a keyword-less address, a Bengali-script brand name, and
+  // the payment step quoted in the confirmation reply.
+  it('Fix 1: "হে" confirms the order (was silently ignored)', async () => {
+    const result = await service.tryCreateOrder(baseCtx({ text: 'হে' }));
+    expect(result.status).toBe('created');
+  });
+
+  it('Fix 2: "নাম করিম" + keyword-less address creates the order with the right name/address', async () => {
+    const saree = { id: 81, name: 'লাল জামদানি শাড়ি', price_bdt: 8000, stock: 10 };
+    const result = await service.tryCreateOrder(
+      baseCtx({
+        text: 'হে',
+        products: [saree],
+        history: [
+          { role: 'user', content: 'আমি লাল জামদানি শাড়ি কিনতে চাই' },
+          { role: 'assistant', content: 'নাম, ফোন নম্বর ও ঠিকানা দিন।' },
+          { role: 'user', content: 'নাম করিম, ০১৬৪২৭৭৫২৭২, ঊলিয়াপুর, চট্টগ্রাম' },
+        ],
+      })
+    );
+    expect(result.status).toBe('created');
+    const params = insertCalls()[0][1];
+    expect(params[7]).toBe('করিম');
+    expect(params[8]).toBe('01642775272');
+    expect(params[9]).toBe('ঊলিয়াপুর, চট্টগ্রাম');
+    expect(params[5]).toBe(8120); // 8000 + 120 outside Dhaka
+    // The reply quotes product + total (never the customer name, by
+    // design) — the name/address correctness is proven by the params.
+  });
+
+  it('Fix 3: "কিটক্যাট" matches the Kitkat product via its owner alias', async () => {
+    const kitkat = { id: 78, name: 'Kitkat', price_bdt: 900, stock: 75, aliases: ['কিটক্যাট'] };
+    const result = await service.tryCreateOrder(
+      baseCtx({
+        text: 'হ্যাঁ',
+        products: [kitkat],
+        history: [
+          { role: 'user', content: 'কিটক্যাট কিনতে চাই' },
+          { role: 'assistant', content: 'নাম, ফোন নম্বর ও ঠিকানা দিন।' },
+          { role: 'user', content: 'আমার নাম করিম, ফোন ০১৬৪২৭৭৫২৭২, ঠিকানা ঊলিয়াপুর, চট্টগ্রাম' },
+        ],
+      })
+    );
+    expect(result.status).toBe('created');
+    const row = [...store.values()][0];
+    expect(JSON.parse(row.items_json)[0].name).toBe('Kitkat');
+  });
+
+  it('Fix 3 (skeleton): "কিটক্যাটের" matches Kitkat even with NO alias set', async () => {
+    const kitkat = { id: 78, name: 'Kitkat', price_bdt: 900, stock: 75 };
+    const result = await service.tryCreateOrder(
+      baseCtx({
+        text: 'হ্যাঁ',
+        products: [kitkat],
+        history: [
+          { role: 'user', content: 'কিটক্যাটের দাম কত? কিনতে চাই' },
+          { role: 'assistant', content: 'নাম, ফোন নম্বর ও ঠিকানা দিন।' },
+          { role: 'user', content: 'আমার নাম করিম, ফোন ০১৬৪২৭৭৫২৭২, ঠিকানা ঊলিয়াপুর, চট্টগ্রাম' },
+        ],
+      })
+    );
+    expect(result.status).toBe('created');
+    const row = [...store.values()][0];
+    expect(JSON.parse(row.items_json)[0].name).toBe('Kitkat');
+  });
+
+  it('Fix 5: the confirmation quotes the advance + bKash number and stores the advance', async () => {
+    const paidClient = { id: 69, name: 'Shop 69', payment_modes: 'both', advance_required_bdt: 100, bkash_number: '01700000000', nagad_number: null, rocket_number: null };
+    const result = await service.tryCreateOrder(baseCtx({ client: paidClient, text: 'হ্যাঁ' }));
+    expect(result.status).toBe('created');
+    const params = insertCalls()[0][1];
+    expect(params[6]).toBe(100); // advance_required_bdt on the row
+    if (result.status === 'created') {
+      expect(result.replyText).toMatch(/১০০/);
+      expect(result.replyText).toMatch(/01700000000/);
+    }
+  });
+
+  it('Fix 5: no payment config — the confirmation quotes no method and stores advance 0', async () => {
+    const result = await service.tryCreateOrder(baseCtx({ text: 'হ্যাঁ' }));
+    expect(result.status).toBe('created');
+    const params = insertCalls()[0][1];
+    expect(params[6]).toBe(0);
+    if (result.status === 'created') {
+      expect(result.replyText).not.toMatch(/বিকাশ|bKash|নগদ|Nagad|রকেট|Rocket|অগ্রিম/);
+    }
   });
 });

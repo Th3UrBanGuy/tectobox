@@ -31,6 +31,7 @@ func TestDemoResponder_DeliveryUsesKnowledge(t *testing.T) {
 		nil,
 		seededKnowledge,
 		nil,
+		PaymentConfig{},
 	)
 	if !strings.Contains(replyWithKnowledge, "130") {
 		t.Fatalf("expected reply to contain 130, got: %s", replyWithKnowledge)
@@ -46,6 +47,7 @@ func TestDemoResponder_DeliveryUsesKnowledge(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		PaymentConfig{},
 	)
 	if !strings.Contains(replyWithoutKnowledge, "60") || !strings.Contains(replyWithoutKnowledge, "120") {
 		t.Fatalf("expected generic delivery template to contain 60 and 120, got: %s", replyWithoutKnowledge)
@@ -64,6 +66,7 @@ func TestDemoResponder_DeliveryUsesKnowledge(t *testing.T) {
 		nil,
 		seededBanglaKB,
 		nil,
+		PaymentConfig{},
 	)
 	if !strings.Contains(replyBanglaKB, "১৩০") && !strings.Contains(replyBanglaKB, "130") {
 		t.Fatalf("expected Bangla delivery reply to contain 130, got: %s", replyBanglaKB)
@@ -79,6 +82,7 @@ func TestDemoResponder_DeliveryUsesKnowledge(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		PaymentConfig{},
 	)
 	if !strings.Contains(replyBanglaDefault, "৬০") || !strings.Contains(replyBanglaDefault, "১২০") {
 		t.Fatalf("expected default Bangla delivery template with 60/120, got: %s", replyBanglaDefault)
@@ -104,6 +108,7 @@ func TestDemoResponder_ChargerProductMatching_F4(t *testing.T) {
 		products,
 		nil,
 		nil,
+		PaymentConfig{},
 	)
 	if strings.Contains(replyBn, "৬০") || strings.Contains(replyBn, "১২০") || strings.Contains(replyBn, "ডেলিভারি চার্জ") {
 		t.Fatalf("F4 regression: 'চার্জার এর দাম কত?' matched delivery charge template! Got: %s", replyBn)
@@ -119,6 +124,7 @@ func TestDemoResponder_ChargerProductMatching_F4(t *testing.T) {
 		products,
 		nil,
 		nil,
+		PaymentConfig{},
 	)
 	if strings.Contains(replyEn, "60") || strings.Contains(replyEn, "120") || strings.Contains(replyEn, "delivery charge") {
 		t.Fatalf("F4 regression: 'How much is the charger?' matched delivery charge template! Got: %s", replyEn)
@@ -138,7 +144,7 @@ func TestDemoResponder_OutOfStockAlternativePrefersSameCategory(t *testing.T) {
 		{Name: "Smart Watch Fit X2", PriceBDT: 3999, Stock: 0, Category: "electronics"},
 	}
 
-	reply := DemoResponder("en", "What is the Smart Watch price?", products, nil, nil)
+	reply := DemoResponder("en", "What is the Smart Watch price?", products, nil, nil, PaymentConfig{})
 	if !strings.Contains(reply, "Smart Watch Fit X2") {
 		t.Fatalf("expected out-of-stock reply naming the watch, got: %s", reply)
 	}
@@ -154,7 +160,7 @@ func TestDemoResponder_OutOfStockAlternativePrefersSameCategory(t *testing.T) {
 		{Name: "chocklate", PriceBDT: 700, Stock: 50, Category: "food"},
 		{Name: "Smart Watch Fit X2", PriceBDT: 3999, Stock: 0, Category: "electronics"},
 	}
-	replyFallback := DemoResponder("en", "What is the Smart Watch price?", productsNoSameCat, nil, nil)
+	replyFallback := DemoResponder("en", "What is the Smart Watch price?", productsNoSameCat, nil, nil, PaymentConfig{})
 	if !strings.Contains(replyFallback, "chocklate") {
 		t.Fatalf("expected fallback to any in-stock item, got: %s", replyFallback)
 	}
@@ -162,7 +168,7 @@ func TestDemoResponder_OutOfStockAlternativePrefersSameCategory(t *testing.T) {
 
 // Farewell gets a closing reply, never the opening greeting.
 func TestDemoResponder_FarewellGetsClosingReply(t *testing.T) {
-	reply := DemoResponder("en", "Thank you, bye!", nil, nil, nil)
+	reply := DemoResponder("en", "Thank you, bye!", nil, nil, nil, PaymentConfig{})
 	if !strings.Contains(reply, "welcome") {
 		t.Fatalf("expected farewell reply containing 'welcome', got: %s", reply)
 	}
@@ -170,7 +176,7 @@ func TestDemoResponder_FarewellGetsClosingReply(t *testing.T) {
 		t.Fatalf("expected NO opening greeting in a farewell reply, got: %s", reply)
 	}
 
-	replyBn := DemoResponder("bn", "ধন্যবাদ, বিদায়!", nil, nil, nil)
+	replyBn := DemoResponder("bn", "ধন্যবাদ, বিদায়!", nil, nil, nil, PaymentConfig{})
 	if !strings.Contains(replyBn, "ধন্যবাদ") {
 		t.Fatalf("expected Bengali farewell reply, got: %s", replyBn)
 	}
@@ -179,7 +185,7 @@ func TestDemoResponder_FarewellGetsClosingReply(t *testing.T) {
 	}
 
 	// A plain greeting still gets the opening greeting.
-	greeting := DemoResponder("en", "Hello", nil, nil, nil)
+	greeting := DemoResponder("en", "Hello", nil, nil, nil, PaymentConfig{})
 	if !strings.Contains(greeting, "assist you") {
 		t.Fatalf("expected greeting to keep the opening reply, got: %s", greeting)
 	}
@@ -454,5 +460,80 @@ func TestTier3_Web2APITimeoutBounded(t *testing.T) {
 	}
 	if model != "deterministic-catalog" {
 		t.Fatalf("expected deterministic-catalog model on timeout fallback, got: %s", model)
+	}
+}
+
+// 2026-11-16 order/payment audit fixes (Go responder mirror): the same
+// flows the TS tests cover — a Bengali-script brand name, "নাম করিম"
+// + keyword-less address, and honest payment replies.
+func TestAuditFixes_SkeletonMatchesBengaliBrandName(t *testing.T) {
+	kitkat := []ProductItem{{Name: "Kitkat", PriceBDT: 900, Stock: 75}}
+	// No alias: the consonant skeleton alone must match.
+	reply := DemoResponder("bn", "কিটক্যাটের দাম কত?", kitkat, nil, nil, PaymentConfig{})
+	if !strings.Contains(reply, "Kitkat") || !strings.Contains(reply, "900") {
+		t.Fatalf("expected Kitkat price reply, got: %s", reply)
+	}
+	// With the owner alias it matches the plain form too.
+	kitkatAliased := []ProductItem{{Name: "Kitkat", PriceBDT: 900, Stock: 75, Aliases: []string{"কিটক্যাট"}}}
+	reply = DemoResponder("bn", "কিটক্যাট কিনতে চাই", kitkatAliased, nil, nil, PaymentConfig{})
+	if !strings.Contains(reply, "Kitkat") {
+		t.Fatalf("expected Kitkat reply via alias, got: %s", reply)
+	}
+	// The skeleton must not over-match an unrelated product.
+	saree := []ProductItem{{Name: "লাল জামদানি শাড়ি", PriceBDT: 8000, Stock: 10}}
+	reply = DemoResponder("bn", "কিটক্যাট কিনতে চাই", saree, nil, nil, PaymentConfig{})
+	if strings.Contains(reply, "8000") {
+		t.Fatalf("skeleton over-matched the saree, got: %s", reply)
+	}
+}
+
+func TestAuditFixes_ExtractCustomerDetails(t *testing.T) {
+	d := ExtractCustomerDetails("নাম করিম, ০১৬৪২৭৭৫২৭২, ঊলিয়াপুর, চট্টগ্রাম")
+	if d.Name != "করিম" {
+		t.Fatalf("expected name করিম, got %q", d.Name)
+	}
+	if d.Phone != "01642775272" {
+		t.Fatalf("expected phone 01642775272, got %q", d.Phone)
+	}
+	if d.Address != "ঊলিয়াপুর, চট্টগ্রাম" {
+		t.Fatalf("expected address ঊলিয়াপুর, চট্টগ্রাম, got %q", d.Address)
+	}
+	// "আমার নাম কি?" captures no name.
+	if d := ExtractCustomerDetails("আমার নাম কি?"); d.Name != "" {
+		t.Fatalf("expected no name for 'আমার নাম কি?', got %q", d.Name)
+	}
+	// A bare quantity after the phone is not an address.
+	if d := ExtractCustomerDetails("আমার নাম করিম, ফোন ০১৬৪২৭৭৫২৭২, ২টি"); d.Address != "" {
+		t.Fatalf("expected no address for a bare quantity, got %q", d.Address)
+	}
+}
+
+func TestAuditFixes_PaymentRepliesUseConfig(t *testing.T) {
+	// No config: honest, never an invented method list.
+	reply := DemoResponder("bn", "পেমেন্ট কিভাবে করব?", nil, nil, nil, PaymentConfig{})
+	if strings.Contains(reply, "bKash") || strings.Contains(reply, "Nagad") {
+		t.Fatalf("unconfigured shop must not claim a method, got: %s", reply)
+	}
+	if !strings.Contains(reply, "ঠিক করা হয়নি") {
+		t.Fatalf("expected the honest not-configured line, got: %s", reply)
+	}
+	// Configured: the real number + advance.
+	cfg := PaymentConfig{Modes: "both", AdvanceBDT: 100, Bkash: "01700000000"}
+	reply = DemoResponder("bn", "পেমেন্ট কিভাবে করব?", nil, nil, nil, cfg)
+	if !strings.Contains(reply, "01700000000") || !strings.Contains(reply, "১০০") {
+		t.Fatalf("expected real number + advance, got: %s", reply)
+	}
+	reply = DemoResponder("bn", "অগ্রিম কত দিতে হবে?", nil, nil, nil, cfg)
+	if !strings.Contains(reply, "১০০") || !strings.Contains(reply, "01700000000") {
+		t.Fatalf("expected advance + number, got: %s", reply)
+	}
+	// "হে" reaches the order branch, not a greeting.
+	kitkat := []ProductItem{{Name: "Kitkat", PriceBDT: 900, Stock: 75}}
+	reply = DemoResponder("bn", "হে", kitkat, nil, nil, PaymentConfig{})
+	if strings.Contains(reply, "নমস্কার") || strings.Contains(reply, "আসসালামু") {
+		t.Fatalf("expected the order branch for 'হে', got: %s", reply)
+	}
+	if !strings.Contains(reply, "নাম") && !strings.Contains(reply, "Kitkat") {
+		t.Fatalf("expected the order branch to ask for details, got: %s", reply)
 	}
 }

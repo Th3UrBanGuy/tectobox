@@ -28,6 +28,11 @@ export interface WidgetIntakeContext {
  * particular the client lookup still selects only `id, name,
  * suspended` — `client.ai_paused` is therefore undefined downstream,
  * exactly as before (the AI block reads it as "not paused").
+ * (2026-11-16: the lookup now also selects business_type and the
+ * payment-config columns (migration 007) so the reply chain can
+ * quote the shop's real payment methods. ai_paused is still NOT
+ * selected — loading it would newly enforce pauses; that needs a
+ * live-DB check first, see the order/payment audit notes.)
  */
 export class WidgetIntakeService {
   constructor(
@@ -39,7 +44,7 @@ export class WidgetIntakeService {
   async intake(widgetKey: string, body: any): Promise<WidgetIntakeContext> {
     const started = Date.now();
     const clientRes = await this.pool.query(
-      'SELECT id, name, suspended FROM clients WHERE widget_key = $1 LIMIT 1',
+      'SELECT id, name, suspended, business_type, payment_modes, advance_required_bdt, bkash_number, nagad_number, rocket_number FROM clients WHERE widget_key = $1 LIMIT 1',
       [widgetKey]
     );
     if (clientRes.rows.length === 0) throw new NotFoundException('Widget not found');

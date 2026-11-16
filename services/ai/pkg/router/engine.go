@@ -157,7 +157,7 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 	t3Cancel()
 
 	// Tier 4: Catalog-Grounded Deterministic Demo Responder with conversational memory
-	demoReply := DemoResponder(lang, cleanMsg, pctx.Products, pctx.Knowledge, history)
+	demoReply := DemoResponder(lang, cleanMsg, pctx.Products, pctx.Knowledge, history, pctx.Payment)
 	e.cache.Set(cKey, demoReply, demoCacheTTL)
 	return demoReply, lang, "deterministic-catalog", false
 }

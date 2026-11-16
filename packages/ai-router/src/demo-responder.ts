@@ -20,6 +20,13 @@
 import { detectCustomerLanguage } from './language.js';
 import type { ProductItem, KnowledgeItem } from './prompts.js';
 import { DEFAULT_DELIVERY_CHARGE_BDT, toBengaliDigits } from './prompts.js';
+import {
+  advanceInfoText,
+  codSentence,
+  EMPTY_PAYMENT_CONFIG,
+  paymentInfoText,
+  type PaymentConfig,
+} from './payment-config.js';
 
 export interface ExtractedDetails {
   name?: string;
@@ -95,7 +102,75 @@ function stripTestPrefix(name: string): string {
 }
 
 function productWords(p: ProductItem): string[] {
-  return stripTestPrefix(p.name.toLowerCase()).split(/[\s\-/]+/).filter(Boolean);
+  const words = stripTestPrefix(p.name.toLowerCase()).split(/[\s\-/]+/).filter(Boolean);
+  // Owner-entered aliases (e.g. "কিটক্যাট" for "Kitkat") are name words too.
+  for (const a of p.aliases || []) {
+    for (const w of String(a).toLowerCase().split(/[\s\-/]+/).filter(Boolean)) {
+      if (!words.includes(w)) words.push(w);
+    }
+  }
+  return words;
+}
+
+/**
+ * Consonant skeleton of a Latin word: digraphs folded (ph→f, sh→s,
+ * gh→g, c→k), vowels dropped. Vowels vary the most across
+ * transliterations, consonants the least — so "kitkat"→"ktkt" and
+ * "iphone"→"fn" survive the script change.
+ */
+function latinSkeleton(word: string): string {
+  return word
+    .toLowerCase()
+    .replace(/ph/g, 'f')
+    .replace(/sh/g, 's')
+    .replace(/gh/g, 'g')
+    .replace(/c(?!h)/g, 'k')
+    .replace(/[aeiouy]/g, '');
+}
+
+/** Bengali/Devanagari consonant → Latin skeleton letter (vowels, vowel signs and hasant dropped). */
+const SKELETON_CONSONANTS: Record<string, string> = {
+  'ক': 'k', 'খ': 'kh', 'গ': 'g', 'ঘ': 'g', 'ঙ': 'n',
+  'চ': 'ch', 'ছ': 'ch', 'জ': 'j', 'ঝ': 'j', 'ঞ': 'n',
+  'ট': 't', 'ঠ': 'th', 'ড': 'd', 'ঢ': 'd', 'ণ': 'n',
+  'ত': 't', 'থ': 'th', 'দ': 'd', 'ধ': 'd', 'ন': 'n',
+  'প': 'p', 'ফ': 'f', 'ব': 'b', 'ভ': 'v', 'ম': 'm',
+  'য': 'y', 'র': 'r', 'ল': 'l', 'শ': 's', 'ষ': 's', 'স': 's',
+  'হ': 'h', 'ড়': 'r', 'ঢ়': 'r', 'য়': 'y', 'ং': 'n', 'ঃ': 'h', 'ৎ': 't',
+  'क': 'k', 'ख': 'kh', 'ग': 'g', 'घ': 'g', 'ङ': 'n',
+  'च': 'ch', 'छ': 'ch', 'ज': 'j', 'झ': 'j', 'ञ': 'n',
+  'ट': 't', 'ठ': 'th', 'ड': 'd', 'ढ': 'd', 'ण': 'n',
+  'त': 't', 'थ': 'th', 'द': 'd', 'ध': 'd', 'न': 'n',
+  'प': 'p', 'फ': 'f', 'ब': 'b', 'भ': 'v', 'म': 'm',
+  'य': 'y', 'र': 'r', 'ल': 'l', 'श': 's', 'ष': 's', 'स': 's',
+  'ह': 'h', 'ड़': 'r', 'ढ़': 'r', 'ं': 'n', 'ः': 'h',
+};
+
+function bengaliSkeleton(text: string): string {
+  // Normalize decomposed forms (ড/ঢ/য + nukta, ड/ढ + nukta) to their
+  // precomposed letters so either spelling skeletons the same way.
+  text = text
+    .replace(/\u09A1\u09BC/g, '\u09DC')
+    .replace(/\u09A2\u09BC/g, '\u09DD')
+    .replace(/\u09AF\u09BC/g, '\u09DF')
+    .replace(/\u0921\u093C/g, '\u095C')
+    .replace(/\u0922\u093C/g, '\u095D');
+  let out = '';
+  let prev = '';
+  for (const ch of text) {
+    // A ya-phala (্য — য right after a hasant, as in কিটক্যাট's ক্যা)
+    // is how Bengali spells a hard "ca/ka" — it carries no Latin 'y'
+    // (kitkat → ktkt, not ktkyt), so it skeletons to nothing. A
+    // standalone য (not after a hasant) still maps to 'y'.
+    if ((ch === '\u09AF' || ch === '\u09DF') && prev === '\u09CD') {
+      prev = ch;
+      continue;
+    }
+    const s = SKELETON_CONSONANTS[ch];
+    if (s) out += s;
+    prev = ch;
+  }
+  return out;
 }
 
 function priceOf(p: ProductItem): number {
@@ -138,6 +213,16 @@ function matchWord(str: string, word: string): boolean {
 function scoreProduct(p: ProductItem, matchText: string, rawText: string): number {
   const normName = stripTestPrefix(p.name.toLowerCase());
   if (matchWord(matchText, normName)) return 10;
+  // Owner-entered alias as a full phrase ("কিটক্যাট" for Kitkat) —
+  // token-prefix so a suffixed form ("কিটক্যাটের দাম") still matches.
+  for (const a of p.aliases || []) {
+    const alias = String(a).toLowerCase();
+    if (!alias) continue;
+    if (matchWord(rawText, alias)) return 10;
+    for (const tok of rawText.toLowerCase().split(/[^\p{L}\p{M}]+/u).filter(Boolean)) {
+      if (tok.startsWith(alias)) return 10;
+    }
+  }
   let score = 0;
   for (const w of productWords(p)) {
     if (GENERIC_PRODUCT_WORDS.has(w)) continue;
@@ -146,18 +231,37 @@ function scoreProduct(p: ProductItem, matchText: string, rawText: string): numbe
       score += /^\d+$/.test(w) ? 1 : 2;
       continue;
     }
+    let wordScored = false;
     // Prefix/substring match for short keywords ("earbud" ~ "earbuds").
     if (w.length >= 4) {
       const tokens = matchText.split(/[^a-z0-9]+/).filter(Boolean);
       for (const tok of tokens) {
         if (tok.length >= 4 && (tok.startsWith(w) || w.startsWith(tok))) {
           score += 2;
+          wordScored = true;
           break;
         }
       }
     }
-    if (w === 'charger' && matchWord(rawText, 'চার্জার')) score += 2;
-    if (w === 'চার্জার' && matchWord(rawText, 'charger')) score += 2;
+    // Consonant-skeleton fallback: a Latin brand name written in Bengali
+    // script ("কিটক্যাট" ~ "kitkat", "আইফোন" ~ "iphone"). The token
+    // skeleton may carry a suffix ("কিটক্যাটের" → "ktktr"), so a
+    // prefix match on the shorter side counts — both sides ≥ 3 letters.
+    if (!wordScored && /^[a-z]+$/.test(w)) {
+      const sk = latinSkeleton(w);
+      if (sk.length >= 3) {
+        for (const tok of rawText.split(/[^\p{L}\p{M}]+/u).filter(Boolean)) {
+          const tokSk = bengaliSkeleton(tok);
+          if (tokSk.length >= 3 && (tokSk === sk || tokSk.startsWith(sk) || sk.startsWith(tokSk))) {
+            score += 2;
+            wordScored = true;
+            break;
+          }
+        }
+      }
+    }
+    if (!wordScored && w === 'charger' && matchWord(rawText, 'চার্জার')) score += 2;
+    if (!wordScored && w === 'চার্জার' && matchWord(rawText, 'charger')) score += 2;
   }
   return score;
 }
@@ -261,12 +365,22 @@ export function extractCustomerDetails(rawText: string): ExtractedDetails {
     out.phone = phoneMatch[0].replace(/[\s\-+]/g, '');
   }
 
+  // "নাম কি?" / "what is the name?" — a question about a name is not a name.
+  const NAME_QUESTION_WORDS = new Set([
+    'কি', 'কী', 'কত', 'কোন', 'কোনটা', 'কার', 'কবে', 'কোথায়', 'কেমন', 'কেন',
+    'what', 'which', 'how', 'when', 'where', 'who', 'whose',
+  ]);
   const namePatterns = [
     /my name is\s+([A-Za-z][A-Za-z.'\- ]{1,40})/i,
     /amar naam(?:e)?\s+([A-Za-z][A-Za-z.'\- ]{1,40})/i,
     /আমার নাম\s+([^\s,।]+(?:\s+[^\s,।]+){0,2})/,
     /naam\s+(?:hai|hain|mera|meri)?\s*([A-Za-z][A-Za-z.'\- ]{1,40})/i,
     /\bi am\s+([A-Za-z][A-Za-z.'\- ]{1,40})/i,
+    // "নাম করিম" — the name without "আমার" (2026-11-16 audit: the
+    // customer's "নাম করিম" matched no pattern, so the order fell
+    // back to the stale conversation name).
+    /নাম\s+([^\s,।?]+(?:\s+[^\s,।?]+){0,2})/,
+    /\bname\s*[:\-]\s*([A-Za-z][A-Za-z.'\- ]{1,40})/i,
   ];
   for (const re of namePatterns) {
     const m = text.match(re);
@@ -275,6 +389,8 @@ export function extractCustomerDetails(rawText: string): ExtractedDetails {
       name = name.split(/,|\.| phone| my | and /i)[0].trim();
       const parts = name.split(/\s+/).slice(0, 3).join(' ');
       if (parts.length >= 2) {
+        const first = parts.split(/\s+/)[0].toLowerCase().replace(/[?।.,]/g, '');
+        if (NAME_QUESTION_WORDS.has(first)) continue;
         out.name = parts;
         break;
       }
@@ -285,6 +401,25 @@ export function extractCustomerDetails(rawText: string): ExtractedDetails {
     text.match(/(?:deliver to|address(?: is|:)?|ঠিকানা|thikana)\s*:?\s*([^.\n;।]{3,200})/i);
   if (addressMatch) {
     out.address = addressMatch[1].trim();
+  }
+
+  // Keyword-less address: "phone, place, city" — the address follows
+  // the phone number ("০১৬৪২৭৭৫২৭২, ঊলিয়াপুর, চট্টগ্রাম"). Only when
+  // no keyword address was found. A bare confirm word or a quantity
+  // after the phone ("016..., 2টি") is not an address.
+  if (!out.address && phoneMatch && phoneMatch.index !== undefined) {
+    const after = ascii.slice(phoneMatch.index + phoneMatch[0].length);
+    const cleaned = after.replace(/^[\s,;:\-]+/, '').replace(/[\s.।;]+$/, '').trim().slice(0, 200);
+    const nonDigit = cleaned.replace(/[\d\s,]/g, '');
+    const isBareConfirm =
+      /^(confirm|confirmed|yes|yeah|ok|okay|haa+|ha|done|thik|ঠিক|হ্যাঁ|হ্যা|হে|হুম|আচ্ছা|দাও|নিলাম)$/iu.test(cleaned);
+    // "2টি" is a quantity, not a place — the non-digit length check
+    // alone cannot tell (টি is two code units), so reject a bare
+    // number + quantity word explicitly.
+    const isBareQuantity = /^\d+\s*(টা|টি|ta|ti|pcs?|pieces?)?$/iu.test(cleaned);
+    if (cleaned.length >= 3 && nonDigit.length >= 2 && !isBareConfirm && !isBareQuantity) {
+      out.address = cleaned;
+    }
   }
 
   const withoutPhone = phoneMatch ? ascii.replace(phoneMatch[0], ' ') : ascii;
@@ -313,7 +448,9 @@ export function demoResponder(
   text: string,
   products: ProductItem[] = [],
   historyOrKnowledge: Array<{ role?: string; title?: string; content?: string }> = [],
-  knowledgeOrHistory: Array<{ role?: string; title?: string; content?: string }> = []
+  knowledgeOrHistory: Array<{ role?: string; title?: string; content?: string }> = [],
+  /** Shop payment config (migration 007). Absent = "not configured" honest replies, never invented methods. */
+  paymentConfig?: PaymentConfig
 ): string {
   let history: Array<{ role: string; content: string }> = [];
   let knowledge: KnowledgeItem[] = [];
@@ -336,6 +473,8 @@ export function demoResponder(
 
   const lang = detectCustomerLanguage(text);
   const hasDevanagari = /[\u0900-\u097F]/.test(text);
+  /** 5-way language for the payment-config helpers (hi splits by script). */
+  const lang5 = lang === 'hi' ? (hasDevanagari ? 'hiDev' : 'hiRoman') : lang;
 
   /** Pick the reply variant for the customer's language. Hindi uses
    * Devanagari when the customer wrote Devanagari, Roman Hindi when
@@ -440,20 +579,21 @@ export function demoResponder(
         `Advance payment ke baare mein: ${entry.content}`
       );
     }
-    // No advance rule in knowledge: answer with the payment info
-    // (knowledge if present, else the payment fallback) — never invent
-    // an advance rule and never start the order flow.
+    // No advance rule in knowledge: answer from the shop's payment
+    // config (real advance + number), or say honestly that payment
+    // info is not set — never invent an advance rule, a generic
+    // method list, or start the order flow.
     const payEntry = findKnowledge(['bkash', 'nagad', 'payment', 'পেমেন্ট', 'cash on delivery', 'cod', 'rocket', 'বিকাশ', 'নগদ', 'भुगतान']);
-    const payContent = payEntry
-      ? payEntry.content
-      : 'We accept bKash, Nagad, Rocket, and Cash on Delivery.';
-    return pick(
-      `অগ্রিম পেমেন্ট সম্পর্কে: ${payContent}`,
-      `Advance payment somporke: ${payContent}`,
-      `About advance payment: ${payContent}`,
-      `अग्रिम भुगतान के बारे में: ${payContent}`,
-      `Advance payment ke baare mein: ${payContent}`
-    );
+    if (payEntry) {
+      return pick(
+        `অগ্রিম পেমেন্ট সম্পর্কে: ${payEntry.content}`,
+        `Advance payment somporke: ${payEntry.content}`,
+        `About advance payment: ${payEntry.content}`,
+        `अग्रिम भुगतान के बारे में: ${payEntry.content}`,
+        `Advance payment ke baare mein: ${payEntry.content}`
+      );
+    }
+    return advanceInfoText(paymentConfig ?? EMPTY_PAYMENT_CONFIG, lang5);
   }
 
   // 1. Payment methods — before delivery, so "Can I pay cash on
@@ -470,13 +610,9 @@ export function demoResponder(
         `Hamare payment options: ${entry.content}`
       );
     }
-    return pick(
-      'আমরা bKash, Nagad, Rocket এবং ক্যাশ অন ডেলিভারি গ্রহণ করি।',
-      'Amra bKash, Nagad, Rocket ebong Cash on Delivery accept kori.',
-      'We accept bKash, Nagad, Rocket, and Cash on Delivery.',
-      'हम bKash, Nagad, Rocket और Cash on Delivery स्वीकार करते हैं।',
-      'Hum bKash, Nagad, Rocket aur Cash on Delivery accept karte hain.'
-    );
+    // No knowledge entry: the shop's real payment config, or an honest
+    // "not set yet" — never the invented generic method list.
+    return paymentInfoText(paymentConfig ?? EMPTY_PAYMENT_CONFIG, lang5);
   }
 
   // 2. Shop opening hours (W9/L2/L3/L5) — knowledge first, fallback
@@ -530,12 +666,15 @@ export function demoResponder(
       }
     }
 
+    // Delivery-charge defaults (60/120) with the COD sentence from the
+    // shop's real payment config — unconfigured shops get no COD claim.
+    const cfg = paymentConfig ?? EMPTY_PAYMENT_CONFIG;
     return pick(
-      `আমাদের ডেলিভারি চার্জ ঢাকার ভেতরে ${toBengaliDigits(DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka)} টাকা (২৪-৪৮ ঘণ্টা) এবং ঢাকার বাইরে ${toBengaliDigits(DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka)} টাকা (২-৩ দিন)। ক্যাশ অন ডেলিভারি সুবিধা রয়েছে।`,
-      `Amader delivery charge Dhaka city-r bhitore ${DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka} taka (24-48 hours) ebong Dhaka-r baire ${DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka} taka (2-3 days). Cash on delivery available ache.`,
-      `Our delivery charge is ${DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka} BDT inside Dhaka (24-48h) and ${DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka} BDT outside Dhaka (2-3 days). Cash on Delivery is available.`,
-      `हमारा डिलीवरी चार्ज ढाका के अंदर ${DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka} BDT (24-48 घंटे) और ढाका के बाहर ${DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka} BDT (2-3 दिन) है। Cash on Delivery उपलब्ध है।`,
-      `Hamara delivery charge Dhaka ke andar ${DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka} BDT (24-48 hours) aur Dhaka ke baahar ${DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka} BDT (2-3 days) hai. Cash on Delivery available hai.`
+      `আমাদের ডেলিভারি চার্জ ঢাকার ভেতরে ${toBengaliDigits(DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka)} টাকা (২৪-৪৮ ঘণ্টা) এবং ঢাকার বাইরে ${toBengaliDigits(DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka)} টাকা (২-৩ দিন)। ${codSentence(cfg, 'bn')}`,
+      `Amader delivery charge Dhaka city-r bhitore ${DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka} taka (24-48 hours) ebong Dhaka-r baire ${DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka} taka (2-3 days). ${codSentence(cfg, 'banglish')}`,
+      `Our delivery charge is ${DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka} BDT inside Dhaka (24-48h) and ${DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka} BDT outside Dhaka (2-3 days). ${codSentence(cfg, 'en')}`,
+      `हमारा डिलीवरी चार्ज ढाका के अंदर ${DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka} BDT (24-48 घंटे) और ढाका के बाहर ${DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka} BDT (2-3 दिन) है। ${codSentence(cfg, 'hiDev')}`,
+      `Hamara delivery charge Dhaka ke andar ${DEFAULT_DELIVERY_CHARGE_BDT.insideDhaka} BDT (24-48 hours) aur Dhaka ke baahar ${DEFAULT_DELIVERY_CHARGE_BDT.outsideDhaka} BDT (2-3 days) hai. ${codSentence(cfg, 'hiRoman')}`
     );
   }
 
@@ -721,7 +860,7 @@ export function demoResponder(
 
   // 9. Order intent (with word boundaries and conversational memory).
   // Uses details already given (W12) and refuses out-of-stock items.
-  const reOrder = /(?:^|[^\p{L}\p{M}\p{N}_])(order|buy|purchase|kinte|nibo|nebo|lagbe|nite|chai|chaichi|haa|ha|yes|confirm|অর্ডার|কিনব|কিনতে|নিব|চাই|নিতে|চাচ্ছি|হাঁ|হ্যাঁ)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
+  const reOrder = /(?:^|[^\p{L}\p{M}\p{N}_])(order|buy|purchase|kinte|nibo|nebo|lagbe|nite|chai|chaichi|haa|ha|yes|confirm|অর্ডার|কিনব|কিনতে|নিব|চাই|নিতে|চাচ্ছি|হাঁ|হ্যাঁ|হে|হুম|আচ্ছা|দাও|নিলাম)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
   if (reOrder.test(text)) {
     let matched = matchProduct(text);
     if (!matched) {

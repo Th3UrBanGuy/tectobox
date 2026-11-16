@@ -21,7 +21,11 @@ async function loadOrdersPage() {
     }
     if (!orders.length) {
       box.innerHTML = '<div class="warm-empty" style="padding:40px; text-align:center;"><div class="we-ic" style="margin-bottom:8px;"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div><b>No orders placed yet</b><p class="muted small" style="margin-top:4px;">Orders created by AI or operators in chat will appear here automatically.</p></div>';
-      return;
+      // 2026-11-16: a bare `return;` here resolved to undefined, and
+      // main.js read it as a failed refresh ("Could not refresh
+      // orders: unknown error") on a SUCCESSFUL empty refresh.
+      // Return the count (0) like the success path below.
+      return 0;
     }
     box.innerHTML = orders.map(o => {
       let items = [];
@@ -112,6 +116,43 @@ async function saveCourierConfig() {
     await api('/api/courier/config', { method: 'POST', body: JSON.stringify(payload) });
     toast('Courier configuration saved successfully ✓');
     $('courier-modal').classList.add('hidden');
+  } catch (e) {
+    toast('Save failed: ' + e.message, 'err');
+  }
+}
+
+// ---------------- Payment Settings (2026-11-16 order/payment audit, Fix 5) ----------------
+// The shop's payment config — the ONLY source the bot quotes in payment
+// answers and order confirmations. Mirrors openCourierConfigModal above.
+async function openPaymentConfigModal() {
+  const m = $('payment-config-modal');
+  if (!m) return;
+  m.classList.remove('hidden');
+  try {
+    const res = await api('/api/payment-config');
+    const cfg = res.config || {};
+    $('pay-modes').value = cfg.modes || 'cod';
+    $('pay-advance').value = cfg.advanceBdt ?? 0;
+    $('pay-bkash').value = cfg.bkash || '';
+    $('pay-nagad').value = cfg.nagad || '';
+    $('pay-rocket').value = cfg.rocket || '';
+  } catch (e) {
+    toast('Payment config error: ' + e.message, 'err');
+  }
+}
+
+async function savePaymentConfig() {
+  const payload = {
+    payment_modes: $('pay-modes').value,
+    advance_required_bdt: Math.max(0, Math.min(100000, Math.floor(Number($('pay-advance').value) || 0))),
+    bkash_number: $('pay-bkash').value.trim(),
+    nagad_number: $('pay-nagad').value.trim(),
+    rocket_number: $('pay-rocket').value.trim(),
+  };
+  try {
+    await api('/api/payment-config', { method: 'POST', body: JSON.stringify(payload) });
+    toast('Payment settings saved ✓');
+    $('payment-config-modal').classList.add('hidden');
   } catch (e) {
     toast('Save failed: ' + e.message, 'err');
   }

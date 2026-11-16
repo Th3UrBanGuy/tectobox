@@ -7,6 +7,7 @@
  */
 
 import type { AIRequestMessage, ProductItem, KnowledgeItem } from './prompts.js';
+import type { PaymentConfig } from './payment-config.js';
 import { detectCustomerLanguage } from './language.js';
 import { demoResponder } from './demo-responder.js';
 
@@ -129,6 +130,7 @@ function deterministicGoFallback(params: {
   history?: Array<{ role: string; content: string }>;
   products?: ProductItem[];
   knowledge?: KnowledgeItem[];
+  payment?: PaymentConfig;
 }, model: string): { reply: string; language: string; model: string; cached: boolean } {
   const templateReply = demoResponder(
     params.clientId || 'default',
@@ -136,6 +138,7 @@ function deterministicGoFallback(params: {
     params.products || [],
     params.history || [],
     params.knowledge || [],
+    params.payment,
   );
   const lang = detectCustomerLanguage(params.text);
   return {
@@ -157,6 +160,8 @@ export async function queryGoAIEngine(params: {
   history?: Array<{ role: string; content: string }>;
   products?: ProductItem[];
   knowledge?: KnowledgeItem[];
+  /** Shop payment config (migration 007) — sent as `payment` in the JSON body; the Go PromptContext decodes it. */
+  payment?: PaymentConfig;
   model?: string;
 }): Promise<{ reply: string; language: string; model: string; cached: boolean } | null> {
   // A missing backend URL must NEVER throw out of the widget path

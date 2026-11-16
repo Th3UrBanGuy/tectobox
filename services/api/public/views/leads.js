@@ -29,7 +29,18 @@ async function loadLeads(quiet) {
   if (state.leadTemp !== 'all') q.set('temperature', state.leadTemp);
   if (state.leadStage !== 'all') q.set('stage', state.leadStage);
   if (state.leadQuery) q.set('q', state.leadQuery);
-  state.leads = await api('/api/leads' + (q.toString() ? '?' + q : ''));
+  try {
+    state.leads = await api('/api/leads' + (q.toString() ? '?' + q : ''));
+  } catch (e) {
+    // 2026-11-16: loadLeads had no try/catch — a failed fetch left the
+    // leads view silently stale (and looked like "something went
+    // wrong"). Surface it in the table like the orders view does.
+    state.leadsError = e.message || 'Unknown error';
+    const body = $('leads-body');
+    if (body) body.innerHTML = `<tr><td colspan="11"><div class="notice warn" style="display:flex; flex-direction:column; gap:10px; align-items:flex-start;"><span>Could not load leads: ${esc(state.leadsError)}</span><button class="btn-primary" onclick="loadLeads()">Retry</button></div></td></tr>`;
+    return;
+  }
+  state.leadsError = null;
   // Default sort: score desc — hottest leads on top.
   state.leads.sort((a, b) => (b.score || 0) - (a.score || 0));
   if (!quiet) renderLeads();
@@ -171,7 +182,12 @@ async function renderLeadIntel(l) {
     ${orders.map(o => {
       const dc = Number(o.delivery_charge_bdt) || 0;
       const advPaid = Number(o.advance_paid_bdt) || 0;
-      const grandTotal = Number(o.total_bdt) + dc;
+      // total_bdt already includes the delivery charge (subtotal +
+      // delivery, set by the order service) — adding dc again double-
+      // counted it (2026-11-16 audit: "Subtotal ৳8000 + Delivery ৳120
+      // = ৳8120" showed ৳8240). Subtotal is total minus delivery.
+      const subtotal = Number(o.subtotal_bdt) || (Number(o.total_bdt) - dc);
+      const grandTotal = Number(o.total_bdt) || (subtotal + dc);
       const pct = grandTotal > 0 ? Math.round((advPaid / grandTotal) * 100) : 0;
       const cls = o.payment_status === 'paid' ? 'green' : o.payment_status === 'partial' ? 'amber' : 'gray';
       return `<div style="background:var(--hover); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:8px;">
@@ -179,7 +195,7 @@ async function renderLeadIntel(l) {
           <b style="font-size:13px;">Order #${o.id}</b>
           <span class="pill ${cls}">${esc(o.payment_status || 'pending')}</span>
         </div>
-        <div class="small muted" style="margin-bottom:6px;">Subtotal ৳${Number(o.total_bdt).toLocaleString('en-US')}${dc ? ` + Delivery ৳${dc}` : ''} = <b style="color:var(--ink);">৳${grandTotal.toLocaleString('en-US')}</b></div>
+        <div class="small muted" style="margin-bottom:6px;">Subtotal ৳${Number(subtotal).toLocaleString('en-US')}${dc ? ` + Delivery ৳${dc}` : ''} = <b style="color:var(--ink);">৳${grandTotal.toLocaleString('en-US')}</b></div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <span class="small">Paid: <b>৳${advPaid.toLocaleString('en-US')}</b> (${pct}%)</span>
           ${o.transaction_id ? `<span class="small muted" style="font-family:ui-monospace,monospace;">${esc(o.transaction_id)}</span>` : '<span class="small muted">No TrxID yet</span>'}

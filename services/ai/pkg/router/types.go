@@ -69,6 +69,10 @@ type ProductItem struct {
 	PriceBDT interface{} `json:"price_bdt"`
 	Stock    int         `json:"stock,omitempty"`
 	Category string      `json:"category,omitempty"`
+	// Aliases are owner-entered alternate names for the product
+	// (migration 007, aliases_json) — e.g. "কিটক্যাট" for "Kitkat".
+	// The matcher scores them as a full phrase, like the name.
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 // KnowledgeItem is one store policy / knowledge-base row.
@@ -76,6 +80,26 @@ type KnowledgeItem struct {
 	Title    string `json:"title"`
 	Content  string `json:"content"`
 	Category string `json:"category,omitempty"`
+}
+
+// PaymentConfig is the shop's payment configuration (migration 007,
+// clients.payment_modes / advance_required_bdt / *_number). The
+// responder quotes ONLY what is configured here — an unconfigured
+// shop gets an honest "not set yet", never an invented method list.
+// Mirrors packages/ai-router/src/payment-config.ts; keep in sync.
+type PaymentConfig struct {
+	Modes      string `json:"modes,omitempty"`
+	AdvanceBDT int    `json:"advance_bdt,omitempty"`
+	Bkash      string `json:"bkash,omitempty"`
+	Nagad      string `json:"nagad,omitempty"`
+	Rocket     string `json:"rocket,omitempty"`
+}
+
+// PaymentConfigured reports whether the shop set any real payment
+// method or advance (the DB default — modes 'cod', advance 0, no
+// numbers — counts as NOT configured).
+func PaymentConfigured(cfg PaymentConfig) bool {
+	return cfg.AdvanceBDT > 0 || cfg.Bkash != "" || cfg.Nagad != "" || cfg.Rocket != ""
 }
 
 // PromptContext is the workspace-scoped context for one reply: the tenant
@@ -88,6 +112,10 @@ type PromptContext struct {
 	BusinessType string          `json:"business_type,omitempty"`
 	Products     []ProductItem   `json:"products,omitempty"`
 	Knowledge    []KnowledgeItem `json:"knowledge,omitempty"`
+	// Payment is the shop's payment config (migration 007). Absent =
+	// unconfigured: replies say so honestly instead of inventing
+	// payment methods.
+	Payment PaymentConfig `json:"payment,omitempty"`
 }
 
 // ChatMessage is one turn of the conversation history.

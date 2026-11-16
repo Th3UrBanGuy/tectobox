@@ -21,6 +21,18 @@ import { DB_POOL } from '../database/database.module.js';
 import { EventsService } from '../events/events.service.js';
 import { SSE_EVENT_TYPES } from '@tectonic/contracts';
 import { VerifyPaymentDto, RejectPaymentDto } from './dto/payments.dto.js';
+import { parsePaymentConfig } from '../ai/router.js';
+
+/** A payment number as the shop owner typed it: digits only, 7–15 digits, or null (not configured). */
+function cleanPaymentNumber(v: unknown): string | null {
+  if (v == null) return null;
+  const d = String(v).replace(/\D/g, '');
+  if (d === '') return null;
+  if (d.length < 7 || d.length > 15) {
+    throw new BadRequestException('Payment numbers must be 7–15 digits.');
+  }
+  return d;
+}
 
 @Controller('api')
 @UseGuards(TenantGuard)
@@ -117,6 +129,67 @@ export class PaymentsController implements OnModuleInit {
   @Get('payments/stats')
   async getStats(@CurrentTenant() tenantId: number | null) {
     return this.getStatsInternal(tenantId);
+  }
+
+  /**
+   * Shop payment configuration (2026-11-16 order/payment audit, Fix 5):
+   * the modes / advance / numbers the bot quotes in payment answers
+   * and order confirmations. Stored as columns on `clients`
+   * (migration 007), edited by the shop owner in Settings → Payment
+   * Settings. An unconfigured shop gets the honest "not set yet"
+   * reply from the bot — never an invented method list.
+   */
+  @Get('payment-config')
+  async getPaymentConfig(@CurrentTenant() tenantId: number | null) {
+    if (!tenantId) throw new BadRequestException('Tenant required.');
+    const res = await this.pool.query(
+      'SELECT payment_modes, advance_required_bdt, bkash_number, nagad_number, rocket_number FROM clients WHERE id = $1 LIMIT 1',
+      [tenantId],
+    );
+    if (!res.rows.length) throw new NotFoundException('Workspace not found.');
+    return { ok: true, config: parsePaymentConfig(res.rows[0]) };
+  }
+
+  @Post('payment-config')
+  async savePaymentConfig(
+    @CurrentTenant() tenantId: number | null,
+    @Body() body: any,
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant required.');
+    const cur = await this.pool.query(
+      'SELECT payment_modes, advance_required_bdt, bkash_number, nagad_number, rocket_number FROM clients WHERE id = $1 LIMIT 1',
+      [tenantId],
+    );
+    if (!cur.rows.length) throw new NotFoundException('Workspace not found.');
+    const row = cur.rows[0];
+
+    const modes = body?.payment_modes ?? body?.modes ?? row.payment_modes ?? 'cod';
+    if (!['cod', 'online', 'both'].includes(String(modes))) {
+      throw new BadRequestException("payment_modes must be 'cod', 'online' or 'both'.");
+    }
+    const advanceRaw = body?.advance_required_bdt ?? body?.advanceBdt ?? row.advance_required_bdt ?? 0;
+    const advance = Number(advanceRaw);
+    if (!Number.isInteger(advance) || advance < 0 || advance > 100000) {
+      throw new BadRequestException('advance_required_bdt must be an integer between 0 and 100000.');
+    }
+    const bkash = body?.bkash_number !== undefined || body?.bkash !== undefined
+      ? cleanPaymentNumber(body?.bkash_number ?? body?.bkash)
+      : row.bkash_number;
+    const nagad = body?.nagad_number !== undefined || body?.nagad !== undefined
+      ? cleanPaymentNumber(body?.nagad_number ?? body?.nagad)
+      : row.nagad_number;
+    const rocket = body?.rocket_number !== undefined || body?.rocket !== undefined
+      ? cleanPaymentNumber(body?.rocket_number ?? body?.rocket)
+      : row.rocket_number;
+
+    const updated = await this.pool.query(
+      `UPDATE clients
+       SET payment_modes = $1, advance_required_bdt = $2, bkash_number = $3, nagad_number = $4, rocket_number = $5
+       WHERE id = $6
+       RETURNING payment_modes, advance_required_bdt, bkash_number, nagad_number, rocket_number`,
+      [modes, advance, bkash, nagad, rocket, tenantId],
+    );
+    return { ok: true, config: parsePaymentConfig(updated.rows[0]) };
   }
 
   private async getStatsInternal(tenantId: number | null) {

@@ -159,9 +159,119 @@ func stripTestPrefix(name string) string {
 }
 
 func productWords(p ProductItem) []string {
-	return strings.FieldsFunc(strings.ToLower(stripTestPrefix(p.Name)), func(r rune) bool {
+	words := strings.FieldsFunc(strings.ToLower(stripTestPrefix(p.Name)), func(r rune) bool {
 		return r == ' ' || r == '-' || r == '/'
 	})
+	// Owner-entered aliases (e.g. "কিটক্যাট" for "Kitkat") are name words too.
+	for _, a := range p.Aliases {
+		for _, w := range strings.FieldsFunc(strings.ToLower(a), func(r rune) bool {
+			return r == ' ' || r == '-' || r == '/'
+		}) {
+			found := false
+			for _, existing := range words {
+				if existing == w {
+					found = true
+					break
+				}
+			}
+			if !found && w != "" {
+				words = append(words, w)
+			}
+		}
+	}
+	return words
+}
+
+// toBengaliDigits renders Latin digits as Bengali digits (০-৯).
+func toBengaliDigits(n int) string {
+	var sb strings.Builder
+	for _, r := range strconv.Itoa(n) {
+		if r >= '0' && r <= '9' {
+			sb.WriteRune('০' + (r - '0'))
+		} else {
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
+}
+
+// firstNonEmpty returns s unless it is empty, then fallback.
+func firstNonEmpty(s, fallback string) string {
+	if s != "" {
+		return s
+	}
+	return fallback
+}
+
+// latinSkeleton folds a Latin word to its consonant skeleton: digraphs
+// folded (ph→f, sh→s, gh→g, c→k), vowels dropped. Vowels vary the most
+// across transliterations, consonants the least — so "kitkat"→"ktkt"
+// and "iphone"→"fn" survive the script change.
+func latinSkeleton(word string) string {
+	w := strings.ToLower(word)
+	w = strings.ReplaceAll(w, "ph", "f")
+	w = strings.ReplaceAll(w, "sh", "s")
+	w = strings.ReplaceAll(w, "gh", "g")
+	var sb strings.Builder
+	runes := []rune(w)
+	for i, r := range runes {
+		if r == 'c' && (i+1 >= len(runes) || runes[i+1] != 'h') {
+			sb.WriteRune('k')
+			continue
+		}
+		if strings.ContainsRune("aeiouy", r) {
+			continue
+		}
+		sb.WriteRune(r)
+	}
+	return sb.String()
+}
+
+// skeletonConsonants maps a Bengali/Devanagari consonant to its Latin
+// skeleton letter (vowels, vowel signs and hasant dropped).
+var skeletonConsonants = map[rune]string{
+	'ক': "k", 'খ': "kh", 'গ': "g", 'ঘ': "g", 'ঙ': "n",
+	'চ': "ch", 'ছ': "ch", 'জ': "j", 'ঝ': "j", 'ঞ': "n",
+	'ট': "t", 'ঠ': "th", 'ড': "d", 'ঢ': "d", 'ণ': "n",
+	'ত': "t", 'থ': "th", 'দ': "d", 'ধ': "d", 'ন': "n",
+	'প': "p", 'ফ': "f", 'ব': "b", 'ভ': "v", 'ম': "m",
+	'য': "y", 'র': "r", 'ল': "l", 'শ': "s", 'ষ': "s", 'স': "s",
+	'হ': "h", '\u09dc': "r", '\u09dd': "r", '\u09df': "y", 'ং': "n", 'ঃ': "h", 'ৎ': "t",
+	'क': "k", 'ख': "kh", 'ग': "g", 'घ': "g", 'ङ': "n",
+	'च': "ch", 'छ': "ch", 'ज': "j", 'झ': "j", 'ञ': "n",
+	'ट': "t", 'ठ': "th", 'ड': "d", 'ढ': "d", 'ण': "n",
+	'त': "t", 'थ': "th", 'द': "d", 'ध': "d", 'न': "n",
+	'प': "p", 'फ': "f", 'ब': "b", 'भ': "v", 'म': "m",
+	'य': "y", 'र': "r", 'ल': "l", 'श': "s", 'ष': "s", 'स': "s",
+	'ह': "h", '\u095c': "r", '\u095d': "r", 'ं': "n", 'ः': "h",
+}
+
+func bengaliSkeleton(text string) string {
+	// Normalize the decomposed forms (consonant + nukta) to their
+	// precomposed letters so either spelling skeletons the same way.
+	text = strings.ReplaceAll(text, "\u09a1\u09bc", "\u09dc")
+	text = strings.ReplaceAll(text, "\u09a2\u09bc", "\u09dd")
+	text = strings.ReplaceAll(text, "\u09af\u09bc", "\u09df")
+	text = strings.ReplaceAll(text, "\u0921\u093c", "\u095c")
+	text = strings.ReplaceAll(text, "\u0922\u093c", "\u095d")
+	var sb strings.Builder
+	var prev rune
+	for _, r := range text {
+		// A ya-phala (hasant + ya, as in the middle of "kitkat" written
+		// in Bengali script) is how Bengali spells a hard "ca/ka" — it
+		// carries no Latin 'y' (kitkat -> ktkt, not ktkyt), so it
+		// skeletons to nothing. A standalone ya (not after a hasant)
+		// still maps to 'y'.
+		if (r == '\u09af' || r == '\u09df') && prev == '\u09cd' {
+			prev = r
+			continue
+		}
+		if s, ok := skeletonConsonants[r]; ok {
+			sb.WriteString(s)
+		}
+		prev = r
+	}
+	return sb.String()
 }
 
 func priceOf(p ProductItem) float64 {
@@ -247,12 +357,21 @@ func ExtractCustomerDetails(rawText string) CustomerDetails {
 		out.Phone = regexp.MustCompile(`[\s\-+]`).ReplaceAllString(m, "")
 	}
 
+	nameQuestionWords := map[string]struct{}{
+		"কি": {}, "কী": {}, "কত": {}, "কোন": {}, "কোনটা": {}, "কার": {}, "কবে": {}, "কোথায়": {}, "কেমন": {}, "কেন": {},
+		"what": {}, "which": {}, "how": {}, "when": {}, "where": {}, "who": {}, "whose": {},
+	}
 	nameRes := []*regexp.Regexp{
 		regexp.MustCompile(`(?i)my name is\s+([A-Za-z][A-Za-z.'\- ]{1,40})`),
 		regexp.MustCompile(`(?i)amar naam(?:e)?\s+([A-Za-z][A-Za-z.'\- ]{1,40})`),
 		regexp.MustCompile(`আমার নাম\s+([^\s,।]+(?:\s+[^\s,।]+){0,2})`),
 		regexp.MustCompile(`(?i)naam\s+(?:hai|hain|mera|meri)?\s*([A-Za-z][A-Za-z.'\- ]{1,40})`),
 		regexp.MustCompile(`(?i)\bi am\s+([A-Za-z][A-Za-z.'\- ]{1,40})`),
+		// "নাম করিম" — the name without "আমার" (2026-11-16 audit: the
+		// customer's "নাম করিম" matched no pattern, so the order fell
+		// back to the stale conversation name).
+		regexp.MustCompile(`নাম\s+([^\s,।?]+(?:\s+[^\s,।?]+){0,2})`),
+		regexp.MustCompile(`(?i)\bname\s*[:\-]\s*([A-Za-z][A-Za-z.'\- ]{1,40})`),
 	}
 	for _, re := range nameRes {
 		if m := re.FindStringSubmatch(text); m != nil {
@@ -268,6 +387,12 @@ func ExtractCustomerDetails(rawText string) CustomerDetails {
 			}
 			name = strings.Join(parts, " ")
 			if len(name) >= 2 {
+				// "নাম কি?" / "what is the name?" — a question about a
+				// name is not a name.
+				first := strings.ToLower(strings.Trim(parts[0], "?।.,"))
+				if _, isQuestion := nameQuestionWords[first]; isQuestion {
+					continue
+				}
 				out.Name = name
 				break
 			}
@@ -277,6 +402,35 @@ func ExtractCustomerDetails(rawText string) CustomerDetails {
 	addrRe := regexp.MustCompile(`(?i)(?:deliver to|address(?: is|:)?|ঠিকানা|thikana)\s*:?\s*([^.\n;।]{3,200})`)
 	if m := addrRe.FindStringSubmatch(text); m != nil {
 		out.Address = strings.TrimSpace(m[1])
+	}
+
+	// Keyword-less address: "phone, place, city" — the address follows
+	// the phone number ("০১৬৪২৭৭৫২৭২, ঊলিয়াপুর, চট্টগ্রাম"). Only when
+	// no keyword address was found. A bare confirm word or a quantity
+	// after the phone ("016..., 2টি") is not an address.
+	if out.Address == "" && out.Phone != "" {
+		if loc := phoneRe.FindStringIndex(ascii); loc != nil {
+			after := ascii[loc[1]:]
+			cleaned := strings.Trim(strings.TrimLeft(after, " \t,;:-"), " \t.।;")
+			if len(cleaned) > 200 {
+				cleaned = cleaned[:200]
+			}
+			cleaned = strings.TrimSpace(cleaned)
+			nonDigit := regexp.MustCompile(`[\d\s,]`).ReplaceAllString(cleaned, "")
+			bareConfirms := map[string]struct{}{
+				"confirm": {}, "confirmed": {}, "yes": {}, "yeah": {}, "ok": {}, "okay": {},
+				"haa": {}, "ha": {}, "done": {}, "thik": {}, "ঠিক": {}, "হ্যাঁ": {}, "হ্যা": {},
+				"হে": {}, "হুম": {}, "আচ্ছা": {}, "দাও": {}, "নিলাম": {},
+			}
+			_, isBareConfirm := bareConfirms[strings.ToLower(cleaned)]
+			// "2টি" is a quantity, not a place — the non-digit length
+			// check alone cannot tell (টি is two runes), so reject a
+			// bare number + quantity word explicitly.
+			isBareQuantity, _ := regexp.MatchString(`^\d+\s*(টা|টি|ta|ti|pcs?|pieces?)?$`, cleaned)
+			if len(cleaned) >= 3 && len([]rune(nonDigit)) >= 2 && !isBareConfirm && !isBareQuantity {
+				out.Address = cleaned
+			}
+		}
 	}
 
 	withoutPhone := ascii
@@ -311,7 +465,7 @@ func ExtractCustomerDetails(rawText string) CustomerDetails {
 	return out
 }
 
-func DemoResponder(lang detector.Language, text string, products []ProductItem, knowledge []KnowledgeItem, history []ChatMessage) string {
+func DemoResponder(lang detector.Language, text string, products []ProductItem, knowledge []KnowledgeItem, history []ChatMessage, payment PaymentConfig) string {
 	// Responder-side Roman-Hindi guard (see isRomanHindi): the detector
 	// scores Devanagari but not Roman Hindi, so a Hinglish question
 	// would otherwise be answered in Banglish (L4).
@@ -338,6 +492,159 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 		}
 	}
 
+	// Payment text from the shop's real config (migration 007).
+	// An unconfigured shop gets the honest "not set yet" line —
+	// never an invented method list (2026-11-16 audit). Mirrors
+	// packages/ai-router/src/payment-config.ts; keep in sync.
+	paymentInfo := func() string {
+		if !PaymentConfigured(payment) {
+			return pick(
+				"দুঃখিত, আমাদের পেমেন্টের তথ্য এখনো ঠিক করা হয়নি — দোকান থেকে শীঘ্রই জানানো হবে।",
+				"Dukkhito, amader payment-er tottho ekhono thik kora hoy ni — dokan theke shighroi janano hobe.",
+				"Sorry, our payment information is not set up yet — the shop will share it soon.",
+				"क्षमा करें, हमारी भुगतान जानकारी अभी तैयार नहीं है — दुकान जल्द ही बताएगी।",
+				"Kshama karein, hamari bhugtan jaankari abhi taiyaar nahi hai — dukaan jald hi batayegi.",
+			)
+		}
+		// Numbers, labeled like the TS numberList ("bKash 01700000000").
+		var nums []string
+		if payment.Bkash != "" {
+			nums = append(nums, "bKash "+payment.Bkash)
+		}
+		if payment.Nagad != "" {
+			nums = append(nums, "Nagad "+payment.Nagad)
+		}
+		if payment.Rocket != "" {
+			nums = append(nums, "Rocket "+payment.Rocket)
+		}
+		numsText := strings.Join(nums, ", ")
+		var advBn, advBanglish, advEn, advHiDev, advHiRoman string
+		var advParenBn, advParenBanglish, advParenEn, advParenHiDev, advParenHiRoman string
+		if payment.AdvanceBDT > 0 {
+			advBn = fmt.Sprintf(" — অগ্রিম %s টাকা", toBengaliDigits(payment.AdvanceBDT))
+			advBanglish = fmt.Sprintf(" — advance %d BDT", payment.AdvanceBDT)
+			advEn = fmt.Sprintf(" — an advance of %d BDT is required", payment.AdvanceBDT)
+			advHiDev = fmt.Sprintf(" — %d BDT अग्रिम देना होगा", payment.AdvanceBDT)
+			advHiRoman = fmt.Sprintf(" — %d BDT advance dena hoga", payment.AdvanceBDT)
+			advParenBn = fmt.Sprintf(" (অগ্রিম %s টাকা দিতে হবে)", toBengaliDigits(payment.AdvanceBDT))
+			advParenBanglish = fmt.Sprintf(" (advance %d BDT dite hobe)", payment.AdvanceBDT)
+			advParenEn = fmt.Sprintf(" (an advance of %d BDT is required)", payment.AdvanceBDT)
+			advParenHiDev = fmt.Sprintf(" (%d BDT अग्रिम देना होगा)", payment.AdvanceBDT)
+			advParenHiRoman = fmt.Sprintf(" (%d BDT advance dena hoga)", payment.AdvanceBDT)
+		}
+		if payment.Modes == "cod" {
+			return pick(
+				fmt.Sprintf("আমরা ক্যাশ অন ডেলিভারি গ্রহণ করি%s।", advParenBn),
+				fmt.Sprintf("Amra Cash on Delivery accept kori%s.", advParenBanglish),
+				fmt.Sprintf("We accept Cash on Delivery%s.", advParenEn),
+				fmt.Sprintf("हम Cash on Delivery स्वीकार करते हैं%s।", advParenHiDev),
+				fmt.Sprintf("Hum Cash on Delivery accept karte hain%s.", advParenHiRoman),
+			)
+		}
+		if payment.Modes == "online" {
+			numBn := numsText
+			if numBn == "" {
+				numBn = "নম্বর শীঘ্রই জানানো হবে"
+			}
+			return pick(
+				fmt.Sprintf("অনলাইন পেমেন্ট: %s%s।", numBn, advBn),
+				fmt.Sprintf("Online payment: %s%s.", firstNonEmpty(numsText, "number shighroi janano hobe"), advBanglish),
+				fmt.Sprintf("Online payment: %s%s.", firstNonEmpty(numsText, "number will be shared soon"), advEn),
+				fmt.Sprintf("ऑनलाइन भुगतान: %s%s।", firstNonEmpty(numsText, "नंबर जल्द ही बताया जाएगा"), advHiDev),
+				fmt.Sprintf("Online payment: %s%s.", firstNonEmpty(numsText, "number jald hi bataya jayega"), advHiRoman),
+			)
+		}
+		// modes "both" (or an empty mode with numbers configured).
+		numBn := numsText
+		if numBn == "" {
+			numBn = "অনলাইন নম্বর শীঘ্রই জানানো হবে"
+		}
+		return pick(
+			fmt.Sprintf("ক্যাশ অন ডেলিভারি বা অনলাইন — যেটা সুবিধা: %s%s।", numBn, advBn),
+			fmt.Sprintf("Cash on Delivery ba online — jeta subidha: %s%s.", firstNonEmpty(numsText, "online number shighroi janano hobe"), advBanglish),
+			fmt.Sprintf("Cash on Delivery or online — whichever suits you: %s%s.", firstNonEmpty(numsText, "online number will be shared soon"), advEn),
+			fmt.Sprintf("Cash on Delivery या ऑनलाइन — जो सुविधाजनक हो: %s%s।", firstNonEmpty(numsText, "ऑनलाइन नंबर जल्द ही बताया जाएगा"), advHiDev),
+			fmt.Sprintf("Cash on Delivery ya online — jo suvidhajanak ho: %s%s.", firstNonEmpty(numsText, "online number jald hi bataya jayega"), advHiRoman),
+		)
+	}
+	advanceInfo := func() string {
+		if !PaymentConfigured(payment) {
+			return paymentInfo()
+		}
+		if payment.AdvanceBDT > 0 {
+			var nums []string
+			if payment.Bkash != "" {
+				nums = append(nums, payment.Bkash)
+			}
+			if payment.Nagad != "" {
+				nums = append(nums, payment.Nagad)
+			}
+			if payment.Rocket != "" {
+				nums = append(nums, payment.Rocket)
+			}
+			if len(nums) > 0 {
+				return pick(
+					fmt.Sprintf("অগ্রিম %s টাকা দিতে হবে — %s-এ পাঠান (TrxID-টি এখানে পাঠিয়ে দিন)।", toBengaliDigits(payment.AdvanceBDT), nums[0]),
+					fmt.Sprintf("Advance %d BDT dite hobe — %s-e pathan (TrxID-ta ekhane pathiye din).", payment.AdvanceBDT, nums[0]),
+					fmt.Sprintf("An advance of %d BDT is required — please send it to %s (share the TrxID here).", payment.AdvanceBDT, nums[0]),
+					fmt.Sprintf("%d BDT अग्रिम देना होगा — कृपया %s पर भेजें (TrxID यहाँ भेजें)।", payment.AdvanceBDT, nums[0]),
+					fmt.Sprintf("%d BDT advance dena hoga — kripya %s par bhejein (TrxID yahan bhejein).", payment.AdvanceBDT, nums[0]),
+				)
+			}
+			return pick(
+				fmt.Sprintf("অগ্রিম %s টাকা দিতে হবে — পেমেন্টের নম্বর দোকান থেকে জানানো হবে।", toBengaliDigits(payment.AdvanceBDT)),
+				fmt.Sprintf("Advance %d BDT dite hobe — payment-er number dokan theke janano hobe.", payment.AdvanceBDT),
+				fmt.Sprintf("An advance of %d BDT is required — the shop will share the payment number.", payment.AdvanceBDT),
+				fmt.Sprintf("%d BDT अग्रिम देना होगा — भुगतान नंबर दुकान बताएगी।", payment.AdvanceBDT),
+				fmt.Sprintf("%d BDT advance dena hoga — payment number dukaan batayegi.", payment.AdvanceBDT),
+			)
+		}
+		cod := payment.Modes == "cod" || payment.Modes == "both"
+		if cod {
+			return pick(
+				"এই দোকানে অগ্রিম লাগে না — পুরো টাকা ক্যাশ অন ডেলিভারি দিতে হবে।",
+				"Ei dokane advance lage na — puro taka Cash on Delivery dite hobe.",
+				"This shop requires no advance — the full amount is due in cash on delivery.",
+				"इस दुकान में अग्रिम नहीं लगता — पूरी राशि Cash on Delivery देनी होगी।",
+				"Is dukaan mein advance nahi lagta — poori raashi Cash on Delivery deni hogi.",
+			)
+		}
+		return pick(
+			"এই দোকানে অগ্রিম লাগে না — পুরো টাকা অনলাইনে দিতে হবে।",
+			"Ei dokane advance lage na — puro taka online-e dite hobe.",
+			"This shop requires no advance — the full amount is due online.",
+			"इस दुकान में अग्रिम नहीं लगता — पूरी राशि ऑनलाइन देनी होगी।",
+			"Is dukaan mein advance nahi lagta — poori raashi online deni hogi.",
+		)
+	}
+	codSentence := func() string {
+		if !PaymentConfigured(payment) {
+			return pick(
+				"পেমেন্টের মাধ্যম সম্পর্কে দোকান থেকে জানানো হবে।",
+				"Payment-er maddhom somporke dokan theke janano hobe.",
+				"The shop will share its payment methods.",
+				"भुगतान के तरीकों के बारे में दुकान बताएगी।",
+				"Bhugtan ke tareekon ke baare mein dukaan batayegi.",
+			)
+		}
+		if payment.Modes == "cod" || payment.Modes == "both" {
+			return pick(
+				"ক্যাশ অন ডেলিভারি সুবিধা রয়েছে।",
+				"Cash on delivery available ache.",
+				"Cash on Delivery is available.",
+				"Cash on Delivery उपलब्ध है।",
+				"Cash on Delivery available hai.",
+			)
+		}
+		return pick(
+			"ক্যাশ অন ডেলিভারি সুবিধা নেই — পেমেন্ট অনলাইনে করতে হবে।",
+			"Cash on delivery available nei — payment online-e korte hobe.",
+			"Cash on Delivery is not available — payment must be made online.",
+			"Cash on Delivery उपलब्ध नहीं है — भुगतान ऑनलाइन करना होगा।",
+			"Cash on Delivery available nahi hai — bhugtan online karna hoga.",
+		)
+	}
+
 	// Helper for Unicode-aware word boundary matching
 	matchWord := func(s, word string) bool {
 		if word == "" {
@@ -360,6 +667,22 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 		if matchWord(matchText, normName) {
 			return 10
 		}
+		// Owner-entered alias as a full phrase ("কিটক্যাট" for Kitkat) —
+		// token-prefix so a suffixed form ("কিটক্যাটের দাম") still matches.
+		for _, a := range p.Aliases {
+			alias := strings.ToLower(a)
+			if alias == "" {
+				continue
+			}
+			if matchWord(rawText, alias) {
+				return 10
+			}
+			for _, tok := range regexp.MustCompile(`[^\p{L}\p{M}]+`).Split(strings.ToLower(rawText), -1) {
+				if tok != "" && strings.HasPrefix(tok, alias) {
+					return 10
+				}
+			}
+		}
 		score := 0
 		for _, w := range productWords(p) {
 			if _, generic := genericProductWords[w]; generic {
@@ -376,20 +699,42 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 				}
 				continue
 			}
+			wordScored := false
 			// Prefix/substring match for short keywords ("earbud" ~ "earbuds").
 			if len(w) >= 4 {
 				tokens := regexp.MustCompile(`[^a-z0-9]+`).Split(matchText, -1)
 				for _, tok := range tokens {
 					if len(tok) >= 4 && (strings.HasPrefix(tok, w) || strings.HasPrefix(w, tok)) {
 						score += 2
+						wordScored = true
 						break
 					}
 				}
 			}
-			if w == "charger" && matchWord(rawText, "চার্জার") {
+			// Consonant-skeleton fallback: a Latin brand name written in
+			// Bengali script ("কিটক্যাট" ~ "kitkat", "আইফোন" ~ "iphone").
+			// The token skeleton may carry a suffix ("কিটক্যাটের" →
+			// "ktktr"), so a prefix match on the shorter side counts —
+			// both sides ≥ 3 letters.
+			if !wordScored {
+				if matched, _ := regexp.MatchString(`^[a-z]+$`, w); matched {
+					sk := latinSkeleton(w)
+					if len(sk) >= 3 {
+						for _, tok := range regexp.MustCompile(`[^\p{L}\p{M}]+`).Split(rawText, -1) {
+							tokSk := bengaliSkeleton(tok)
+							if len(tokSk) >= 3 && (tokSk == sk || strings.HasPrefix(tokSk, sk) || strings.HasPrefix(sk, tokSk)) {
+								score += 2
+								wordScored = true
+								break
+							}
+						}
+					}
+				}
+			}
+			if !wordScored && w == "charger" && matchWord(rawText, "চার্জার") {
 				score += 2
 			}
-			if w == "চার্জার" && matchWord(rawText, "charger") {
+			if !wordScored && w == "চার্জার" && matchWord(rawText, "charger") {
 				score += 2
 			}
 		}
@@ -567,20 +912,20 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 				fmt.Sprintf("Advance payment ke baare mein: %s", entry.Content),
 			)
 		}
-		// No advance rule in knowledge: answer with the payment info
-		// (knowledge if present, else the payment fallback) — never invent
-		// an advance rule and never start the order flow.
-		payContent := "We accept bKash, Nagad, Rocket, and Cash on Delivery."
+		// No advance rule in knowledge: answer from the shop's payment
+		// config (real advance + number), or say honestly that payment
+		// info is not set — never invent an advance rule, a generic
+		// method list, or start the order flow.
 		if payEntry := findKnowledge([]string{"bkash", "nagad", "payment", "পেমেন্ট", "cash on delivery", "cod", "rocket", "বিকাশ", "নগদ", "भुगतान"}); payEntry != nil {
-			payContent = payEntry.Content
+			return pick(
+				fmt.Sprintf("অগ্রিম পেমেন্ট সম্পর্কে: %s", payEntry.Content),
+				fmt.Sprintf("Advance payment somporke: %s", payEntry.Content),
+				fmt.Sprintf("About advance payment: %s", payEntry.Content),
+				fmt.Sprintf("अग्रिम भुगतान के बारे में: %s", payEntry.Content),
+				fmt.Sprintf("Advance payment ke baare mein: %s", payEntry.Content),
+			)
 		}
-		return pick(
-			fmt.Sprintf("অগ্রিম পেমেন্ট সম্পর্কে: %s", payContent),
-			fmt.Sprintf("Advance payment somporke: %s", payContent),
-			fmt.Sprintf("About advance payment: %s", payContent),
-			fmt.Sprintf("अग्रिम भुगतान के बारे में: %s", payContent),
-			fmt.Sprintf("Advance payment ke baare mein: %s", payContent),
-		)
+		return advanceInfo()
 	}
 
 	// 1. Payment methods — before delivery, so "Can I pay cash on
@@ -596,13 +941,9 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 				fmt.Sprintf("Hamare payment options: %s", entry.Content),
 			)
 		}
-		return pick(
-			"আমরা bKash, Nagad, Rocket এবং ক্যাশ অন ডেলিভারি গ্রহণ করি।",
-			"Amra bKash, Nagad, Rocket ebong Cash on Delivery accept kori.",
-			"We accept bKash, Nagad, Rocket, and Cash on Delivery.",
-			"हम bKash, Nagad, Rocket और Cash on Delivery स्वीकार करते हैं।",
-			"Hum bKash, Nagad, Rocket aur Cash on Delivery accept karte hain.",
-		)
+		// No knowledge entry: the shop's real payment config, or an honest
+		// "not set yet" — never the invented generic method list.
+		return paymentInfo()
 	}
 
 	// 2. Shop opening hours (W9/L2/L3/L5) — knowledge first, fallback
@@ -649,13 +990,16 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 			}
 		}
 
-		// Fallback to generic template only when no knowledge entry matches
+		// Fallback to generic template only when no knowledge entry matches.
+		// The COD sentence comes from the shop's real payment config —
+		// an unconfigured shop gets no COD claim.
+		cod := codSentence()
 		return pick(
-			"আমাদের ডেলিভারি চার্জ ঢাকার ভেতরে ৬০ টাকা (২৪-৪৮ ঘণ্টা) এবং ঢাকার বাইরে ১২০ টাকা (২-৩ দিন)। ক্যাশ অন ডেলিভারি সুবিধা রয়েছে।",
-			"Amader delivery charge Dhaka city-r bhitore 60 taka (24-48 hours) ebong Dhaka-r baire 120 taka (2-3 days). Cash on delivery available ache.",
-			"Our delivery charge is 60 BDT inside Dhaka (24-48h) and 120 BDT outside Dhaka (2-3 days). Cash on Delivery is available.",
-			"हमारा डिलीवरी चार्ज ढाका के अंदर 60 BDT (24-48 घंटे) और ढाका के बाहर 120 BDT (2-3 दिन) है। Cash on Delivery उपलब्ध है।",
-			"Hamara delivery charge Dhaka ke andar 60 BDT (24-48 hours) aur Dhaka ke baahar 120 BDT (2-3 days) hai. Cash on Delivery available hai.",
+			fmt.Sprintf("আমাদের ডেলিভারি চার্জ ঢাকার ভেতরে ৬০ টাকা (২৪-৪৮ ঘণ্টা) এবং ঢাকার বাইরে ১২০ টাকা (২-৩ দিন)। %s", cod),
+			fmt.Sprintf("Amader delivery charge Dhaka city-r bhitore 60 taka (24-48 hours) ebong Dhaka-r baire 120 taka (2-3 days). %s", cod),
+			fmt.Sprintf("Our delivery charge is 60 BDT inside Dhaka (24-48h) and 120 BDT outside Dhaka (2-3 days). %s", cod),
+			fmt.Sprintf("हमारा डिलीवरी चार्ज ढाका के अंदर 60 BDT (24-48 घंटे) और ढाका के बाहर 120 BDT (2-3 दिन) है। %s", cod),
+			fmt.Sprintf("Hamara delivery charge Dhaka ke andar 60 BDT (24-48 hours) aur Dhaka ke baahar 120 BDT (2-3 days) hai. %s", cod),
 		)
 	}
 
@@ -878,7 +1222,7 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 	// 9. Order intent (with word boundaries and conversational memory
 	// across turns). Uses details already given (W12) and refuses
 	// out-of-stock items.
-	reOrder := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(order|buy|purchase|kinte|nibo|nebo|lagbe|nite|chai|chaichi|haa|ha|yes|confirm|অর্ডার|কিনব|কিনতে|নিব|চাই|নিতে|চাচ্ছি|হাঁ|হ্যাঁ)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	reOrder := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(order|buy|purchase|kinte|nibo|nebo|lagbe|nite|chai|chaichi|haa|ha|yes|confirm|অর্ডার|কিনব|কিনতে|নিব|চাই|নিতে|চাচ্ছি|হাঁ|হ্যাঁ|হে|হুম|আচ্ছা|দাও|নিলাম)(?:[^\p{L}\p{M}\p{N}_]|$)`)
 	if reOrder.MatchString(text) {
 		matched := matchProduct(text)
 		if matched == nil {

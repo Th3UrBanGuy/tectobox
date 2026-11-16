@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { demoResponder, queryGoAIEngine, GO_AI_TIMEOUT_MS, resetGoAiCircuitBreaker } from './router.js';
+import { demoResponder, queryGoAIEngine, GO_AI_TIMEOUT_MS, resetGoAiCircuitBreaker, findProduct, extractCustomerDetails } from './router.js';
 
 describe('demoResponder (API)', () => {
   it('answers delivery from knowledge when delivery knowledge is seeded', () => {
@@ -276,5 +276,70 @@ describe('queryGoAIEngine (F1 bridge)', () => {
     vi.stubGlobal('fetch', fetchMock);
     expect(await queryGoAIEngine(params)).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe('2026-11-16 order/payment audit fixes (TS responder)', () => {
+  const kitkat = { name: 'Kitkat', price_bdt: 900, stock: 75 };
+  const kitkatAliased = { ...kitkat, aliases: ['কিটক্যাট'] };
+
+  it('Fix 3: findProduct matches "কিটক্যাট" via the owner alias', () => {
+    expect(findProduct('কিটক্যাট কিনতে চাই', [kitkatAliased])?.name).toBe('Kitkat');
+  });
+
+  it('Fix 3: findProduct matches "কিটক্যাটের দাম কত?" via the consonant skeleton (no alias)', () => {
+    expect(findProduct('কিটক্যাটের দাম কত?', [kitkat])?.name).toBe('Kitkat');
+  });
+
+  it('Fix 3: the skeleton does not over-match an unrelated product', () => {
+    const saree = { name: 'লাল জামদানি শাড়ি', price_bdt: 8000, stock: 10 };
+    expect(findProduct('কিটক্যাট কিনতে চাই', [saree])).toBeUndefined();
+  });
+
+  it('Fix 2: extractCustomerDetails reads "নাম করিম" + keyword-less address after the phone', () => {
+    const d = extractCustomerDetails('নাম করিম, ০১৬৪২৭৭৫২৭২, ঊলিয়াপুর, চট্টগ্রাম');
+    expect(d.name).toBe('করিম');
+    expect(d.phone).toBe('01642775272');
+    expect(d.address).toBe('ঊলিয়াপুর, চট্টগ্রাম');
+  });
+
+  it('Fix 2: "আমার নাম কি?" captures no name', () => {
+    const d = extractCustomerDetails('আমার নাম কি?');
+    expect(d.name).toBeUndefined();
+  });
+
+  it('Fix 2: a bare quantity after the phone is not an address', () => {
+    const d = extractCustomerDetails('আমার নাম করিম, ফোন ০১৬৪২৭৭৫২৭২, ২টি');
+    expect(d.address).toBeUndefined();
+  });
+
+  it('Fix 5: payment question with NO config answers honestly, never invents a method', () => {
+    const reply = demoResponder('client1', 'পেমেন্ট কিভাবে করব?', [], []);
+    expect(reply).toContain('ঠিক করা হয়নি');
+    expect(reply).not.toContain('bKash');
+    expect(reply).not.toContain('Nagad');
+  });
+
+  it('Fix 5: payment question WITH config quotes the real methods + number + advance', () => {
+    const cfg = { modes: 'both', advanceBdt: 100, bkash: '01700000000' } as any;
+    const reply = demoResponder('client1', 'পেমেন্ট কিভাবে করব?', [], [], [], cfg);
+    expect(reply).toContain('bKash');
+    expect(reply).toContain('01700000000');
+    expect(reply).toContain('১০০');
+    expect(reply).not.toContain('Nagad');
+    expect(reply).not.toContain('Rocket');
+  });
+
+  it('Fix 5: advance question WITH config quotes the advance + number', () => {
+    const cfg = { modes: 'both', advanceBdt: 100, bkash: '01700000000' } as any;
+    const reply = demoResponder('client1', 'অগ্রিম কত দিতে হবে?', [], [], [], cfg);
+    expect(reply).toContain('১০০');
+    expect(reply).toContain('01700000000');
+  });
+
+  it('Fix 1: "হে" reaches the order branch (asks for details, not a greeting)', () => {
+    const reply = demoResponder('client1', 'হে', [kitkat], []);
+    expect(reply).not.toMatch(/নমস্কার|আসসালামু|Hello/);
+    expect(reply).toMatch(/নাম|ফোন|ঠিকানা|Kitkat/);
   });
 });
