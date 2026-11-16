@@ -125,6 +125,15 @@ export class OrderService {
     // this one message (intent + product + all details in `text`
     // itself — details supplied in an earlier turn do NOT count
     // here, or the bot's "reply confirm to place it" would be a lie).
+    // OR a repeat order: "আরেকটা / Arekta <product> chai" IS the
+    // confirmation for the second order — the customer already
+    // confirmed these exact details on order #1, and the repeat word
+    // is an explicit request for another one (live 2026-11-16: the
+    // bare "confirm" that followed carried no repeat word, so it
+    // deduped to order #1 and a second order could never be placed).
+    // The repeat path still needs the product named in THIS message
+    // and all details on file; a bare "arekta dao" asks for
+    // clarification instead of guessing the product.
     const explicitConfirm = CONFIRM_RE.test(text);
     const completeInOneMessage =
       ORDER_INTENT_RE.test(text) &&
@@ -132,7 +141,13 @@ export class OrderService {
       !!currentDetails.phone &&
       !!currentDetails.address &&
       !!findProduct(text, products);
-    if (!explicitConfirm && !completeInOneMessage) return { status: 'not_applicable' };
+    const repeatOrder =
+      REPEAT_ORDER_RE.test(text) &&
+      !!findProduct(text, products) &&
+      !!details.name &&
+      !!details.phone &&
+      !!details.address;
+    if (!explicitConfirm && !completeInOneMessage && !repeatOrder) return { status: 'not_applicable' };
 
     // 3. Product: this message first, then earlier user messages
     // (newest first). No fallback — an unidentified product is never
@@ -467,7 +482,7 @@ const ORDER_INTENT_RE =
  * return the existing order, not a new row.
  */
 const REPEAT_ORDER_RE =
-  /(?:^|[^\p{L}\p{M}\p{N}_])(আরেকটা|আরেকটি|আরেকবার|আরো|আরও|আবার|another|one more|নতুন অর্ডার|new order)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
+  /(?:^|[^\p{L}\p{M}\p{N}_])(আরেকটা|আরেকটি|আরেকবার|আরো|আরও|আবার|arekta|arekti|arekbar|aro|abar|another|one more|নতুন অর্ডার|new order)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
 
 /**
  * Text after the address keyword in one message (to end of line,

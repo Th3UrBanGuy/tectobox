@@ -217,6 +217,22 @@ describe('OrderService.tryCreateOrder — W3/W4', () => {
     expect(pool.stock.get(1)).toBe(23); // decremented twice, once per order
   });
 
+  it('Scenario audit #4b: Banglish "Arekta" also creates a SECOND order', async () => {
+    // Live 2026-11-16: "Arekta Kitkat chai" got "already confirmed" —
+    // the repeat-word list had Bengali script + English only, no
+    // Banglish Latin forms, so a Banglish customer could never place
+    // a second order in the same conversation.
+    const first = await service.tryCreateOrder(baseCtx());
+    expect(first.status).toBe('created');
+    const second = await service.tryCreateOrder(
+      baseCtx({ text: 'Arekta earbuds kinte chai' })
+    );
+    expect(second.status).toBe('created');
+    expect(store.size).toBe(2);
+    const keys = insertCalls().map((c: any[]) => c[1][10]);
+    expect(keys[1]).toBe('webchat:101:1:qty:1:seq:2');
+  });
+
   it('Scenario audit #4: a third "আরেকটা" creates a third order with seq:3', async () => {
     await service.tryCreateOrder(baseCtx());
     await service.tryCreateOrder(baseCtx({ text: 'আরেকটা earbuds কিনতে চাই, হে' }));
