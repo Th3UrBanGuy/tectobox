@@ -537,3 +537,43 @@ func TestAuditFixes_PaymentRepliesUseConfig(t *testing.T) {
 		t.Fatalf("expected the order branch to ask for details, got: %s", reply)
 	}
 }
+
+// 2026-11-16 probe: with advance=100 configured, the LLM twice told the
+// customer "no advance needed". Pure payment questions are now answered
+// deterministically before any LLM tier, so the model can never invent
+// or deny an advance.
+func TestAuditFixes_PaymentQuestionsAnsweredDeterministically(t *testing.T) {
+	engine := NewEngine()
+	ctx := context.Background()
+	pctx := PromptContext{
+		ClientID:   "69",
+		ClientName: "Xyz",
+		Payment:    PaymentConfig{Modes: "both", AdvanceBDT: 100, Bkash: "01700000000"},
+	}
+
+	// The exact yes/no phrasing that failed live, twice.
+	reply, _, model, _ := engine.GenerateReply(ctx, pctx, "অগ্রিম দিতে হবে কি? কত টাকা?", nil, "")
+	if model != "deterministic-payment" {
+		t.Fatalf("expected deterministic-payment, got model: %s reply: %s", model, reply)
+	}
+	if !strings.Contains(reply, "১০০") || !strings.Contains(reply, "01700000000") {
+		t.Fatalf("expected advance 100 + number, got: %s", reply)
+	}
+
+	// Unconfigured shop: the honest line, still deterministic.
+	pctxNoCfg := PromptContext{ClientID: "69", ClientName: "Xyz"}
+	reply, _, model, _ = engine.GenerateReply(ctx, pctxNoCfg, "পেমেন্ট কিভাবে করব?", nil, "")
+	if model != "deterministic-payment" {
+		t.Fatalf("expected deterministic-payment, got model: %s reply: %s", model, reply)
+	}
+	if strings.Contains(reply, "bKash") || strings.Contains(reply, "Nagad") {
+		t.Fatalf("unconfigured shop must not claim a method, got: %s", reply)
+	}
+
+	// An order intent that mentions payment stays with the normal flow
+	// (in this no-LLM test env that is the Tier-4 catalog responder).
+	reply, _, model, _ = engine.GenerateReply(ctx, pctx, "Kitkat কিনতে চাই, বিকাশে পাঠাবো", nil, "")
+	if model != "deterministic-catalog" {
+		t.Fatalf("order intent must not take the payment shortcut, got model: %s reply: %s", model, reply)
+	}
+}

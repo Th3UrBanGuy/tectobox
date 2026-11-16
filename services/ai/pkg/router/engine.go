@@ -83,6 +83,20 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 		return cached, lang, "cache", true
 	}
 
+	// Payment facts are deterministic (numbers from the shop's config),
+	// never LLM territory: a pure advance/payment question is answered
+	// by the template responder before any LLM tier, so the model can
+	// never invent or deny an advance. Live proof (2026-11-16 probe):
+	// with advance=100 configured, Gemini twice told the customer "no
+	// advance needed" — it weighed "COD is available" over the prompt's
+	// advance line. An order intent is excluded: "Kitkat কিনতে চাই,
+	// বিকাশে পাঠাবো" is an order first, a payment question second.
+	if isPaymentQuestion(cleanMsg) {
+		demoReply := DemoResponder(lang, cleanMsg, pctx.Products, pctx.Knowledge, history, pctx.Payment)
+		e.cache.Set(cKey, demoReply, demoCacheTTL)
+		return demoReply, lang, "deterministic-payment", false
+	}
+
 	sysPrompt := BuildSystemPrompt(pctx, lang)
 
 	// Format multi-turn transcript with conversational memory

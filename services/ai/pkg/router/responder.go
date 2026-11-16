@@ -465,6 +465,26 @@ func ExtractCustomerDetails(rawText string) CustomerDetails {
 	return out
 }
 
+// isPaymentQuestion reports whether the message asks about payment
+// methods or an advance — the questions whose answers are pure config
+// facts (numbers), answered deterministically before any LLM tier
+// (see the early return in GenerateReply). An order intent stays with
+// the normal flow: "Kitkat কিনতে চাই, বিকাশে পাঠাবো" is an order first,
+// a payment question second. The regexes mirror DemoResponder's
+// advance (branch 0), payment (branch 1) and order (branch 9) tests.
+func isPaymentQuestion(text string) bool {
+	reOrder := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(order|buy|purchase|kinte|nibo|nebo|lagbe|nite|chai|chaichi|haa|ha|yes|confirm|অর্ডার|কিনব|কিনতে|নিব|চাই|নিতে|চাচ্ছি|হাঁ|হ্যাঁ|হে|হুম|আচ্ছা|দাও|নিলাম)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	if reOrder.MatchString(text) {
+		return false
+	}
+	reAdvance := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(advance|অগ্রিম|agrim|एडवांस|अग्रिम)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	if reAdvance.MatchString(text) {
+		return true
+	}
+	rePayment := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(payment|pay|paid|bkash|nagad|rocket|cash on delivery|cod|upi|পেমেন্ট|পে|ক্যাশ অন ডেলিভারি|বিকাশ|নগদ|রকেট|भुगतान)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	return rePayment.MatchString(text)
+}
+
 func DemoResponder(lang detector.Language, text string, products []ProductItem, knowledge []KnowledgeItem, history []ChatMessage, payment PaymentConfig) string {
 	// Responder-side Roman-Hindi guard (see isRomanHindi): the detector
 	// scores Devanagari but not Roman Hindi, so a Hinglish question
