@@ -97,6 +97,15 @@ function toAsciiDigits(s: string): string {
   return s.replace(/[০-৯]/g, (d) => BENGALI_DIGITS[d] || d);
 }
 
+// Bengali quantity words become ASCII "ti"/"ta" so the quantity regexes
+// in extractCustomerDetails can read them: "৩টি" → "3 ti". Applied ONLY
+// to the quantity-matching input — never to the address/name text, where
+// the original Bengali must survive (2026-11-16 scenario audit #3:
+// "লাল জামদানি শাড়ি ৩টি কিনতে চাই" ordered 1 instead of 3).
+function normalizeQtyWords(s: string): string {
+  return s.replace(/টি/g, ' ti').replace(/টা/g, ' ta');
+}
+
 function stripTestPrefix(name: string): string {
   return name.replace(/^test[- ]/i, '');
 }
@@ -260,6 +269,25 @@ function scoreProduct(p: ProductItem, matchText: string, rawText: string): numbe
         }
       }
     }
+    // Reverse-skeleton fallback: a Bengali-script product word ("শাড়ি")
+    // written in Latin ("Shari") — skeletonize the Bengali word and
+    // compare against the Latin token's skeleton. Bengali words
+    // skeletonize shorter ("শাড়ি" → "sr"), so both sides ≥ 2 letters
+    // here, not 3 (2026-11-16 scenario audit #5).
+    if (!wordScored && !/^[a-z]+$/.test(w)) {
+      const wSk = bengaliSkeleton(w);
+      if (wSk.length >= 2) {
+        for (const tok of matchText.split(/[^a-z0-9]+/).filter(Boolean)) {
+          if (!/^[a-z]+$/.test(tok)) continue;
+          const tokSk = latinSkeleton(tok);
+          if (tokSk.length >= 2 && (tokSk === wSk || tokSk.startsWith(wSk) || wSk.startsWith(tokSk))) {
+            score += 2;
+            wordScored = true;
+            break;
+          }
+        }
+      }
+    }
     if (!wordScored && w === 'charger' && matchWord(rawText, 'চার্জার')) score += 2;
     if (!wordScored && w === 'চার্জার' && matchWord(rawText, 'charger')) score += 2;
   }
@@ -357,7 +385,12 @@ export function buildOutOfStockReply(text: string, p: ProductItem, products: Pro
  */
 export function extractCustomerDetails(rawText: string): ExtractedDetails {
   const out: ExtractedDetails = {};
-  const text = String(rawText || '');
+  // Strip markdown bold markers first: the assistant's own echoes are
+  // markdown ("**ঠিকানা:** ** Banani, Dhaka") and an extractor that
+  // reads them verbatim stores "** Banani, Dhaka" as the address
+  // (2026-11-16 scenario audit #9). `**` is never part of a real
+  // name, phone or address. Keep in sync with Go responder.go.
+  const text = String(rawText || '').replace(/\*\*/g, '');
   const ascii = toAsciiDigits(text);
 
   const phoneMatch = ascii.match(/(?:\+?880[\s\-]?1[3-9]\d{2}[\s\-]?\d{6}|01[3-9]\d{8}|1[3-9]\d{8})/);
@@ -373,6 +406,12 @@ export function extractCustomerDetails(rawText: string): ExtractedDetails {
   const namePatterns = [
     /my name is\s+([A-Za-z][A-Za-z.'\- ]{1,40})/i,
     /amar naam(?:e)?\s+([A-Za-z][A-Za-z.'\- ]{1,40})/i,
+    // "amar nam" (single a) is the most common Bangladeshi spelling —
+    // the 2026-11-16 scenario audit (S1 Banglish) got 0/10 orders
+    // because only "amar naam" (double a) matched. "amr nam" is the
+    // common shorthand. Keep in sync with Go responder.go.
+    /amar nam\s+([A-Za-z][A-Za-z.'\- ]{1,40})/i,
+    /amr nam\s+([A-Za-z][A-Za-z.'\- ]{1,40})/i,
     /আমার নাম\s+([^\s,।]+(?:\s+[^\s,।]+){0,2})/,
     /naam\s+(?:hai|hain|mera|meri)?\s*([A-Za-z][A-Za-z.'\- ]{1,40})/i,
     /\bi am\s+([A-Za-z][A-Za-z.'\- ]{1,40})/i,
@@ -422,7 +461,7 @@ export function extractCustomerDetails(rawText: string): ExtractedDetails {
     }
   }
 
-  const withoutPhone = phoneMatch ? ascii.replace(phoneMatch[0], ' ') : ascii;
+  const withoutPhone = normalizeQtyWords(phoneMatch ? ascii.replace(phoneMatch[0], ' ') : ascii);
   const qtyMatch =
     withoutPhone.match(/(?:quantity|qty)\s*:?\s*(\d{1,2})\b/i) ||
     withoutPhone.match(/\b(\d{1,2})\s*(?:ta|ti|pcs?|pieces?)\b/i) ||
@@ -865,6 +904,10 @@ export function demoResponder(
     let matched = matchProduct(text);
     if (!matched) {
       for (const h of [...history].reverse()) {
+        // Customer turns only: the bot's own echoes mention products
+        // and details in markdown ("**ঠিকানা:** ** Banani, Dhaka")
+        // and must never supply them (2026-11-16 scenario audit #9).
+        if (h.role !== 'user') continue;
         matched = matchProduct(h.content || '');
         if (matched) break;
       }
@@ -876,6 +919,7 @@ export function demoResponder(
 
     const details = extractCustomerDetails(text);
     for (const h of [...history].reverse()) {
+      if (h.role !== 'user') continue;
       if (details.name && details.phone && details.address) break;
       const older = extractCustomerDetails(h.content || '');
       if (!details.name && older.name) details.name = older.name;
@@ -940,6 +984,27 @@ export function demoResponder(
             `${lines} = कुल ${total} BDT।`,
             `${lines} = kul ${total} BDT.`
           );
+        }
+      }
+      // Authenticity / quality question about a matched product
+      // ("Shari ta ki ashol Jamdani?"): quote the shop's own
+      // knowledge entry instead of answering with the price — the
+      // price does not answer whether it is real (2026-11-16
+      // scenario audit #7). No matching entry = the price reply.
+      // Keep in sync with Go responder.go branch 10.
+      if (!rePrice.test(text)) {
+        const reAuthenticity = /(?:^|[^\p{L}\p{M}\p{N}_])(ashol|আসল|authentic|original|genuine|jamdani|জামদানি|handloom|quality|কোয়ালিটি)(?:[^\p{L}\p{N}_]|$)/iu;
+        if (reAuthenticity.test(text)) {
+          const entry = findKnowledge(['ashol', 'আসল', 'authentic', 'original', 'genuine', 'jamdani', 'জামদানি', 'handloom', 'quality', 'কোয়ালিটি']);
+          if (entry) {
+            return pick(
+              `${matched.name} সম্পর্কে আমাদের তথ্য: ${entry.content}`,
+              `${matched.name} somporke amader tottho: ${entry.content}`,
+              `About ${matched.name}: ${entry.content}`,
+              `${matched.name} के बारे में हमारी जानकारी: ${entry.content}`,
+              `${matched.name} ke baare mein hamari jaankari: ${entry.content}`
+            );
+          }
         }
       }
       return priceReply(matched);

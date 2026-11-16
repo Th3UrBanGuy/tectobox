@@ -93,6 +93,14 @@ describe('OrderService.tryCreateOrder — W3/W4', () => {
         s.set(key, row);
         return { rows: [row] };
       }
+      if (q.includes('count(*)') && q.includes('from orders')) {
+        // Scenario audit #4: the repeat-order sequence count. pg
+        // returns COUNT(*) as a string — mirror that.
+        const n = [...s.values()].filter(
+          (r: any) => r.client_id === params[0] && r.conversation_id === params[1]
+        ).length;
+        return { rows: [{ count: String(n) }] };
+      }
       if (q.includes('from orders')) {
         const row = s.get(params[1]);
         return { rows: row ? [row] : [] };
@@ -189,6 +197,47 @@ describe('OrderService.tryCreateOrder — W3/W4', () => {
       expect(second.replyText).toMatch(/1560/);
       expect(second.modelUsed).toBe('order:already-exists');
     }
+  });
+
+  it('Scenario audit #4: "আরেকটা" creates a SECOND order, not already_exists', async () => {
+    const first = await service.tryCreateOrder(baseCtx());
+    expect(first.status).toBe('created');
+    const second = await service.tryCreateOrder(
+      baseCtx({ text: 'আরেকটা earbuds কিনতে চাই, হে' })
+    );
+    expect(second.status).toBe('created');
+    expect(store.size).toBe(2);
+    if (second.status === 'created') {
+      expect(second.order.id).toBe(2);
+      // Reply is Bengali (text detected as bn): "অর্ডার নম্বর #2".
+      expect(second.replyText).toMatch(/অর্ডার নম্বর #2/);
+    }
+    const keys = insertCalls().map((c: any[]) => c[1][10]);
+    expect(keys[1]).toBe('webchat:101:1:qty:1:seq:2');
+    expect(pool.stock.get(1)).toBe(23); // decremented twice, once per order
+  });
+
+  it('Scenario audit #4: a third "আরেকটা" creates a third order with seq:3', async () => {
+    await service.tryCreateOrder(baseCtx());
+    await service.tryCreateOrder(baseCtx({ text: 'আরেকটা earbuds কিনতে চাই, হে' }));
+    const third = await service.tryCreateOrder(
+      baseCtx({ text: 'আরেকটা earbuds কিনতে চাই, হে' })
+    );
+    expect(third.status).toBe('created');
+    expect(store.size).toBe(3);
+    const keys = insertCalls().map((c: any[]) => c[1][10]);
+    expect(keys[2]).toBe('webchat:101:1:qty:1:seq:3');
+  });
+
+  it('Scenario audit #4: "আরেকটা" on the FIRST order keeps the base key (later bare confirm dedupes)', async () => {
+    const first = await service.tryCreateOrder(
+      baseCtx({ text: 'আরেকটা earbuds কিনতে চাই, হে' })
+    );
+    expect(first.status).toBe('created');
+    expect(insertCalls()[0][1][10]).toBe('webchat:101:1:qty:1');
+    const second = await service.tryCreateOrder(baseCtx());
+    expect(second.status).toBe('already_exists');
+    expect(store.size).toBe(1);
   });
 
   it('decrements stock by the ordered quantity when an order is created', async () => {

@@ -79,6 +79,11 @@ export async function startAIWorker() {
           clientId,
           clientName: payload.clientName,
           businessType: payload.businessType,
+          // Scenario audit #1 (2026-11-16): scope the Go reply cache
+          // to this conversation; fall back to the peer id (`to`) when
+          // the request carries no conversation id — it is still one
+          // customer, never shared across customers.
+          conversationId: payload.conversationId || to,
           text,
           history: payload.history,
           products: payload.products,

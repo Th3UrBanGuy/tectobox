@@ -21,9 +21,48 @@ const (
 	// web2apiDetachedTimeout is the context given to the gemini-web2api
 	// proxy call. It is detached from the Tier-3 context on purpose:
 	// web2api drives the Gemini web UI, so first replies take ~5s and
-	// the 2s Tier-3 context would always time out.
-	web2apiDetachedTimeout = 20 * time.Second
+	// the 2s Tier-3 context would always time out. 10s (was 20s): a
+	// healthy first reply fits, and a saturated session's tail is
+	// halved — the breaker below takes over from there.
+	web2apiDetachedTimeout = 10 * time.Second
+
+	// web2apiBreakerThreshold / web2apiBreakerCooldown: under load the
+	// single shared web2api session serializes requests and the tail
+	// burns the full detached timeout (2026-11-16 scenario audit S7:
+	// p95 15.72s, max 23.21s, 429s in the ai log). After this many
+	// consecutive failures the leg is skipped for the cooldown, so
+	// traffic falls through to the deterministic Tier 4 reply in
+	// milliseconds instead of queueing behind a saturated session. A
+	// success resets the failure count.
+	web2apiBreakerThreshold = 3
+	web2apiBreakerCooldown  = 60 * time.Second
 )
+
+// web2apiBreakerOpen reports whether the web2api leg is currently
+// skipped because of consecutive failures.
+func (e *Engine) web2apiBreakerOpen() bool {
+	e.web2apiMu.Lock()
+	defer e.web2apiMu.Unlock()
+	return time.Now().Before(e.web2apiOpenUntil)
+}
+
+// web2apiNoteResult records one web2api leg outcome: a success resets
+// the failure count; a failure increments it and opens the breaker for
+// the cooldown once the threshold is reached.
+func (e *Engine) web2apiNoteResult(err error) {
+	e.web2apiMu.Lock()
+	defer e.web2apiMu.Unlock()
+	if err == nil {
+		e.web2apiFailures = 0
+		return
+	}
+	e.web2apiFailures++
+	if e.web2apiFailures >= web2apiBreakerThreshold {
+		e.web2apiOpenUntil = time.Now().Add(web2apiBreakerCooldown)
+		log.Printf("[ai] web2api breaker OPEN for %s after %d consecutive failures", web2apiBreakerCooldown, e.web2apiFailures)
+		e.web2apiFailures = 0
+	}
+}
 
 // web2APIAllowed — web2api is the PRIMARY backend for ALL traffic,
 // including workspace/widget traffic (user order 2026-11-15).
@@ -79,11 +118,25 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 				}
 				wCtx, wCancel := context.WithTimeout(context.WithoutCancel(ctx), t3Timeout)
 				defer wCancel()
-				// Seg-D instrumentation: this leg has a detached 20s timeout
+				// Seg-D instrumentation: this leg has a detached 10s timeout
 				// (web2api drives the Gemini web UI), so log its elapsed time
 				// whenever it is actually attempted.
 				t3Start := time.Now()
-				reply, err := e.callOpenAICompatible(wCtx, url, key, model, sysPrompt, userMsg, history)
+				var reply string
+				var err error
+				if e.web2apiBreakerOpen() {
+					// Saturated session: skip the leg outright so the
+					// request falls through to the next tier / Tier 4
+					// instead of queueing behind it. The skip itself is
+					// NOT fed back into the breaker — counting it would
+					// re-open the breaker on every request and the
+					// cooldown would never lapse under sustained load.
+					err = fmt.Errorf("web2api breaker open")
+					log.Printf("[ai] tier3 web2api skipped (breaker open)")
+				} else {
+					reply, err = e.callOpenAICompatible(wCtx, url, key, model, sysPrompt, userMsg, history)
+					e.web2apiNoteResult(err)
+				}
 				log.Printf("[ai] tier3 web2api elapsed_ms=%d err=%v", time.Since(t3Start).Milliseconds(), err)
 				if err == nil && reply != "" {
 					return reply, "gemini-web2api:" + model, nil

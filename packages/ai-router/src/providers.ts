@@ -156,6 +156,13 @@ export async function queryGoAIEngine(params: {
   clientId?: string | number;
   clientName?: string;
   businessType?: string;
+  /** Conversation scope for the Go reply cache (2026-11-16 scenario
+   * audit #1, CRITICAL): without it, two customers of the same
+   * workspace whose last history turn is the identical generic bot
+   * reply hash to one cache key and share a reply — including another
+   * customer's name, phone and address. Widget passes conv.id;
+   * channel workers pass their conversation id (or the peer id). */
+  conversationId?: string | number;
   text: string;
   history?: Array<{ role: string; content: string }>;
   products?: ProductItem[];
@@ -197,6 +204,12 @@ export async function queryGoAIEngine(params: {
         client_id: params.clientId,
         client_name: params.clientName,
         business_type: params.businessType,
+        // NOTE (scenario audit #1, 2026-11-16): the Go reply cache is
+        // scoped by conversation_id. Same snake_case rule as client_id
+        // above — Go decodes `conversation_id`, a camelCase
+        // `conversationId` would be silently dropped and the leak
+        // would return.
+        conversation_id: params.conversationId,
         // NOTE (F1 again): the Go bridge expects snake_case keys. The
         // `payment` object must be re-keyed — Go's encoding/json does
         // NOT map camelCase "advanceBdt" to "advance_bdt", so sending
@@ -216,6 +229,7 @@ export async function queryGoAIEngine(params: {
         clientId: undefined,
         clientName: undefined,
         businessType: undefined,
+        conversationId: undefined,
       }),
       // 25s: explicit timeout below the widget's 30s abort.
       signal: AbortSignal.timeout(GO_AI_TIMEOUT_MS),

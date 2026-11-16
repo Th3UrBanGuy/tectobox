@@ -107,11 +107,20 @@ func PaymentConfigured(cfg PaymentConfig) bool {
 // must be grounded in. ClientID is the tenant-isolation key — see cacheKey
 // in cache.go and the F1 guard in direct.go.
 type PromptContext struct {
-	ClientID     string          `json:"client_id,omitempty"`
-	ClientName   string          `json:"client_name,omitempty"`
-	BusinessType string          `json:"business_type,omitempty"`
-	Products     []ProductItem   `json:"products,omitempty"`
-	Knowledge    []KnowledgeItem `json:"knowledge,omitempty"`
+	ClientID     string `json:"client_id,omitempty"`
+	ClientName   string `json:"client_name,omitempty"`
+	BusinessType string `json:"business_type,omitempty"`
+	// ConversationID scopes the reply cache to one customer
+	// conversation (2026-11-16 scenario audit #1, CRITICAL): without
+	// it, two customers of the same workspace whose last history turn
+	// is the identical generic bot reply hash to one cache key and
+	// share a reply — including another customer's name, phone and
+	// address. Empty for callers that have no conversation (the
+	// generic /v1/chat/completions path); the full-history hash in
+	// cacheKey is the fallback guard there.
+	ConversationID string          `json:"conversation_id,omitempty"`
+	Products       []ProductItem   `json:"products,omitempty"`
+	Knowledge      []KnowledgeItem `json:"knowledge,omitempty"`
 	// Payment is the shop's payment config (migration 007). Absent =
 	// unconfigured: replies say so honestly instead of inventing
 	// payment methods.

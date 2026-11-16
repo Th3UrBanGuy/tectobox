@@ -285,6 +285,10 @@ export class AiReplyService {
               clientId: client.id,
               clientName: client.name,
               businessType: client.business_type,
+              // Scenario audit #1 (2026-11-16): scope the Go reply
+              // cache to this conversation, or two customers whose
+              // last bot reply is identical share one cached reply.
+              conversationId: conv.id,
               text: text,
               history: history,
               products,

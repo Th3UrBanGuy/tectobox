@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tect0nicofficial/tectobox/services/ai/pkg/cloudflare"
@@ -41,6 +42,13 @@ type Engine struct {
 	cfClient     *cloudflare.Client
 	httpClient   *http.Client
 	cache        *Cache
+
+	// web2api circuit breaker (see direct.go): consecutive failures on
+	// the shared-session leg open it for a cooldown, so a saturated
+	// session stops burning the detached timeout on every request.
+	web2apiMu        sync.Mutex
+	web2apiFailures  int
+	web2apiOpenUntil time.Time
 }
 
 func NewEngine() *Engine {
@@ -76,7 +84,7 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 	}
 
 	lang := detector.DetectLanguage(cleanMsg)
-	cKey := cacheKey(pctx.ClientID, lang, cleanMsg, history, pctx.Payment)
+	cKey := cacheKey(pctx.ClientID, pctx.ConversationID, lang, cleanMsg, history, pctx.Payment)
 
 	// Check cache
 	if cached, ok := e.cache.Get(cKey); ok {
@@ -95,6 +103,20 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 		demoReply := DemoResponder(lang, cleanMsg, pctx.Products, pctx.Knowledge, history, pctx.Payment)
 		e.cache.Set(cKey, demoReply, demoCacheTTL)
 		return demoReply, lang, "deterministic-payment", false
+	}
+
+	// Delivery facts are deterministic too (60 inside Dhaka, 120
+	// outside): a pure delivery-charge question is answered by the
+	// template responder before any LLM tier, so the model can never
+	// answer "no info" for it. Live proof (2026-11-16 scenario audit
+	// S7-Q2/Q7): Tier 3 answered "কোনো নির্দিষ্ট তথ্য আমার কাছে দেওয়া
+	// নেই" / "not listed in my available store information" while
+	// the template branch held the real charges. An order intent is
+	// excluded, same as payment above.
+	if isDeliveryQuestion(cleanMsg) {
+		demoReply := DemoResponder(lang, cleanMsg, pctx.Products, pctx.Knowledge, history, pctx.Payment)
+		e.cache.Set(cKey, demoReply, demoCacheTTL)
+		return demoReply, lang, "deterministic-delivery", false
 	}
 
 	sysPrompt := BuildSystemPrompt(pctx, lang)

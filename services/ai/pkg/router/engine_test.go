@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -349,8 +350,12 @@ func TestTier3_Web2APIPrimaryForWorkspaceTraffic(t *testing.T) {
 	}
 
 	// Workspace traffic must route through web2api and come back
-	// grounded in that workspace's own knowledge.
-	reply, _, model, _ := engine.GenerateReply(ctx, pctxWorkspace, "delivery charge", nil, "")
+	// grounded in that workspace's own knowledge. The message is
+	// deliberately NOT a delivery question: since the 2026-11-16
+	// scenario audit fix #6, pure delivery-charge questions are
+	// answered deterministically before any LLM tier, so "delivery
+	// charge" here would never reach Tier 3.
+	reply, _, model, _ := engine.GenerateReply(ctx, pctxWorkspace, "What products do you have?", nil, "")
 	if model != "gemini-web2api:gemini-3.6-flash" {
 		t.Fatalf("workspace traffic must route through web2api (primary), got model: %s reply: %s", model, reply)
 	}
@@ -440,26 +445,21 @@ func TestTier3_Web2APITimeoutBounded(t *testing.T) {
 
 	pctx := PromptContext{
 		ClientID: "", // Tier 3 web2api runs for all traffic, including workspaces (primary since 2026-11-15); empty here keeps the test minimal.
-		Knowledge: []KnowledgeItem{
-			{
-				Title:   "Delivery Policy",
-				Content: "Delivery fee is 120 taka.",
-			},
-		},
 	}
 
+	// The message is deliberately NOT a delivery question: since the
+	// 2026-11-16 scenario audit fix #6, pure delivery-charge questions
+	// are answered deterministically before any LLM tier, so "delivery
+	// charge" here would never reach the slow web2api leg at all.
 	start := time.Now()
-	reply, _, model, _ := engine.GenerateReply(ctx, pctx, "delivery charge", nil, "")
+	reply, _, model, _ := engine.GenerateReply(ctx, pctx, "Hello", nil, "")
 	dur := time.Since(start)
 
 	if dur > 4*time.Second {
 		t.Fatalf("expected bounded timeout within 4s, took %v", dur)
 	}
-	if !strings.Contains(reply, "120") {
-		t.Fatalf("expected fallback demo responder reply containing 120, got: %s (model: %s)", reply, model)
-	}
 	if model != "deterministic-catalog" {
-		t.Fatalf("expected deterministic-catalog model on timeout fallback, got: %s", model)
+		t.Fatalf("expected deterministic-catalog model on timeout fallback, got: %s (reply: %s)", model, reply)
 	}
 }
 
@@ -487,6 +487,28 @@ func TestAuditFixes_SkeletonMatchesBengaliBrandName(t *testing.T) {
 	}
 }
 
+// 2026-11-16 scenario audit #5: a Bengali-script product name written
+// in Latin ("Shari") must match "লাল জামদানি শাড়ি" — the reverse
+// skeleton (Bengali word → Latin token) covers it.
+func TestScenarioAudit_ReverseSkeletonMatchesShari(t *testing.T) {
+	saree := []ProductItem{{Name: "লাল জামদানি শাড়ি", PriceBDT: 8000, Stock: 10}}
+	reply := DemoResponder("banglish", "Shari er dam koto?", saree, nil, nil, PaymentConfig{})
+	if !strings.Contains(reply, "8000") {
+		t.Fatalf("expected saree price reply for 'Shari', got: %s", reply)
+	}
+	// "Saree" is the same word in another spelling.
+	reply = DemoResponder("banglish", "Saree er dam koto?", saree, nil, nil, PaymentConfig{})
+	if !strings.Contains(reply, "8000") {
+		t.Fatalf("expected saree price reply for 'Saree', got: %s", reply)
+	}
+	// Negative: "Shari" must not match Kitkat.
+	kitkat := []ProductItem{{Name: "Kitkat", PriceBDT: 900, Stock: 75}}
+	reply = DemoResponder("banglish", "Shari er dam koto?", kitkat, nil, nil, PaymentConfig{})
+	if strings.Contains(reply, "900") {
+		t.Fatalf("reverse skeleton over-matched Kitkat, got: %s", reply)
+	}
+}
+
 func TestAuditFixes_ExtractCustomerDetails(t *testing.T) {
 	d := ExtractCustomerDetails("নাম করিম, ০১৬৪২৭৭৫২৭২, ঊলিয়াপুর, চট্টগ্রাম")
 	if d.Name != "করিম" {
@@ -505,6 +527,193 @@ func TestAuditFixes_ExtractCustomerDetails(t *testing.T) {
 	// A bare quantity after the phone is not an address.
 	if d := ExtractCustomerDetails("আমার নাম করিম, ফোন ০১৬৪২৭৭৫২৭২, ২টি"); d.Address != "" {
 		t.Fatalf("expected no address for a bare quantity, got %q", d.Address)
+	}
+}
+
+// 2026-11-16 scenario audit #6: delivery-charge questions were
+// answered "no info" by the LLM tier (S7-Q2/Q7) while the template
+// branch held the real 60/120 charges — they must route
+// deterministically, like payment questions.
+func TestScenarioAudit_DeliveryRoutedDeterministically(t *testing.T) {
+	engine := NewEngine()
+	ctx := context.Background()
+	pctx := PromptContext{ClientID: "69", ClientName: "Shop 69"}
+	// S7-Q2: "Delivery charge koto?" — must quote 60/120.
+	reply, _, model, _ := engine.GenerateReply(ctx, pctx, "Delivery charge koto?", nil, "")
+	if model != "deterministic-delivery" {
+		t.Fatalf("expected deterministic-delivery model, got %s: %s", model, reply)
+	}
+	if !strings.Contains(reply, "60") || !strings.Contains(reply, "120") {
+		t.Fatalf("expected 60/120 charges, got: %s", reply)
+	}
+	// S7-Q7: "Dhakar baire delivery hoy?" — same route, outside charge.
+	reply, _, model, _ = engine.GenerateReply(ctx, pctx, "Dhakar baire delivery hoy?", nil, "")
+	if model != "deterministic-delivery" || !strings.Contains(reply, "120") {
+		t.Fatalf("expected deterministic delivery outside-Dhaka reply, got model=%s: %s", model, reply)
+	}
+	// "Kobe asbe?" (when will it arrive) — delivery-time, same route.
+	reply, _, model, _ = engine.GenerateReply(ctx, pctx, "Kobe asbe?", nil, "")
+	if model != "deterministic-delivery" {
+		t.Fatalf("expected deterministic-delivery for arrival question, got %s: %s", model, reply)
+	}
+	// Opening hours must NOT be stolen: "kobe khulbe?" goes to the
+	// normal tiers (LLM/demo), not the delivery template.
+	_, _, model, _ = engine.GenerateReply(ctx, pctx, "Kobe khulbe?", nil, "")
+	if model == "deterministic-delivery" {
+		t.Fatalf("opening-hours question must not route to deterministic-delivery")
+	}
+	// Order intent stays with the normal flow.
+	_, _, model, _ = engine.GenerateReply(ctx, pctx, "Kitkat kinte chai, delivery charge koto?", nil, "")
+	if model == "deterministic-delivery" {
+		t.Fatalf("order intent must not route to deterministic-delivery")
+	}
+}
+
+// 2026-11-16 scenario audit #7: "Shari ta ki ashol Jamdani?" was
+// answered in Hindi ("Namaste! Main aapki kaise madad kar sakta
+// hoon?") because isRomanHindi flipped Banglish to Hindi on the
+// single shared word "ki" (কি / की) — and the question itself went
+// unanswered despite the authenticity doc existing.
+func TestScenarioAudit_RomanHindiSharedWords(t *testing.T) {
+	// Shared words alone never flip the language.
+	for _, q := range []string{
+		"Shari ta ki ashol Jamdani?",
+		"Dam koto?",
+		"Raat e delivery hobe?",
+		"Eita ne",
+	} {
+		if isRomanHindi(q) {
+			t.Fatalf("%q must not score as Roman Hindi", q)
+		}
+	}
+	// Genuine Roman Hindi still scores as Hindi.
+	for _, q := range []string{
+		"Yeh kya hai?",
+		"Mujhe batao",
+		"Ki chahiye?",
+		"Aapka naam kya hai?",
+	} {
+		if !isRomanHindi(q) {
+			t.Fatalf("%q must still score as Roman Hindi", q)
+		}
+	}
+}
+
+func TestScenarioAudit_BanglishAuthenticityAnswered(t *testing.T) {
+	saree := []ProductItem{{Name: "লাল জামদানি শাড়ি", PriceBDT: 8000, Stock: 10}}
+	authDoc := []KnowledgeItem{{
+		Title:   "Authenticity",
+		Content: "Amader Jamdani shari 100% ashol handloom Jamdani, Dhaka theke ana.",
+	}}
+	// With the authenticity doc: the answer quotes it, in Banglish —
+	// never the Hindi greeting, and never just the price.
+	reply := DemoResponder("banglish", "Shari ta ki ashol Jamdani?", saree, authDoc, nil, PaymentConfig{})
+	if strings.Contains(reply, "Namaste") || strings.Contains(reply, "नमस्ते") {
+		t.Fatalf("Banglish question must not be answered in Hindi, got: %s", reply)
+	}
+	if !strings.Contains(reply, "ashol") || !strings.Contains(reply, "handloom") {
+		t.Fatalf("expected the authenticity doc quoted, got: %s", reply)
+	}
+	// Without any knowledge doc: the grounded price reply, still
+	// Banglish, never Hindi.
+	reply = DemoResponder("banglish", "Shari ta ki ashol Jamdani?", saree, nil, nil, PaymentConfig{})
+	if strings.Contains(reply, "Namaste") || strings.Contains(reply, "नमस्ते") {
+		t.Fatalf("Banglish question must not be answered in Hindi, got: %s", reply)
+	}
+	if !strings.Contains(reply, "8000") {
+		t.Fatalf("expected the grounded price reply without a knowledge doc, got: %s", reply)
+	}
+}
+
+// 2026-11-16 scenario audit #8: under 20-way concurrency the single
+// shared web2api session serialized requests — p95 15.72s, max 23.21s,
+// 429s in the ai log. The breaker opens after 3 consecutive leg
+// failures so traffic falls through to Tier 4 in milliseconds instead
+// of queueing behind a saturated session; a success resets the count.
+func TestScenarioAudit_Web2APIBreaker(t *testing.T) {
+	e := NewEngine()
+	if e.web2apiBreakerOpen() {
+		t.Fatalf("fresh engine must not have the breaker open")
+	}
+	for i := 0; i < web2apiBreakerThreshold; i++ {
+		e.web2apiNoteResult(errors.New("status 429"))
+		if i < web2apiBreakerThreshold-1 && e.web2apiBreakerOpen() {
+			t.Fatalf("breaker must not open before %d consecutive failures", web2apiBreakerThreshold)
+		}
+	}
+	if !e.web2apiBreakerOpen() {
+		t.Fatalf("breaker must be open after %d consecutive failures", web2apiBreakerThreshold)
+	}
+	// A success resets the failure count (the open breaker itself
+	// lapses only when its cooldown expires).
+	e.web2apiNoteResult(nil)
+	if e.web2apiFailures != 0 {
+		t.Fatalf("success must reset the failure count, got %d", e.web2apiFailures)
+	}
+	if !e.web2apiBreakerOpen() {
+		t.Fatalf("breaker must stay open until the cooldown lapses")
+	}
+}
+
+// 2026-11-16 scenario audit #9: the order branch mined the
+// assistant's own markdown echo ("**ঠিকানা:** ** Banani, Dhaka")
+// from history and stored "** Banani, Dhaka" as the address.
+func TestScenarioAudit_ExtractStripsMarkdown(t *testing.T) {
+	d := ExtractCustomerDetails("**ঠিকানা:** ** Banani, Dhaka")
+	if strings.Contains(d.Address, "**") {
+		t.Fatalf("markdown must be stripped from the extracted address, got: %q", d.Address)
+	}
+	if d.Address != "Banani, Dhaka" {
+		t.Fatalf("expected address %q, got: %q", "Banani, Dhaka", d.Address)
+	}
+}
+
+func TestScenarioAudit_OrderBranchIgnoresAssistantEcho(t *testing.T) {
+	products := []ProductItem{{Name: "Kitkat", PriceBDT: 900, Stock: 75}}
+	history := []ChatMessage{
+		{Role: "user", Content: "Kitkat kinte chai"},
+		{Role: "assistant", Content: "ধন্যবাদ! **নাম:** করিম, **ঠিকানা:** ** Banani, Dhaka — confirm korle order hobe."},
+	}
+	reply := DemoResponder("banglish", "confirm", products, nil, history, PaymentConfig{})
+	if strings.Contains(reply, "**") || strings.Contains(reply, "Banani") {
+		t.Fatalf("order branch must not mine the assistant's own markdown echo, got: %s", reply)
+	}
+	if !strings.Contains(reply, "naam") {
+		t.Fatalf("expected a missing-details reply asking for the name, got: %s", reply)
+	}
+}
+
+// 2026-11-16 scenario audit #2 + #3: Banglish "amar nam" (single a)
+// is the most common Bangladeshi spelling, and "৩টি" is the most
+// common Bengali quantity — both must extract, or the order never forms.
+func TestScenarioAudit_BanglishNameAndBengaliQty(t *testing.T) {
+	// #2: "Amar nam Rahim" — the exact S1 Banglish shape (0/10 orders).
+	d := ExtractCustomerDetails("Amar nam Rahim, phone 01711111111, thikana Dhanmondi")
+	if d.Name != "Rahim" {
+		t.Fatalf("expected name Rahim, got %q", d.Name)
+	}
+	if d.Phone != "01711111111" {
+		t.Fatalf("expected phone 01711111111, got %q", d.Phone)
+	}
+	// #2 shorthand: "Amr nam Sakib".
+	if d := ExtractCustomerDetails("Amr nam Sakib, 01722222222, Mirpur"); d.Name != "Sakib" {
+		t.Fatalf("expected name Sakib, got %q", d.Name)
+	}
+	// Double-a still works.
+	if d := ExtractCustomerDetails("Amar naam Jamal, 01744444444"); d.Name != "Jamal" {
+		t.Fatalf("expected name Jamal, got %q", d.Name)
+	}
+	// #3: "৩টি" must read as 3, not fall back to 1.
+	if d := ExtractCustomerDetails("লাল জামদানি শাড়ি ৩টি কিনতে চাই"); !d.HasQty || d.Quantity != 3 {
+		t.Fatalf("expected quantity 3, got %d (hasQty=%v)", d.Quantity, d.HasQty)
+	}
+	// #3: "২টা" must read as 2.
+	if d := ExtractCustomerDetails("কিটক্যাট ২টা কিনতে চাই"); !d.HasQty || d.Quantity != 2 {
+		t.Fatalf("expected quantity 2, got %d (hasQty=%v)", d.Quantity, d.HasQty)
+	}
+	// Latin "x 3" still works.
+	if d := ExtractCustomerDetails("Kitkat x 3 kinte chai"); !d.HasQty || d.Quantity != 3 {
+		t.Fatalf("expected quantity 3, got %d (hasQty=%v)", d.Quantity, d.HasQty)
 	}
 }
 

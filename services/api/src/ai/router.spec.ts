@@ -312,6 +312,18 @@ describe('2026-11-16 order/payment audit fixes (TS responder)', () => {
     expect(findProduct('কিটক্যাট কিনতে চাই', [saree])).toBeUndefined();
   });
 
+  it('Scenario audit #5: findProduct matches "Shari" for "লাল জামদানি শাড়ি" via reverse skeleton', () => {
+    const saree = { name: 'লাল জামদানি শাড়ি', price_bdt: 8000, stock: 10 };
+    expect(findProduct('Shari er dam koto?', [saree])?.name).toBe('লাল জামদানি শাড়ি');
+    expect(findProduct('Saree er dam koto?', [saree])?.name).toBe('লাল জামদানি শাড়ি');
+    expect(findProduct('Jamdani shari kinte chai', [saree])?.name).toBe('লাল জামদানি শাড়ি');
+  });
+
+  it('Scenario audit #5: "Shari" does not match Kitkat', () => {
+    const kitkat = { name: 'Kitkat', price_bdt: 900, stock: 75 };
+    expect(findProduct('Shari er dam koto?', [kitkat])).toBeUndefined();
+  });
+
   it('Fix 2: extractCustomerDetails reads "নাম করিম" + keyword-less address after the phone', () => {
     const d = extractCustomerDetails('নাম করিম, ০১৬৪২৭৭৫২৭২, ঊলিয়াপুর, চট্টগ্রাম');
     expect(d.name).toBe('করিম');
@@ -327,6 +339,60 @@ describe('2026-11-16 order/payment audit fixes (TS responder)', () => {
   it('Fix 2: a bare quantity after the phone is not an address', () => {
     const d = extractCustomerDetails('আমার নাম করিম, ফোন ০১৬৪২৭৭৫২৭২, ২টি');
     expect(d.address).toBeUndefined();
+  });
+
+  it('Scenario audit #7: Banglish authenticity question quotes the knowledge doc, never Hindi', () => {
+    const saree = { name: 'লাল জামদানি শাড়ি', price_bdt: 8000, stock: 10 };
+    const authDoc = [{ title: 'Authenticity', content: 'Amader Jamdani shari 100% ashol handloom Jamdani, Dhaka theke ana.' }];
+    const reply = demoResponder('client1', 'Shari ta ki ashol Jamdani?', [saree], [], authDoc);
+    expect(reply).not.toContain('Namaste');
+    expect(reply).toContain('ashol');
+    expect(reply).toContain('handloom');
+  });
+
+  it('Scenario audit #7: without a knowledge doc the same question gets the grounded price reply', () => {
+    const saree = { name: 'লাল জামদানি শাড়ি', price_bdt: 8000, stock: 10 };
+    const reply = demoResponder('client1', 'Shari ta ki ashol Jamdani?', [saree], []);
+    expect(reply).not.toContain('Namaste');
+    expect(reply).toContain('8000');
+  });
+
+  it('Scenario audit #9: extractor strips markdown bold from addresses', () => {
+    const d = extractCustomerDetails('**ঠিকানা:** ** Banani, Dhaka');
+    expect(d.address).toBe('Banani, Dhaka');
+    expect(d.address).not.toContain('**');
+  });
+
+  it("Scenario audit #9: order branch ignores the assistant's markdown echo in history", () => {
+    const kitkat = { name: 'Kitkat', price_bdt: 900, stock: 75 };
+    const history = [
+      { role: 'user', content: 'Kitkat kinte chai' },
+      { role: 'assistant', content: 'ধন্যবাদ! **নাম:** করিম, **ঠিকানা:** ** Banani, Dhaka — confirm korle order hobe.' },
+    ];
+    const reply = demoResponder('client1', 'confirm', [kitkat], history as any);
+    expect(reply).not.toContain('**');
+    expect(reply).not.toContain('Banani');
+    // "confirm" detects as English, so the missing-details reply asks
+    // for "name" — the point is it asks, instead of echoing the bot's
+    // own markdown details back as if they were the customer's.
+    expect(reply).toContain('name');
+  });
+
+  it('Scenario audit #2: Banglish "Amar nam" (single a) extracts the name', () => {
+    const d = extractCustomerDetails('Amar nam Rahim, phone 01711111111, thikana Dhanmondi');
+    expect(d.name).toBe('Rahim');
+    expect(d.phone).toBe('01711111111');
+  });
+
+  it('Scenario audit #2: shorthand "Amr nam" extracts the name', () => {
+    expect(extractCustomerDetails('Amr nam Sakib, 01722222222, Mirpur').name).toBe('Sakib');
+    expect(extractCustomerDetails('Amar naam Jamal, 01744444444').name).toBe('Jamal');
+  });
+
+  it('Scenario audit #3: Bengali "৩টি" reads as quantity 3', () => {
+    expect(extractCustomerDetails('লাল জামদানি শাড়ি ৩টি কিনতে চাই').quantity).toBe(3);
+    expect(extractCustomerDetails('কিটক্যাট ২টা কিনতে চাই').quantity).toBe(2);
+    expect(extractCustomerDetails('Kitkat x 3 kinte chai').quantity).toBe(3);
   });
 
   it('Fix 5: payment question with NO config answers honestly, never invents a method', () => {

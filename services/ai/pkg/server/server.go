@@ -193,7 +193,13 @@ type InternalChatRequest struct {
 	// payment methods even after the owner configured them
 	// (caught live by probe D, 2026-11-16).
 	Payment router.PaymentConfig `json:"payment,omitempty"`
-	Model   string                `json:"model"`
+	// ConversationID scopes the reply cache to one customer
+	// conversation (2026-11-16 scenario audit #1, CRITICAL). Optional
+	// on purpose: older callers (channel workers without a
+	// conversation id) keep working — an empty id still gets the
+	// full-history hash guard in cacheKey. Never 400 on this field.
+	ConversationID string `json:"conversation_id,omitempty"`
+	Model          string `json:"model"`
 }
 
 func (s *Server) handleInternalAIChat(w http.ResponseWriter, r *http.Request) {
@@ -234,12 +240,13 @@ func (s *Server) handleInternalAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pctx := router.PromptContext{
-		ClientID:     workspaceID,
-		ClientName:   req.ClientName,
-		BusinessType: req.BusinessType,
-		Products:     req.Products,
-		Knowledge:    req.Knowledge,
-		Payment:      req.Payment,
+		ClientID:       workspaceID,
+		ClientName:     req.ClientName,
+		BusinessType:   req.BusinessType,
+		ConversationID: req.ConversationID,
+		Products:       req.Products,
+		Knowledge:      req.Knowledge,
+		Payment:        req.Payment,
 	}
 
 	reply, lang, modelUsed, cached := s.engine.GenerateReply(r.Context(), pctx, req.Text, req.History, req.Model)

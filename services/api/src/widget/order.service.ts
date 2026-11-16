@@ -72,6 +72,13 @@ export type OrderCreatedListener = (order: any) => Promise<void> | void;
  *   confirm (or a retried message) returns the existing order instead
  *   of a second row. The INSERT itself is ON CONFLICT DO NOTHING, so
  *   a concurrent double-confirm cannot race a duplicate in either.
+ *   A genuinely SECOND order of the same thing in the same
+ *   conversation is the exception, not a duplicate: when the message
+ *   carries a repeat word (আরেকটা / another / one more — see
+ *   REPEAT_ORDER_RE) the key gains `:seq:<n>` with n = the
+ *   conversation's order count + 1, so it becomes a new row. Without
+ *   a repeat word the key is unchanged and a second confirm still
+ *   returns the existing order.
  */
 export class OrderService {
   constructor(
@@ -184,7 +191,28 @@ export class OrderService {
     const total = subtotal + deliveryCharge;
 
     const productRef = (product as any).id ?? (product as any).sku ?? product.name;
-    const idempotencyKey = `webchat:${conv.id}:${String(productRef).slice(0, 80)}:qty:${quantity}`;
+    // 2026-11-16 scenario audit #4: the same conversation could not
+    // place a second identical order — the key had no order sequence,
+    // so "আরেকটা কিটক্যাট কিনতে চাই" returned the first order. A
+    // repeat word opens a new order: the key gains :seq:<n>, where n
+    // is the conversation's order count + 1. Without a repeat word
+    // the key is unchanged, so a double confirm still returns the
+    // existing order. The count is read before the insert; a race
+    // between two repeats computes the same seq and ON CONFLICT still
+    // leaves exactly one row. A repeat word on the FIRST order
+    // (count 0) keeps the base key, so a later bare confirm dedupes
+    // against it correctly.
+    let idempotencyKey = `webchat:${conv.id}:${String(productRef).slice(0, 80)}:qty:${quantity}`;
+    if (REPEAT_ORDER_RE.test(text)) {
+      const existingCountRes = await this.pool.query(
+        'SELECT COUNT(*) FROM orders WHERE client_id = $1 AND conversation_id = $2',
+        [client.id, conv.id]
+      );
+      const existingCount = Number(existingCountRes.rows[0]?.count ?? 0);
+      if (existingCount > 0) {
+        idempotencyKey += `:seq:${existingCount + 1}`;
+      }
+    }
     // The shop's payment config (migration 007 columns on clients):
     // the advance the customer must pay, quoted in the confirmation
     // reply and stored on the order row.
@@ -430,6 +458,16 @@ const CONFIRM_RE =
 /** Order-intent words (same vocabulary as the responder's order branch). */
 const ORDER_INTENT_RE =
   /(?:^|[^\p{L}\p{M}\p{N}_])(order|buy|purchase|kinte|nibo|nebo|lagbe|nite|chai|chaichi|অর্ডার|কিনব|কিনতে|নিব|চাই|নিতে|চাচ্ছি)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
+
+/**
+ * Repeat-order words (2026-11-16 scenario audit #4): the customer
+ * explicitly wants ANOTHER order of the same thing in the same
+ * conversation ("আরেকটা কিটক্যাট কিনতে চাই"). Only these words open a
+ * new order — a bare second confirm is a double-tap/retry and must
+ * return the existing order, not a new row.
+ */
+const REPEAT_ORDER_RE =
+  /(?:^|[^\p{L}\p{M}\p{N}_])(আরেকটা|আরেকটি|আরেকবার|আরো|আরও|আবার|another|one more|নতুন অর্ডার|new order)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
 
 /**
  * Text after the address keyword in one message (to end of line,

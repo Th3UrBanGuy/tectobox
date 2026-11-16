@@ -96,9 +96,17 @@ var categoryLabels = []categoryLabel{
 // against Banglish for the responder-side language guard below. The
 // detector package scores Devanagari but not Roman Hindi, so a Roman
 // Hindi question would otherwise arrive here as Banglish (L4).
+//
+// romanHindiWords holds DISTINCTIVE Hindi words only. Words that exist
+// in BOTH languages live in romanHindiSharedWords instead and are
+// scored in NEITHER list — a lone shared word must never flip the
+// language (2026-11-16 scenario audit #7: "Shari ta ki ashol
+// Jamdani?" flipped to Hindi on the single word "ki" — কি / की —
+// and was answered "Namaste! Main aapki kaise madad kar sakta hoon?"
+// instead of answering the Jamdani question).
 var romanHindiWords = map[string]struct{}{
-	"ki": {}, "kya": {}, "hai": {}, "hain": {}, "kaise": {}, "kaisa": {}, "kaisi": {},
-	"kitna": {}, "kitne": {}, "kitni": {}, "keemat": {}, "kimat": {}, "daam": {},
+	"kya": {}, "hai": {}, "hain": {}, "kaise": {}, "kaisa": {}, "kaisi": {},
+	"kitna": {}, "kitne": {}, "kitni": {}, "keemat": {}, "kimat": {},
 	"karna": {}, "karo": {}, "karein": {}, "karen": {}, "mujhe": {}, "mera": {},
 	"meri": {}, "mere": {}, "aap": {}, "aapka": {}, "aapki": {}, "aapko": {},
 	"tum": {}, "tumhara": {}, "tumhari": {}, "chahiye": {}, "chahie": {},
@@ -106,11 +114,23 @@ var romanHindiWords = map[string]struct{}{
 	"kaun": {}, "kyun": {}, "kyu": {}, "batao": {}, "bataiye": {}, "dijiye": {},
 	"lena": {}, "lene": {}, "khareedna": {}, "kharidna": {}, "dukaan": {},
 	"dukan": {}, "khula": {}, "khulta": {}, "khulna": {}, "band": {},
-	"subah": {}, "shaam": {}, "raat": {}, "aaj": {}, "abhi": {}, "yeh": {},
+	"subah": {}, "shaam": {}, "abhi": {}, "yeh": {},
 	"ye": {}, "woh": {}, "iska": {}, "uska": {}, "iski": {}, "uski": {},
-	"ka": {}, "ke": {}, "ko": {}, "ne": {}, "bhi": {}, "nahin": {}, "nahi": {},
-	"bahut": {}, "acha": {}, "achha": {}, "theek": {}, "samay": {},
+	"ka": {}, "ko": {}, "bhi": {}, "nahin": {}, "nahi": {},
+	"bahut": {}, "theek": {},
 	"paisa": {}, "rupay": {}, "rupaye": {}, "bhugtan": {},
+}
+
+// romanHindiSharedWords: words spelled the same in Roman Hindi and
+// Banglish — "ki" (কি / की), "daam" (দাম / दाम), "ke" (কে / के),
+// "ne" (নে / ने), "samay"/"raat"/"aaj" (সময়/রাত/আজ), "acha"/"achha"
+// (আচ্ছা / अच्छा). They count toward NEITHER side: a shared word
+// beside a distinctive Hindi word still leaves Hindi (e.g. "ki
+// chahiye" — chahiye is distinctive), but a shared word alone, or
+// with only Banglish around it, never flips Banglish to Hindi.
+var romanHindiSharedWords = map[string]struct{}{
+	"ki": {}, "daam": {}, "ke": {}, "ne": {}, "samay": {}, "raat": {},
+	"aaj": {}, "acha": {}, "achha": {},
 }
 
 var banglishMarkerWords = map[string]struct{}{
@@ -137,6 +157,18 @@ var bengaliDigitReplacer = strings.NewReplacer(
 )
 
 func toASCIIDigits(s string) string { return bengaliDigitReplacer.Replace(s) }
+
+// normalizeQtyWords turns Bengali quantity words into ASCII so the
+// quantity regexes in ExtractCustomerDetails can read them: "৩টি" →
+// "3 ti". Applied ONLY to the quantity-matching input — never to the
+// address/name text, where the original Bengali must survive (2026-11-16
+// scenario audit #3: "লাল জামদানি শাড়ি ৩টি কিনতে চাই" ordered 1
+// instead of 3). Keep in sync with TS demo-responder.ts.
+func normalizeQtyWords(s string) string {
+	s = strings.ReplaceAll(s, "টি", " ti")
+	s = strings.ReplaceAll(s, "টা", " ta")
+	return s
+}
 
 func hasDevanagari(s string) bool {
 	for _, r := range s {
@@ -323,7 +355,11 @@ func transliterateForMatch(text string) string {
 
 // isRomanHindi mirrors detectCustomerLanguage in packages/ai-router/src/
 // language.ts: Roman Hindi wins on 2+ distinctive Hindi words, or on a
-// single one with no Banglish marker present.
+// single one with no Banglish marker present. Words in
+// romanHindiSharedWords ("ki", "daam", "raat" ...) are in NEITHER list
+// — they exist in both languages, so they never count toward Hindi.
+// Without that split, any Banglish question containing "ki" (কি) and
+// no other marker word flipped to Hindi (scenario audit #7).
 func isRomanHindi(text string) bool {
 	if hasDevanagari(text) {
 		return false
@@ -349,7 +385,12 @@ func isRomanHindi(text string) bool {
 // Quantity is only read from this message, never from history.
 func ExtractCustomerDetails(rawText string) CustomerDetails {
 	var out CustomerDetails
-	text := rawText
+	// Strip markdown bold markers first: the assistant's own echoes are
+	// markdown ("**ঠিকানা:** ** Banani, Dhaka") and an extractor that
+	// reads them verbatim stores "** Banani, Dhaka" as the address
+	// (2026-11-16 scenario audit #9). `**` is never part of a real
+	// name, phone or address. Keep in sync with TS demo-responder.ts.
+	text := strings.ReplaceAll(rawText, "**", "")
 	ascii := toASCIIDigits(text)
 
 	phoneRe := regexp.MustCompile(`(?:\+?880[\s\-]?1[3-9]\d{2}[\s\-]?\d{6}|01[3-9]\d{8}|1[3-9]\d{8})`)
@@ -364,6 +405,13 @@ func ExtractCustomerDetails(rawText string) CustomerDetails {
 	nameRes := []*regexp.Regexp{
 		regexp.MustCompile(`(?i)my name is\s+([A-Za-z][A-Za-z.'\- ]{1,40})`),
 		regexp.MustCompile(`(?i)amar naam(?:e)?\s+([A-Za-z][A-Za-z.'\- ]{1,40})`),
+		// "amar nam" (single a) is the most common Bangladeshi
+		// spelling — the 2026-11-16 scenario audit (S1 Banglish) got
+		// 0/10 orders because only "amar naam" (double a) matched.
+		// "amr nam" is the common shorthand. Keep in sync with TS
+		// demo-responder.ts.
+		regexp.MustCompile(`(?i)amar nam\s+([A-Za-z][A-Za-z.'\- ]{1,40})`),
+		regexp.MustCompile(`(?i)amr nam\s+([A-Za-z][A-Za-z.'\- ]{1,40})`),
 		regexp.MustCompile(`আমার নাম\s+([^\s,।]+(?:\s+[^\s,।]+){0,2})`),
 		regexp.MustCompile(`(?i)naam\s+(?:hai|hain|mera|meri)?\s*([A-Za-z][A-Za-z.'\- ]{1,40})`),
 		regexp.MustCompile(`(?i)\bi am\s+([A-Za-z][A-Za-z.'\- ]{1,40})`),
@@ -437,6 +485,7 @@ func ExtractCustomerDetails(rawText string) CustomerDetails {
 	if out.Phone != "" {
 		withoutPhone = strings.Replace(ascii, phoneRe.FindString(ascii), " ", 1)
 	}
+	withoutPhone = normalizeQtyWords(withoutPhone)
 	qtyRes := []*regexp.Regexp{
 		regexp.MustCompile(`(?i)(?:quantity|qty)\s*:?\s*(\d{1,2})\b`),
 		regexp.MustCompile(`(?i)\b(\d{1,2})\s*(?:ta|ti|pcs?|pieces?)\b`),
@@ -486,6 +535,32 @@ func isPaymentQuestion(text string) bool {
 	}
 	rePayment := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(payment|pay|paid|bkash|nagad|rocket|cash on delivery|cod|upi|পেমেন্ট|পে|ক্যাশ অন ডেলিভারি|বিকাশ|নগদ|রকেট|भुगतान)(?:[^\p{L}\p{N}_]|$)`)
 	return rePayment.MatchString(text)
+}
+
+// isDeliveryQuestion reports whether the message is a pure delivery
+// question — the questions whose answers are fixed config facts (60
+// BDT inside Dhaka, 120 outside), answered deterministically before
+// any LLM tier (see the early return in GenerateReply). Same shape as
+// isPaymentQuestion: an order intent stays with the normal flow.
+// The word list is deliberately NARROWER than DemoResponder's
+// delivery branch (branch 3): bare "when" words (kobe/somoy/কবে) also
+// match opening-hours questions ("kobe khulbe?"), which the LLM
+// answers correctly from the prompt — so they only count with a
+// delivery word or an arrival word (asbe/pabo). The two audit
+// failures (S7-Q2 "Delivery charge koto?", S7-Q7 "Dhakar baire
+// delivery hoy?") both carry a strong delivery word.
+func isDeliveryQuestion(text string) bool {
+	reOrder := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(order|buy|purchase|kinte|nibo|nebo|lagbe|nite|chai|chaichi|haa|ha|yes|confirm|অর্ডার|কিনব|কিনতে|নিব|চাই|নিতে|চাচ্ছি|হাঁ|হ্যাঁ|হে|হুম|আচ্ছা|দাও|নিলাম)(?:[^\p{L}\p{N}_]|$)`)
+	if reOrder.MatchString(text) {
+		return false
+	}
+	reDelivery := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(delivery|charge|shipping|courier|pathan|ডেলিভারি|চার্জ|কুরিয়ার|কুরিয়ার|পাঠান)(?:[^\p{L}\p{N}_]|$)`)
+	if reDelivery.MatchString(text) {
+		return true
+	}
+	reWhen := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(kobe|somoy|shomoy|কবে|সময়)(?:[^\p{L}\p{N}_]|$)`)
+	reArrive := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(asbe|ashbe|arrive|arriving|pabo|আসবে|পাবো)(?:[^\p{L}\p{N}_]|$)`)
+	return reWhen.MatchString(text) && reArrive.MatchString(text)
 }
 
 func DemoResponder(lang detector.Language, text string, products []ProductItem, knowledge []KnowledgeItem, history []ChatMessage, payment PaymentConfig) string {
@@ -746,6 +821,33 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 						for _, tok := range regexp.MustCompile(`[^\p{L}\p{M}]+`).Split(rawText, -1) {
 							tokSk := bengaliSkeleton(tok)
 							if len(tokSk) >= 3 && (tokSk == sk || strings.HasPrefix(tokSk, sk) || strings.HasPrefix(sk, tokSk)) {
+								score += 2
+								wordScored = true
+								break
+							}
+						}
+					}
+				}
+			}
+			// Reverse-skeleton fallback: a Bengali-script product word
+			// ("শাড়ি") written in Latin ("Shari") — skeletonize the
+			// Bengali word and compare against the Latin token's
+			// skeleton. Bengali words skeletonize shorter ("শাড়ি" →
+			// "sr"), so both sides ≥ 2 letters here, not 3
+			// (2026-11-16 scenario audit #5).
+			if !wordScored {
+				if matched, _ := regexp.MatchString(`^[a-z]+$`, w); !matched {
+					wSk := bengaliSkeleton(w)
+					if len(wSk) >= 2 {
+						for _, tok := range regexp.MustCompile(`[^a-z0-9]+`).Split(matchText, -1) {
+							if tok == "" {
+								continue
+							}
+							if tokMatched, _ := regexp.MatchString(`^[a-z]+$`, tok); !tokMatched {
+								continue
+							}
+							tokSk := latinSkeleton(tok)
+							if len(tokSk) >= 2 && (tokSk == wSk || strings.HasPrefix(tokSk, wSk) || strings.HasPrefix(wSk, tokSk)) {
 								score += 2
 								wordScored = true
 								break
@@ -1250,6 +1352,13 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 		matched := matchProduct(text)
 		if matched == nil {
 			for i := len(history) - 1; i >= 0; i-- {
+				// Customer turns only: the bot's own echoes mention
+				// products and details in markdown ("**ঠিকানা:** **
+				// Banani, Dhaka") and must never supply them
+				// (2026-11-16 scenario audit #9).
+				if history[i].Role != "user" {
+					continue
+				}
 				if m := matchProduct(history[i].Content); m != nil {
 					matched = m
 					break
@@ -1263,6 +1372,9 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 
 		details := ExtractCustomerDetails(text)
 		for i := len(history) - 1; i >= 0; i-- {
+			if history[i].Role != "user" {
+				continue
+			}
 			if details.Name != "" && details.Phone != "" && details.Address != "" {
 				break
 			}
@@ -1376,6 +1488,26 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 						fmt.Sprintf("%s = कुल %s BDT।", lines, totalStr),
 						fmt.Sprintf("%s = kul %s BDT.", lines, totalStr),
 					)
+				}
+			}
+			// Authenticity / quality question about a matched product
+			// ("Shari ta ki ashol Jamdani?"): quote the shop's own
+			// knowledge entry instead of answering with the price —
+			// the price does not answer whether it is real (2026-11-16
+			// scenario audit #7). No matching entry = the price reply.
+			// Keep in sync with TS demo-responder.ts branch 10.
+			if !rePrice.MatchString(text) {
+				reAuthenticity := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(ashol|আসল|authentic|original|genuine|jamdani|জামদানি|handloom|quality|কোয়ালিটি)(?:[^\p{L}\p{N}_]|$)`)
+				if reAuthenticity.MatchString(text) {
+					if entry := findKnowledge([]string{"ashol", "আসল", "authentic", "original", "genuine", "jamdani", "জামদানি", "handloom", "quality", "কোয়ালিটি"}); entry != nil {
+						return pick(
+							fmt.Sprintf("%s সম্পর্কে আমাদের তথ্য: %s", matched.Name, entry.Content),
+							fmt.Sprintf("%s somporke amader tottho: %s", matched.Name, entry.Content),
+							fmt.Sprintf("About %s: %s", matched.Name, entry.Content),
+							fmt.Sprintf("%s के बारे में हमारी जानकारी: %s", matched.Name, entry.Content),
+							fmt.Sprintf("%s ke baare mein hamari jaankari: %s", matched.Name, entry.Content),
+						)
+					}
 				}
 			}
 			return priceReply(matched)
