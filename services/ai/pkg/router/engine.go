@@ -76,7 +76,7 @@ func (e *Engine) GenerateReply(ctx context.Context, pctx PromptContext, userMess
 	}
 
 	lang := detector.DetectLanguage(cleanMsg)
-	cKey := cacheKey(pctx.ClientID, lang, cleanMsg, history)
+	cKey := cacheKey(pctx.ClientID, lang, cleanMsg, history, pctx.Payment)
 
 	// Check cache
 	if cached, ok := e.cache.Get(cKey); ok {

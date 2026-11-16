@@ -3,6 +3,7 @@ package router
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -81,13 +82,17 @@ func (c *Cache) Set(key, val string, ttl time.Duration) {
 // every workspace hash to one shared key. The /api/ai/chat handler now
 // rejects a missing client_id (see pkg/server) so this function never
 // receives the "<nil>" placeholder.
-func cacheKey(clientID string, lang detector.Language, text string, history []ChatMessage) string {
+func cacheKey(clientID string, lang detector.Language, text string, history []ChatMessage, payment PaymentConfig) string {
 	h := sha256.New()
 	historyHash := ""
 	if len(history) > 0 {
 		last := history[len(history)-1]
 		historyHash = last.Role + ":" + strings.ToLower(strings.TrimSpace(last.Content))
 	}
-	h.Write([]byte(clientID + ":" + string(lang) + ":" + historyHash + ":" + strings.ToLower(strings.TrimSpace(text))))
+	// The payment config is part of the key: a payment answer cached
+	// before the owner saved their settings must not keep serving the
+	// stale "not configured" reply (2026-11-16 probe D).
+	paymentHash := fmt.Sprintf("%s|%d|%s|%s|%s", payment.Modes, payment.AdvanceBDT, payment.Bkash, payment.Nagad, payment.Rocket)
+	h.Write([]byte(clientID + ":" + string(lang) + ":" + historyHash + ":" + strings.ToLower(strings.TrimSpace(text)) + ":" + paymentHash))
 	return hex.EncodeToString(h.Sum(nil))
 }

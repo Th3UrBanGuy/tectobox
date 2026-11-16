@@ -187,7 +187,13 @@ type InternalChatRequest struct {
 	History      []router.ChatMessage   `json:"history"`
 	Products     []router.ProductItem   `json:"products"`
 	Knowledge    []router.KnowledgeItem `json:"knowledge"`
-	Model        string                 `json:"model"`
+	// Payment is the shop's payment config (migration 007). Without
+	// this field the JSON `payment` the api sends was silently
+	// dropped, so the engine's prompt claimed the shop had no
+	// payment methods even after the owner configured them
+	// (caught live by probe D, 2026-11-16).
+	Payment router.PaymentConfig `json:"payment,omitempty"`
+	Model   string                `json:"model"`
 }
 
 func (s *Server) handleInternalAIChat(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +239,7 @@ func (s *Server) handleInternalAIChat(w http.ResponseWriter, r *http.Request) {
 		BusinessType: req.BusinessType,
 		Products:     req.Products,
 		Knowledge:    req.Knowledge,
+		Payment:      req.Payment,
 	}
 
 	reply, lang, modelUsed, cached := s.engine.GenerateReply(r.Context(), pctx, req.Text, req.History, req.Model)
