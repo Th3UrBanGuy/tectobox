@@ -45,7 +45,7 @@ func BuildSystemPrompt(ctx PromptContext, lang detector.Language) string {
 		}
 		sb.WriteString(fmt.Sprintf("- Payment modes: %s.\n", modes))
 		if ctx.Payment.AdvanceBDT > 0 {
-			sb.WriteString(fmt.Sprintf("- Advance required: %d BDT.\n", ctx.Payment.AdvanceBDT))
+			sb.WriteString(fmt.Sprintf("- Advance required: %d BDT — the customer MUST pay this advance before delivery, even for Cash on Delivery orders. NEVER say no advance is needed when an amount is listed here.\n", ctx.Payment.AdvanceBDT))
 		} else {
 			sb.WriteString("- Advance required: none.\n")
 		}

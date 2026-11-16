@@ -70,7 +70,7 @@ function paymentSection(payment?: PaymentConfig): string {
     .join(', ');
   const advance =
     payment.advanceBdt > 0
-      ? ` Advance required per order: ${payment.advanceBdt} BDT.`
+      ? ` Advance required per order: ${payment.advanceBdt} BDT — the customer MUST pay this before delivery, even for Cash on Delivery. NEVER say no advance is needed when an amount is listed here.`
       : ' No advance required.';
   return `${methods}.${numbers ? ` Numbers: ${numbers}.` : ''}${advance}`;
 }
