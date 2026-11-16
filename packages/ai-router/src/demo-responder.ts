@@ -280,7 +280,18 @@ function scoreProduct(p: ProductItem, matchText: string, rawText: string): numbe
         for (const tok of matchText.split(/[^a-z0-9]+/).filter(Boolean)) {
           if (!/^[a-z]+$/.test(tok)) continue;
           const tokSk = latinSkeleton(tok);
-          if (tokSk.length >= 2 && (tokSk === wSk || tokSk.startsWith(wSk) || wSk.startsWith(tokSk))) {
+          // A 2-letter token skeleton ("kt" from "koto", the price
+          // word itself) prefix-matching a longer product skeleton
+          // ("ktkt" from the alias "কিটক্যাট") is a false positive:
+          // it made "Shari er dam koto?" quote Kitkat instead of the
+          // saree (live 2026-11-16). Prefix matching needs a 3-letter
+          // shorter side; 2-letter skeletons must match exactly.
+          // Keep in sync with Go responder.go.
+          const exact = tokSk === wSk;
+          const prefixOk =
+            Math.min(tokSk.length, wSk.length) >= 3 &&
+            (tokSk.startsWith(wSk) || wSk.startsWith(tokSk));
+          if (tokSk.length >= 2 && (exact || prefixOk)) {
             score += 2;
             wordScored = true;
             break;
@@ -993,9 +1004,14 @@ export function demoResponder(
       // scenario audit #7). No matching entry = the price reply.
       // Keep in sync with Go responder.go branch 10.
       if (!rePrice.test(text)) {
-        const reAuthenticity = /(?:^|[^\p{L}\p{M}\p{N}_])(ashol|আসল|authentic|original|genuine|jamdani|জামদানি|handloom|quality|কোয়ালিটি)(?:[^\p{L}\p{N}_]|$)/iu;
+        const reAuthenticity = /(?:^|[^\p{L}\p{M}\p{N}_])(ashol|আসল|authentic|original|genuine|jamdani|জামদানি|জামদানী|অথেন্টিক|handloom|quality|কোয়ালিটি)(?:[^\p{L}\p{N}_]|$)/iu;
         if (reAuthenticity.test(text)) {
-          const entry = findKnowledge(['ashol', 'আসল', 'authentic', 'original', 'genuine', 'jamdani', 'জামদানি', 'handloom', 'quality', 'কোয়ালিটি']);
+          // Keywords include the spellings the owner's own doc uses:
+          // doc 71 is titled "অথেন্টিক" and writes "জামদানী" (long ী),
+          // so the plain "জামদানি"/"authentic" keywords alone score 0
+          // against it (live 2026-11-16). Keep in sync with Go
+          // responder.go branch 10.
+          const entry = findKnowledge(['ashol', 'আসল', 'authentic', 'original', 'genuine', 'jamdani', 'জামদানি', 'জামদানী', 'অথেন্টিক', 'handloom', 'quality', 'কোয়ালিটি']);
           if (entry) {
             return pick(
               `${matched.name} সম্পর্কে আমাদের তথ্য: ${entry.content}`,

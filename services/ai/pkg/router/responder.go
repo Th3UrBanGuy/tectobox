@@ -847,7 +847,23 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 								continue
 							}
 							tokSk := latinSkeleton(tok)
-							if len(tokSk) >= 2 && (tokSk == wSk || strings.HasPrefix(tokSk, wSk) || strings.HasPrefix(wSk, tokSk)) {
+							// A 2-letter token skeleton ("kt" from
+							// "koto", the price word itself)
+							// prefix-matching a longer product skeleton
+							// ("ktkt" from the alias "কিটক্যাট") is a
+							// false positive: it made "Shari er dam
+							// koto?" quote Kitkat instead of the saree
+							// (live 2026-11-16). Prefix matching needs
+							// a 3-letter shorter side; 2-letter
+							// skeletons must match exactly. Keep in
+							// sync with TS demo-responder.ts.
+							exact := tokSk == wSk
+							minLen := len(tokSk)
+							if len(wSk) < minLen {
+								minLen = len(wSk)
+							}
+							prefixOk := minLen >= 3 && (strings.HasPrefix(tokSk, wSk) || strings.HasPrefix(wSk, tokSk))
+							if len(tokSk) >= 2 && (exact || prefixOk) {
 								score += 2
 								wordScored = true
 								break
@@ -1497,9 +1513,15 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 			// scenario audit #7). No matching entry = the price reply.
 			// Keep in sync with TS demo-responder.ts branch 10.
 			if !rePrice.MatchString(text) {
-				reAuthenticity := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(ashol|আসল|authentic|original|genuine|jamdani|জামদানি|handloom|quality|কোয়ালিটি)(?:[^\p{L}\p{N}_]|$)`)
+				reAuthenticity := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(ashol|আসল|authentic|original|genuine|jamdani|জামদানি|জামদানী|অথেন্টিক|handloom|quality|কোয়ালিটি)(?:[^\p{L}\p{N}_]|$)`)
 				if reAuthenticity.MatchString(text) {
-					if entry := findKnowledge([]string{"ashol", "আসল", "authentic", "original", "genuine", "jamdani", "জামদানি", "handloom", "quality", "কোয়ালিটি"}); entry != nil {
+					// Keywords include the spellings the owner's own doc
+					// uses: doc 71 is titled "অথেন্টিক" and writes
+					// "জামদানী" (long ী), so the plain "জামদানি"/
+					// "authentic" keywords alone score 0 against it
+					// (live 2026-11-16). Keep in sync with TS
+					// demo-responder.ts branch 10.
+					if entry := findKnowledge([]string{"ashol", "আসল", "authentic", "original", "genuine", "jamdani", "জামদানি", "জামদানী", "অথেন্টিক", "handloom", "quality", "কোয়ালিটি"}); entry != nil {
 						return pick(
 							fmt.Sprintf("%s সম্পর্কে আমাদের তথ্য: %s", matched.Name, entry.Content),
 							fmt.Sprintf("%s somporke amader tottho: %s", matched.Name, entry.Content),

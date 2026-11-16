@@ -491,15 +491,23 @@ func TestAuditFixes_SkeletonMatchesBengaliBrandName(t *testing.T) {
 // in Latin ("Shari") must match "লাল জামদানি শাড়ি" — the reverse
 // skeleton (Bengali word → Latin token) covers it.
 func TestScenarioAudit_ReverseSkeletonMatchesShari(t *testing.T) {
-	saree := []ProductItem{{Name: "লাল জামদানি শাড়ি", PriceBDT: 8000, Stock: 10}}
-	reply := DemoResponder("banglish", "Shari er dam koto?", saree, nil, nil, PaymentConfig{})
-	if !strings.Contains(reply, "8000") {
-		t.Fatalf("expected saree price reply for 'Shari', got: %s", reply)
+	// The LIVE catalog has both products: Kitkat carries the owner
+	// alias "কিটক্যাট", and the price word "koto" skeletonizes to
+	// "kt" — which prefix-matched the alias skeleton "ktkt" and made
+	// "Shari er dam koto?" quote Kitkat (live 2026-11-16). The test
+	// must use the two-product catalog, or the collision is invisible.
+	catalog := []ProductItem{
+		{Name: "Kitkat", PriceBDT: 900, Stock: 75, Aliases: []string{"কিটক্যাট"}},
+		{Name: "লাল জামদানি শাড়ি", PriceBDT: 8000, Stock: 10},
+	}
+	reply := DemoResponder("banglish", "Shari er dam koto?", catalog, nil, nil, PaymentConfig{})
+	if !strings.Contains(reply, "8000") || strings.Contains(reply, "900") {
+		t.Fatalf("expected saree price reply for 'Shari' with both products, got: %s", reply)
 	}
 	// "Saree" is the same word in another spelling.
-	reply = DemoResponder("banglish", "Saree er dam koto?", saree, nil, nil, PaymentConfig{})
-	if !strings.Contains(reply, "8000") {
-		t.Fatalf("expected saree price reply for 'Saree', got: %s", reply)
+	reply = DemoResponder("banglish", "Saree er dam koto?", catalog, nil, nil, PaymentConfig{})
+	if !strings.Contains(reply, "8000") || strings.Contains(reply, "900") {
+		t.Fatalf("expected saree price reply for 'Saree' with both products, got: %s", reply)
 	}
 	// Negative: "Shari" must not match Kitkat.
 	kitkat := []ProductItem{{Name: "Kitkat", PriceBDT: 900, Stock: 75}}
@@ -613,6 +621,18 @@ func TestScenarioAudit_BanglishAuthenticityAnswered(t *testing.T) {
 	}
 	if !strings.Contains(reply, "ashol") || !strings.Contains(reply, "handloom") {
 		t.Fatalf("expected the authenticity doc quoted, got: %s", reply)
+	}
+	// The LIVE doc 71 is titled "অথেন্টিক" and writes "জামদানী"
+	// (long ী) — the plain "জামদানি"/"authentic" keywords score 0
+	// against it, so the live reply fell back to the price. The
+	// branch must match the owner's real spellings.
+	realDoc := []KnowledgeItem{{
+		Title:   "অথেন্টিক",
+		Content: "আমাদের প্রোডাক্ট একদম অথেন্টিক। আর জামদানী শাড়ি নারায়নগঞ্জের কুচিয়ামোড়া তাতীদের কাছ থেকে সংগ্রহ করা হয়।",
+	}}
+	reply = DemoResponder("banglish", "Shari ta ki ashol Jamdani?", saree, realDoc, nil, PaymentConfig{})
+	if !strings.Contains(reply, "জামদানী") || !strings.Contains(reply, "অথেন্টিক") {
+		t.Fatalf("expected the live authenticity doc quoted, got: %s", reply)
 	}
 	// Without any knowledge doc: the grounded price reply, still
 	// Banglish, never Hindi.

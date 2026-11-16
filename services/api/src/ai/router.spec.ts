@@ -324,6 +324,21 @@ describe('2026-11-16 order/payment audit fixes (TS responder)', () => {
     expect(findProduct('Shari er dam koto?', [kitkat])).toBeUndefined();
   });
 
+  it('Scenario audit #5b: with BOTH products, "Shari er dam koto?" still picks the saree, not Kitkat', () => {
+    // Live 2026-11-16: the price word "koto" skeletonizes to "kt",
+    // which prefix-matched the alias "কিটক্যাট" skeleton "ktkt" and
+    // made the reply quote Kitkat (900) instead of the saree (8000).
+    // Single-product tests cannot see the collision — this one uses
+    // the live two-product catalog.
+    const kitkat = { name: 'Kitkat', price_bdt: 900, stock: 75, aliases: ['কিটক্যাট'] };
+    const saree = { name: 'লাল জামদানি শাড়ি', price_bdt: 8000, stock: 10 };
+    expect(findProduct('Shari er dam koto?', [kitkat, saree])?.name).toBe('লাল জামদানি শাড়ি');
+    expect(findProduct('Saree er dam koto?', [kitkat, saree])?.name).toBe('লাল জামদানি শাড়ি');
+    const reply = demoResponder('client1', 'Shari er dam koto?', [kitkat, saree], []);
+    expect(reply).toContain('8000');
+    expect(reply).not.toContain('900');
+  });
+
   it('Fix 2: extractCustomerDetails reads "নাম করিম" + keyword-less address after the phone', () => {
     const d = extractCustomerDetails('নাম করিম, ০১৬৪২৭৭৫২৭২, ঊলিয়াপুর, চট্টগ্রাম');
     expect(d.name).toBe('করিম');
@@ -348,6 +363,17 @@ describe('2026-11-16 order/payment audit fixes (TS responder)', () => {
     expect(reply).not.toContain('Namaste');
     expect(reply).toContain('ashol');
     expect(reply).toContain('handloom');
+  });
+
+  it('Scenario audit #7: the LIVE doc-71 wording (অথেন্টিক / জামদানী) is quoted too', () => {
+    // Doc 71 is titled "অথেন্টিক" and writes "জামদানী" (long ী) —
+    // the plain "জামদানি"/"authentic" keywords scored 0 against it,
+    // so the live reply fell back to the price (2026-11-16).
+    const saree = { name: 'লাল জামদানি শাড়ি', price_bdt: 8000, stock: 10 };
+    const realDoc = [{ title: 'অথেন্টিক', content: 'আমাদের প্রোডাক্ট একদম অথেন্টিক। আর জামদানী শাড়ি নারায়নগঞ্জের কুচিয়ামোড়া তাতীদের কাছ থেকে সংগ্রহ করা হয়।' }];
+    const reply = demoResponder('client1', 'Shari ta ki ashol Jamdani?', [saree], [], realDoc);
+    expect(reply).toContain('জামদানী');
+    expect(reply).toContain('অথেন্টিক');
   });
 
   it('Scenario audit #7: without a knowledge doc the same question gets the grounded price reply', () => {
