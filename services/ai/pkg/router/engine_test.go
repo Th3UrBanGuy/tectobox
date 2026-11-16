@@ -576,4 +576,14 @@ func TestAuditFixes_PaymentQuestionsAnsweredDeterministically(t *testing.T) {
 	if model != "deterministic-catalog" {
 		t.Fatalf("order intent must not take the payment shortcut, got model: %s reply: %s", model, reply)
 	}
+
+	// A suffixed form ("বিকাশে") must still take the payment shortcut:
+	// the trailing vowel sign is a word boundary, not part of the word.
+	reply, _, model, _ = engine.GenerateReply(ctx, pctx, "বিকাশে কত টাকা পাঠাবো?", nil, "")
+	if model != "deterministic-payment" {
+		t.Fatalf("suffixed payment question must route deterministically, got model: %s reply: %s", model, reply)
+	}
+	if !strings.Contains(reply, "১০০") || !strings.Contains(reply, "01700000000") {
+		t.Fatalf("expected advance 100 + number, got: %s", reply)
+	}
 }

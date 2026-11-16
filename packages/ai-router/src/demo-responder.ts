@@ -567,7 +567,7 @@ export function demoResponder(
   }
 
   // 0. Advance-payment question — NEVER an order prompt (W13).
-  const reAdvance = /(?:^|[^\p{L}\p{M}\p{N}_])(advance|অগ্রিম|agrim|एडवांस|अग्रिम)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
+  const reAdvance = /(?:^|[^\p{L}\p{M}\p{N}_])(advance|অগ্রিম|agrim|एडवांस|अग्रिम)(?:[^\p{L}\p{N}_]|$)/iu;
   if (reAdvance.test(text)) {
     const entry = findKnowledge(['advance', 'অগ্রিম', 'एडवांस', 'अग्रिम']);
     if (entry) {
@@ -598,7 +598,7 @@ export function demoResponder(
 
   // 1. Payment methods — before delivery, so "Can I pay cash on
   // delivery?" gets the payment answer, not the delivery template (W9/L5).
-  const rePayment = /(?:^|[^\p{L}\p{M}\p{N}_])(payment|pay|paid|bkash|nagad|rocket|cash on delivery|cod|upi|পেমেন্ট|পে|ক্যাশ অন ডেলিভারি|বিকাশ|নগদ|রকেট|भुगतान)(?:[^\p{L}\p{M}\p{N}_]|$)/iu;
+  const rePayment = /(?:^|[^\p{L}\p{M}\p{N}_])(payment|pay|paid|bkash|nagad|rocket|cash on delivery|cod|upi|পেমেন্ট|পে|ক্যাশ অন ডেলিভারি|বিকাশ|নগদ|রকেট|भुगतान)(?:[^\p{L}\p{N}_]|$)/iu;
   if (rePayment.test(text)) {
     const entry = findKnowledge(['bkash', 'nagad', 'payment', 'পেমেন্ট', 'cash on delivery', 'cod', 'rocket', 'বিকাশ', 'নগদ', 'भुगतान', 'upi']);
     if (entry) {

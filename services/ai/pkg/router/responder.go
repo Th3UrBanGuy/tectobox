@@ -473,15 +473,18 @@ func ExtractCustomerDetails(rawText string) CustomerDetails {
 // a payment question second. The regexes mirror DemoResponder's
 // advance (branch 0), payment (branch 1) and order (branch 9) tests.
 func isPaymentQuestion(text string) bool {
-	reOrder := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(order|buy|purchase|kinte|nibo|nebo|lagbe|nite|chai|chaichi|haa|ha|yes|confirm|অর্ডার|কিনব|কিনতে|নিব|চাই|নিতে|চাচ্ছি|হাঁ|হ্যাঁ|হে|হুম|আচ্ছা|দাও|নিলাম)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	// The trailing boundary drops \p{M}: a Bengali suffix vowel sign
+	// ("বিকাশে", "অগ্রিমের") must still end the word — a trailing
+	// LETTER still blocks it, so "পে" never matches inside "পেয়েছি".
+	reOrder := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(order|buy|purchase|kinte|nibo|nebo|lagbe|nite|chai|chaichi|haa|ha|yes|confirm|অর্ডার|কিনব|কিনতে|নিব|চাই|নিতে|চাচ্ছি|হাঁ|হ্যাঁ|হে|হুম|আচ্ছা|দাও|নিলাম)(?:[^\p{L}\p{N}_]|$)`)
 	if reOrder.MatchString(text) {
 		return false
 	}
-	reAdvance := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(advance|অগ্রিম|agrim|एडवांस|अग्रिम)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	reAdvance := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(advance|অগ্রিম|agrim|एडवांस|अग्रिम)(?:[^\p{L}\p{N}_]|$)`)
 	if reAdvance.MatchString(text) {
 		return true
 	}
-	rePayment := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(payment|pay|paid|bkash|nagad|rocket|cash on delivery|cod|upi|পেমেন্ট|পে|ক্যাশ অন ডেলিভারি|বিকাশ|নগদ|রকেট|भुगतान)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	rePayment := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(payment|pay|paid|bkash|nagad|rocket|cash on delivery|cod|upi|পেমেন্ট|পে|ক্যাশ অন ডেলিভারি|বিকাশ|নগদ|রকেট|भुगतान)(?:[^\p{L}\p{N}_]|$)`)
 	return rePayment.MatchString(text)
 }
 
@@ -921,7 +924,7 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 	}
 
 	// 0. Advance-payment question — NEVER an order prompt (W13).
-	reAdvance := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(advance|অগ্রিম|agrim|एडवांस|अग्रिम)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	reAdvance := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(advance|অগ্রিম|agrim|एडवांस|अग्रिम)(?:[^\p{L}\p{N}_]|$)`)
 	if reAdvance.MatchString(text) {
 		if entry := findKnowledge([]string{"advance", "অগ্রিম", "एडवांस", "अग्रिम"}); entry != nil {
 			return pick(
@@ -950,7 +953,7 @@ func DemoResponder(lang detector.Language, text string, products []ProductItem, 
 
 	// 1. Payment methods — before delivery, so "Can I pay cash on
 	// delivery?" gets the payment answer, not the delivery template (W9/L5).
-	rePayment := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(payment|pay|paid|bkash|nagad|rocket|cash on delivery|cod|upi|পেমেন্ট|পে|ক্যাশ অন ডেলিভারি|বিকাশ|নগদ|রকেট|भुगतान)(?:[^\p{L}\p{M}\p{N}_]|$)`)
+	rePayment := regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{M}\p{N}_])(payment|pay|paid|bkash|nagad|rocket|cash on delivery|cod|upi|পেমেন্ট|পে|ক্যাশ অন ডেলিভারি|বিকাশ|নগদ|রকেট|भुगतान)(?:[^\p{L}\p{N}_]|$)`)
 	if rePayment.MatchString(text) {
 		if entry := findKnowledge([]string{"bkash", "nagad", "payment", "পেমেন্ট", "cash on delivery", "cod", "rocket", "বিকাশ", "নগদ", "भुगतान", "upi"}); entry != nil {
 			return pick(

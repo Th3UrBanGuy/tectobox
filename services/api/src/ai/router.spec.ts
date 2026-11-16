@@ -172,6 +172,22 @@ describe('queryGoAIEngine (F1 bridge)', () => {
     expect(body).not.toHaveProperty('businessType');
   });
 
+  it('sends the payment config snake_cased (advance_bdt) — camelCase is silently dropped by Go', async () => {
+    let sentBody = '';
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, opts: any) => {
+      sentBody = String(opts?.body || '');
+      return { ok: true, json: async () => ({ reply: 'ok', language: 'en', model: 'x', cached: false }) };
+    }));
+    await queryGoAIEngine({
+      clientId: 69,
+      text: 'অগ্রিম কত?',
+      payment: { modes: 'both', advanceBdt: 100, bkash: '01700000000', nagad: null, rocket: null } as any,
+    });
+    const body = JSON.parse(sentBody);
+    expect(body.payment).toEqual({ modes: 'both', advance_bdt: 100, bkash: '01700000000', nagad: null, rocket: null });
+    expect(body.payment).not.toHaveProperty('advanceBdt');
+  });
+
   it('returns knowledge-grounded template answer when Go backend times out or aborts', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
       const err = new Error('The operation was aborted due to timeout');

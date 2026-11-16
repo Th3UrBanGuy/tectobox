@@ -197,6 +197,22 @@ export async function queryGoAIEngine(params: {
         client_id: params.clientId,
         client_name: params.clientName,
         business_type: params.businessType,
+        // NOTE (F1 again): the Go bridge expects snake_case keys. The
+        // `payment` object must be re-keyed — Go's encoding/json does
+        // NOT map camelCase "advanceBdt" to "advance_bdt", so sending
+        // it as-is silently dropped the advance (live probe: the bot
+        // said "no advance" with advance=100 configured, while the
+        // number arrived fine). Single-word keys (modes, bkash) match
+        // case-insensitively and need no mapping.
+        payment: params.payment
+          ? {
+              modes: params.payment.modes,
+              advance_bdt: params.payment.advanceBdt,
+              bkash: params.payment.bkash ?? null,
+              nagad: params.payment.nagad ?? null,
+              rocket: params.payment.rocket ?? null,
+            }
+          : undefined,
         clientId: undefined,
         clientName: undefined,
         businessType: undefined,
