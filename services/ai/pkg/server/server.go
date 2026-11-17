@@ -38,6 +38,14 @@ func (s *Server) Routes() http.Handler {
 	// client_id contract (400 on missing/camelCase) is the tenant guard.
 	mux.HandleFunc("/api/ai/chat", s.handleInternalAIChat)
 
+	// Internal key-pool endpoints (same network-isolation posture as
+	// /api/ai/chat: reachable only from the api container over the
+	// internal Docker network, never routed publicly). The admin panel
+	// manages keys through the api, which proxies here. Stats expose
+	// fingerprints + counters only — never key values.
+	mux.HandleFunc("/internal/pool", s.handlePool)
+	mux.HandleFunc("/internal/pool/keys", s.handlePoolKeys)
+
 	// High-throughput middleware: CORS, Token Bucket Rate Limiting, and Brute-force protection
 	limiter := router.GetRateLimiterManager()
 
@@ -259,4 +267,65 @@ func (s *Server) handleInternalAIChat(w http.ResponseWriter, r *http.Request) {
 		"cached":     cached,
 		"latency_ms": time.Since(start).Milliseconds(),
 	})
+}
+
+// handlePool serves GET /internal/pool — the admin-safe key-pool stats
+// (fingerprints + counters, never key values). Used by the admin panel
+// through the api. Network-isolated, same posture as /api/ai/chat.
+func (s *Server) handlePool(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"total": s.engine.KeyPoolLen(),
+		"keys":  s.engine.KeyPoolStats(),
+	})
+}
+
+// handlePoolKeys serves POST /internal/pool/keys (add a key) and DELETE
+// /internal/pool/keys?fp=<fingerprint> (remove a key). The request
+// body carries the key value over the internal Docker network only;
+// the value is never logged and never returned.
+func (s *Server) handlePoolKeys(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	switch r.Method {
+	case http.MethodPost:
+		var req struct {
+			Key    string `json:"key"`
+			Source string `json:"source"`
+			Label  string `json:"label"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "invalid JSON"})
+			return
+		}
+		if req.Source == "" {
+			req.Source = "admin"
+		}
+		fp, err := s.engine.KeyPoolAdd(req.Key, req.Source, req.Label)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"fingerprint": fp})
+	case http.MethodDelete:
+		fp := r.URL.Query().Get("fp")
+		if fp == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "fp query param is required"})
+			return
+		}
+		if !s.engine.KeyPoolRemove(fp) {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "unknown fingerprint"})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"removed": fp})
+	default:
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
 }

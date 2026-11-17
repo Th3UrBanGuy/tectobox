@@ -406,6 +406,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) { toast('Failed: ' + e.message, 'err'); }
   };
   $('btn-save-config').onclick = saveAdminConfig;
+  $('btn-aikey-add').onclick = addAiKey;
+  $('btn-aikey-sync').onclick = syncAiKeys;
 
   // modal backdrop click closes (except QR which cancels the flow explicitly)
   for (const id of ['lead-modal', 'product-modal', 'user-modal', 'pw-modal', 'meta-pick-modal', 'assign-modal', 'courier-modal', 'courier-book-modal', 'payment-config-modal', 'thermal-label-modal', 'quickreplies-modal', 'orders-modal']) {

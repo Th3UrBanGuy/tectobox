@@ -12,6 +12,7 @@ import (
 	"github.com/tect0nicofficial/tectobox/services/ai/pkg/cloudflare"
 	"github.com/tect0nicofficial/tectobox/services/ai/pkg/detector"
 	"github.com/tect0nicofficial/tectobox/services/ai/pkg/gemini"
+	"github.com/tect0nicofficial/tectobox/services/ai/pkg/keypool"
 )
 
 // Tier timeouts and cache TTLs. These were magic literals inside
@@ -49,6 +50,12 @@ type Engine struct {
 	web2apiMu        sync.Mutex
 	web2apiFailures  int
 	web2apiOpenUntil time.Time
+
+	// keyPool is the Gemini API key serving pool (see keypool): the
+	// direct-API leg draws a uniform-random healthy key per attempt.
+	// It is the ONLY place keys live in this service — no other field
+	// holds a key value.
+	keyPool *keypool.Pool
 }
 
 func NewEngine() *Engine {
@@ -57,12 +64,35 @@ func NewEngine() *Engine {
 		cfClient:     cloudflare.NewClient(),
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
 		cache:        NewCache(),
+		keyPool:      keypool.NewFromEnv(),
 	}
 
 	// Periodic cache cleanup
 	e.cache.StartSweeper(cacheSweepInterval)
 
 	return e
+}
+
+// KeyPoolStats returns the admin-safe view of the key pool (fingerprints
+// + counters, never key values). Served by GET /internal/pool.
+func (e *Engine) KeyPoolStats() []keypool.Stat {
+	return e.keyPool.Stats()
+}
+
+// KeyPoolLen returns the number of keys in the pool.
+func (e *Engine) KeyPoolLen() int {
+	return e.keyPool.Len()
+}
+
+// KeyPoolAdd inserts a key into the pool (admin path). The value is
+// validated for shape only — liveness is the caller's job.
+func (e *Engine) KeyPoolAdd(value, source, label string) (string, error) {
+	return e.keyPool.Add(value, source, label)
+}
+
+// KeyPoolRemove drops the key with this fingerprint from the pool.
+func (e *Engine) KeyPoolRemove(fp string) bool {
+	return e.keyPool.Remove(fp)
 }
 
 // GenerateReply is the main high-performance AI entrypoint:

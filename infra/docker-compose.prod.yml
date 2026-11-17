@@ -130,6 +130,15 @@ services:
       # only passes it through, never holds the value). Without it the
       # web2api tier is skipped even when the URL is set.
       GEMINI_WEB2API_KEY: ${GEMINI_WEB2API_KEY:-}
+      # Direct Gemini API key pool (2026-11-17): comma-separated keys,
+      # served uniform-random by the keypool component with per-key
+      # cooldown. Lives in the VPS .env (gitignored); compose only
+      # passes it through, never holds the value. Empty = pool leg
+      # skipped, web2api remains the only LLM path.
+      GEMINI_API_KEYS: ${GEMINI_API_KEYS:-}
+      # Model for the direct pool leg. gemini-2.0-flash is retired
+      # (API 404 since 2026-11-17); default is the free-tier 2.5-flash.
+      GEMINI_DIRECT_MODEL: ${GEMINI_DIRECT_MODEL:-gemini-2.5-flash}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health"]
       interval: 10s

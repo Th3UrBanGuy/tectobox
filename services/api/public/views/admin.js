@@ -181,10 +181,12 @@ function switchAdminTab(tab) {
   $('atab-users').classList.toggle('hidden', tab !== 'users');
   $('atab-licensing').classList.toggle('hidden', tab !== 'licensing');
   $('atab-config').classList.toggle('hidden', tab !== 'config');
+  $('atab-aikeys').classList.toggle('hidden', tab !== 'aikeys');
   $('atab-notify').classList.toggle('hidden', tab !== 'notify');
   $('atab-audit').classList.toggle('hidden', tab !== 'audit');
   $('atab-watchdog').classList.toggle('hidden', tab !== 'watchdog');
   if (tab === 'config') loadAdminConfig();
+  if (tab === 'aikeys') loadAiKeysTab();
   if (tab === 'notify') loadNotifyTab();
   if (tab === 'audit') loadAdminAudit();
   if (tab === 'licensing') loadAdminLicensing();
@@ -471,4 +473,86 @@ async function loadAdminAudit() {
       <span class="muted small">${esc(a.actor || '')}${a.target ? ' → ' + esc(a.target) : ''}</span>
       <span class="right"><span>${esc(a.ip || '')}</span><span>${fmtDT(a.created_at)}</span></span>
     </div>`).join('') || '<div class="tbl-empty">No audit events yet.</div>');
+}
+
+// ---------------- AI Keys (Gemini pool, 2026-11-17) ----------------
+// Admin tab: pool stats (fingerprints + counters, never key values) and
+// stored keys. Env-seeded keys are read-only here — they live in the
+// VPS .env; only admin-added keys can be tested/deleted from this tab.
+async function loadAiKeysTab() {
+  const sum = $('aikeys-summary'), body = $('aikeys-body'), note = $('aikeys-note');
+  if (!sum || !body) return;
+  sum.textContent = 'Loading…';
+  try {
+    const data = await api('/api/admin/ai/keys');
+    const pool = data.pool || [];
+    const stored = data.stored || [];
+    const storedByFp = {};
+    stored.forEach(s => { storedByFp[s.fingerprint] = s; });
+    sum.innerHTML = `<b style="color:var(--ink);">${data.poolTotal || 0} keys in pool · ${data.poolHealthy || 0} healthy</b> — one picked at random per reply. A key that fails 3 times in a row cools down for 10 minutes. web2api answers when the whole pool is down.`;
+    body.innerHTML = pool.map(k => {
+      const s = storedByFp[k.fingerprint];
+      const status = k.healthy ? '<span class="pill green">Healthy</span>' : '<span class="pill amber">Cooling down</span>';
+      const actions = s
+        ? `<button class="btn-soft" data-aktest="${s.id}">Test</button> <button class="btn-soft danger" data-akdel="${s.id}">Delete</button>`
+        : '<span class="muted small">env — edit .env</span>';
+      return `<tr>
+        <td data-label="Fingerprint"><code>${esc(k.fingerprint)}</code></td>
+        <td data-label="Source" class="muted">${esc(k.source)}</td>
+        <td data-label="Label" class="muted">${esc(s ? (s.label || '—') : (k.label || '—'))}</td>
+        <td data-label="Uses">${k.uses}</td>
+        <td data-label="Success">${k.successes}</td>
+        <td data-label="Failures">${k.failures}</td>
+        <td data-label="Status">${status}${k.last_failure ? `<br><span class="muted small">${esc(k.last_failure)}</span>` : ''}</td>
+        <td data-label="">${actions}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="8" class="tbl-empty">No keys in the pool — add one below, or set GEMINI_API_KEYS in the VPS .env.</td></tr>';
+    note.textContent = stored.length
+      ? `${stored.length} key(s) stored encrypted in the database. Env keys are listed above but managed in the VPS .env, not here.`
+      : 'No keys stored in the database yet — the pool above is running on the VPS .env keys.';
+    body.querySelectorAll('[data-aktest]').forEach(b => b.onclick = () => testAiKey(Number(b.dataset.aktest)));
+    body.querySelectorAll('[data-akdel]').forEach(b => b.onclick = () => deleteAiKey(Number(b.dataset.akdel)));
+  } catch (e) {
+    sum.textContent = 'Failed to load key pool: ' + e.message;
+    body.innerHTML = '<tr><td colspan="8" class="tbl-empty">Could not load the key pool.</td></tr>';
+  }
+}
+async function addAiKey() {
+  const keyEl = $('aikey-new'), labelEl = $('aikey-label'), msg = $('aikey-msg');
+  const key = (keyEl.value || '').trim();
+  if (key.length < 20) { msg.textContent = 'Paste a full Gemini API key first.'; return; }
+  msg.textContent = 'Live-probing the key against Google…';
+  try {
+    const res = await api('/api/admin/ai/keys', { method: 'POST', body: JSON.stringify({ key, label: (labelEl.value || '').trim() }) });
+    keyEl.value = ''; labelEl.value = '';
+    msg.textContent = res.poolSynced ? `Added ✓ fingerprint ${res.fingerprint}` : `Stored, but the live pool push failed — it joins the pool on the next 5-minute sync. Fingerprint ${res.fingerprint}`;
+    toast('Key added to the pool');
+    loadAiKeysTab();
+  } catch (e) { msg.textContent = 'Add failed: ' + e.message; }
+}
+async function testAiKey(id) {
+  const msg = $('aikey-msg');
+  msg.textContent = 'Testing…';
+  try {
+    const res = await api(`/api/admin/ai/keys/${id}/test`, { method: 'POST' });
+    msg.textContent = res.ok ? `Key ${res.fingerprint} works ✓` : `Key ${res.fingerprint} failed: ${res.reason || ''}`;
+    loadAiKeysTab();
+  } catch (e) { msg.textContent = 'Test failed: ' + e.message; }
+}
+async function deleteAiKey(id) {
+  if (!confirm('Delete this key from the pool and the database? The AI keeps answering from the remaining keys + web2api.')) return;
+  try {
+    await api(`/api/admin/ai/keys/${id}`, { method: 'DELETE' });
+    toast('Key deleted');
+    loadAiKeysTab();
+  } catch (e) { toast('Delete failed: ' + e.message, 'err'); }
+}
+async function syncAiKeys() {
+  const msg = $('aikey-msg');
+  msg.textContent = 'Re-syncing…';
+  try {
+    const res = await api('/api/admin/ai/keys/sync', { method: 'POST' });
+    msg.textContent = `Synced — ${res.pushed} pushed, ${res.failed} failed.`;
+    loadAiKeysTab();
+  } catch (e) { msg.textContent = 'Sync failed: ' + e.message; }
 }

@@ -41,6 +41,23 @@ const (
 	// success resets the failure count.
 	web2apiBreakerThreshold = 3
 	web2apiBreakerCooldown  = 60 * time.Second
+
+	// poolTimeout bounds ONE attempt of the direct-Gemini pool leg
+	// (tryGeminiPool). It is detached from the Tier-3 context on
+	// purpose, exactly like web2apiDetachedTimeout: the Tier-3 context
+	// is 2s and a direct Gemini call takes 2-4s, so using it would
+	// time out nearly every call (the old single-key direct leg did
+	// exactly that — it could never reliably succeed). 8s covers two
+	// key attempts at healthy latency and stays far under the TS
+	// upstream fetch timeout (25s); env GEMINI_POOL_TIMEOUT_SEC
+	// overrides it.
+	poolTimeout = 8 * time.Second
+
+	// directModelDefault is the Gemini model for the direct-API pool
+	// leg. gemini-2.0-flash was retired (live-verified 2026-11-17:
+	// API returns 404 "no longer available"); gemini-2.5-flash is the
+	// current free-tier model. Env GEMINI_DIRECT_MODEL overrides it.
+	directModelDefault = "gemini-2.5-flash"
 )
 
 // web2apiBreakerOpen reports whether the web2api leg is currently
@@ -100,8 +117,22 @@ func (e *Engine) web2APIAllowed(_ PromptContext) bool {
 }
 
 func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPrompt, userMsg string, history []ChatMessage) (string, string, error) {
-	// 0. Gemini via local gemini-web2api-go (OpenAI-compatible endpoint).
-	// Runs first: it is the configured backend. web2api drives the Gemini
+	// 0. Direct Gemini API key pool — PRIMARY for webchat (2026-11-17).
+	// The pool hands out a uniform-random healthy key per attempt; a
+	// failed key is reported (3 consecutive failures → 10 min
+	// cooldown) and the next random key is tried. web2api stays as
+	// the fallback leg below, so a customer is never left without an
+	// answer while keys recover. Order matters: the pool answers in
+	// 2-4s; web2api takes 15-17s and sometimes hangs — pool first
+	// keeps replies fast, web2api second keeps them possible.
+	if e.keyPool != nil && e.keyPool.Len() > 0 {
+		if reply, modelName, err := e.tryGeminiPool(ctx, sysPrompt, userMsg, history); err == nil && reply != "" {
+			return reply, modelName, nil
+		}
+	}
+
+	// 1. Gemini via local gemini-web2api-go (OpenAI-compatible endpoint).
+	// Fallback now (was primary until 2026-11-17). web2api drives the Gemini
 	// web UI, so first replies take ~5s — the 2s Tier-3 context would
 	// always time out, hence a detached 25s context here.
 	if e.web2APIAllowed(pctx) {
@@ -150,45 +181,11 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 		}
 	}
 
-	// 1. OpenRouter
+	// 2. OpenRouter
 	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
 		reply, err := e.callOpenAICompatible(ctx, "https://openrouter.ai/api/v1/chat/completions", key, "google/gemini-2.5-flash", sysPrompt, userMsg, history)
 		if err == nil && reply != "" {
 			return reply, "openrouter:gemini-2.5-flash", nil
-		}
-	}
-
-	// 2. Direct Gemini API — one text prompt, so the history goes in as a
-	// transcript (same turns the OpenAI-compatible legs carry as messages).
-	if key := os.Getenv("GEMINI_API_KEY"); key != "" {
-		url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-		payload := map[string]interface{}{
-			"contents": []map[string]interface{}{
-				{"role": "user", "parts": []map[string]string{{"text": sysPrompt + historyTranscript(history) + "\n\nUser: " + userMsg}}},
-			},
-		}
-		data, _ := json.Marshal(payload)
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
-		if err == nil {
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("x-goog-api-key", key)
-			resp, err := e.httpClient.Do(req)
-			if err == nil {
-				defer resp.Body.Close()
-				body, _ := io.ReadAll(resp.Body)
-				var gRes struct {
-					Candidates []struct {
-						Content struct {
-							Parts []struct {
-								Text string `json:"text"`
-							} `json:"parts"`
-						} `json:"content"`
-					} `json:"candidates"`
-				}
-				if json.Unmarshal(body, &gRes) == nil && len(gRes.Candidates) > 0 && len(gRes.Candidates[0].Content.Parts) > 0 {
-					return strings.TrimSpace(gRes.Candidates[0].Content.Parts[0].Text), "direct-gemini-api", nil
-				}
-			}
 		}
 	}
 
@@ -203,6 +200,99 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 	return "", "", fmt.Errorf("no direct APIs available or succeeded")
 }
 
+// tryGeminiPool walks the key pool in uniform-random order (one
+// Shuffled() call per request, so the first key tried is random and no
+// key is tried twice in one request). Each attempt reports its outcome
+// to the pool; a dead key cools down and the next key is tried. The
+// model name carries the serving key's fingerprint — the ai log then
+// proves rotation without ever holding key material.
+func (e *Engine) tryGeminiPool(ctx context.Context, sysPrompt, userMsg string, history []ChatMessage) (string, string, error) {
+	timeout := poolTimeout
+	if v := os.Getenv("GEMINI_POOL_TIMEOUT_SEC"); v != "" {
+		if d, err := strconv.Atoi(v); err == nil && d > 0 {
+			timeout = time.Duration(d) * time.Second
+		}
+	}
+	model := os.Getenv("GEMINI_DIRECT_MODEL")
+	if model == "" {
+		model = directModelDefault
+	}
+	pCtx, pCancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer pCancel()
+	var lastErr error
+	for _, cand := range e.keyPool.Shuffled() {
+		start := time.Now()
+		reply, err := e.callDirectGemini(pCtx, cand.Value, model, sysPrompt, userMsg, history)
+		kind := "ok"
+		if err != nil {
+			kind = err.Error()
+		}
+		e.keyPool.Report(cand.Fingerprint, err, kind)
+		log.Printf("[ai] tier3 pool key=%s elapsed_ms=%d err=%v", cand.Fingerprint, time.Since(start).Milliseconds(), err)
+		if err == nil && reply != "" {
+			return reply, "direct-gemini-api:" + cand.Fingerprint, nil
+		}
+		lastErr = err
+		if pCtx.Err() != nil {
+			break
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("pool empty")
+	}
+	return "", "", lastErr
+}
+
+// callDirectGemini is one direct Gemini API call with one key. The
+// history goes in as a transcript (same turns the OpenAI-compatible
+// legs carry as messages) because generateContent takes one text
+// prompt. A non-2xx status is an error carrying the status code, so
+// the pool can tell a dead key (400/401/403 — permanent for that key)
+// from a transient failure (429/5xx) in its failure kind.
+func (e *Engine) callDirectGemini(ctx context.Context, key, model, sysPrompt, userMsg string, history []ChatMessage) (string, error) {
+	// GEMINI_DIRECT_BASE_URL is a test hook (httptest server) — in
+	// production it is always the real generativelanguage host.
+	base := os.Getenv("GEMINI_DIRECT_BASE_URL")
+	if base == "" {
+		base = "https://generativelanguage.googleapis.com/v1beta"
+	}
+	url := strings.TrimSuffix(base, "/") + "/models/" + model + ":generateContent"
+	payload := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{"role": "user", "parts": []map[string]string{{"text": sysPrompt + historyTranscript(history) + "\n\nUser: " + userMsg}}},
+		},
+	}
+	data, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", key)
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("gemini status %d", resp.StatusCode)
+	}
+	var gRes struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if json.Unmarshal(body, &gRes) == nil && len(gRes.Candidates) > 0 && len(gRes.Candidates[0].Content.Parts) > 0 {
+		return strings.TrimSpace(gRes.Candidates[0].Content.Parts[0].Text), nil
+	}
+	return "", fmt.Errorf("empty candidate from direct Gemini API")
+}
+
 func (e *Engine) callOpenAICompatible(ctx context.Context, endpoint, token, model, sysPrompt, userMsg string, history []ChatMessage) (string, error) {
 	// History goes between the system prompt and the current message, as
 	// proper turns — this is what gives the reply conversational memory.
@@ -213,8 +303,8 @@ func (e *Engine) callOpenAICompatible(ctx context.Context, endpoint, token, mode
 	messages = append(messages, historyMessages(history)...)
 	messages = append(messages, map[string]string{"role": "user", "content": userMsg})
 	payload := map[string]interface{}{
-		"model":    model,
-		"messages": messages,
+		"model":       model,
+		"messages":    messages,
 		"temperature": 0.4,
 		"max_tokens":  600,
 	}
