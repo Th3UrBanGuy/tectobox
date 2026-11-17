@@ -139,6 +139,7 @@ services:
       # Model for the direct pool leg. gemini-2.0-flash is retired
       # (API 404 since 2026-11-17); default is the free-tier 2.5-flash.
       GEMINI_DIRECT_MODEL: ${GEMINI_DIRECT_MODEL:-gemini-2.5-flash}
+      GEMINI_DIRECT_MODEL_FALLBACK: ${GEMINI_DIRECT_MODEL_FALLBACK:-gemini-3.8-flash}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health"]
       interval: 10s

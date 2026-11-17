@@ -68,3 +68,54 @@ func TestHandleInternalAIChat_ClientID(t *testing.T) {
 		t.Errorf("valid request: empty reply")
 	}
 }
+
+// POST /api/ai/chat — the conversation_id contract (live catch
+// 2026-11-17). The Node callers send the Postgres integer
+// conversation id as a JSON NUMBER; a plain `string` field rejected
+// every widget/channel request with 400 in ~5ms, the TS breaker
+// counted three and opened for 30s, and customers got template
+// replies while the pool sat idle. router.ConversationID accepts a
+// string or a number — and, unlike client_id, the field is optional:
+// missing/null/empty/zero must never fail the request.
+func TestHandleInternalAIChat_ConversationID(t *testing.T) {
+	srv := NewServer()
+
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		srv.handleInternalAIChat(rec, req)
+		return rec
+	}
+
+	cases := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		// Accepted: a real conversation id as number or string, or none.
+		{"number conversation_id", `{"client_id":69,"text":"hello","conversation_id":7755}`, http.StatusOK},
+		{"string conversation_id", `{"client_id":69,"text":"hello","conversation_id":"7755"}`, http.StatusOK},
+		{"missing conversation_id", `{"client_id":69,"text":"hello"}`, http.StatusOK},
+		{"null conversation_id", `{"client_id":69,"text":"hello","conversation_id":null}`, http.StatusOK},
+		{"zero conversation_id", `{"client_id":69,"text":"hello","conversation_id":0}`, http.StatusOK},
+		// Rejected: a wrong-typed conversation_id still fails the decode.
+		{"bool conversation_id", `{"client_id":69,"text":"hello","conversation_id":true}`, http.StatusBadRequest},
+		{"object conversation_id", `{"client_id":69,"text":"hello","conversation_id":{"id":7755}}`, http.StatusBadRequest},
+	}
+	for _, c := range cases {
+		rec := post(c.body)
+		if rec.Code != c.wantStatus {
+			t.Errorf("%s: got status %d, want %d (body: %s)", c.name, rec.Code, c.wantStatus, rec.Body.String())
+		}
+		if c.wantStatus == http.StatusOK {
+			var out struct {
+				Reply string `json:"reply"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+				t.Errorf("%s: bad JSON response: %v", c.name, err)
+			} else if out.Reply == "" {
+				t.Errorf("%s: empty reply", c.name)
+			}
+		}
+	}
+}

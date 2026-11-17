@@ -205,9 +205,11 @@ type InternalChatRequest struct {
 	// conversation (2026-11-16 scenario audit #1, CRITICAL). Optional
 	// on purpose: older callers (channel workers without a
 	// conversation id) keep working — an empty id still gets the
-	// full-history hash guard in cacheKey. Never 400 on this field.
-	ConversationID string `json:"conversation_id,omitempty"`
-	Model          string `json:"model"`
+	// full-history hash guard in cacheKey. Never 400 on this field:
+	// router.ConversationID accepts a string or a JSON number (the
+	// Node callers send the Postgres integer id as a number).
+	ConversationID router.ConversationID `json:"conversation_id,omitempty"`
+	Model          string                `json:"model"`
 }
 
 func (s *Server) handleInternalAIChat(w http.ResponseWriter, r *http.Request) {
@@ -251,7 +253,7 @@ func (s *Server) handleInternalAIChat(w http.ResponseWriter, r *http.Request) {
 		ClientID:       workspaceID,
 		ClientName:     req.ClientName,
 		BusinessType:   req.BusinessType,
-		ConversationID: req.ConversationID,
+		ConversationID: req.ConversationID.String(),
 		Products:       req.Products,
 		Knowledge:      req.Knowledge,
 		Payment:        req.Payment,

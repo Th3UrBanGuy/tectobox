@@ -57,6 +57,50 @@ func (c *ClientID) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("client_id must be a non-empty string or a non-zero number")
 }
 
+// ConversationID scopes the reply cache to one customer conversation
+// (2026-11-16 scenario audit #1, CRITICAL). It is a string on the
+// wire, but the Node callers send the Postgres integer id as a JSON
+// NUMBER (node-postgres returns integer columns as numbers) — a plain
+// `string` field rejects EVERY widget/channel request with 400
+// (live-caught 2026-11-17: /api/ai/chat answered 5ms 400s, the TS
+// breaker opened after 3, and the widget fell back to templates for
+// 30s at a time). Like ClientID it accepts a string or a number;
+// unlike ClientID it is OPTIONAL — empty, zero and null all decode
+// to "" (no conversation scoping), never a 400: the field must never
+// fail a request, only narrow its cache key.
+type ConversationID string
+
+// String returns the conversation id for the cache key / PromptContext.
+func (c ConversationID) String() string {
+	return string(c)
+}
+
+// UnmarshalJSON implements json.Unmarshaler for ConversationID.
+func (c *ConversationID) UnmarshalJSON(data []byte) error {
+	// JSON null / missing: no conversation scoping.
+	if string(data) == "null" {
+		*c = ""
+		return nil
+	}
+	// JSON string: any value, including "".
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*c = ConversationID(s)
+		return nil
+	}
+	// JSON number: coerce to its decimal string (7755 -> "7755").
+	var n json.Number
+	if err := json.Unmarshal(data, &n); err == nil {
+		f, err := n.Float64()
+		if err != nil {
+			return fmt.Errorf("conversation_id must be a string or a number")
+		}
+		*c = ConversationID(strconv.FormatFloat(f, 'f', -1, 64))
+		return nil
+	}
+	return fmt.Errorf("conversation_id must be a string or a number")
+}
+
 // Domain types for the AI engine — split from engine.go in Phase 4 of the
 // modular restructure. These are the wire contract with the Node callers
 // (PromptContext mirrors the JSON the Go bridge receives); they must not

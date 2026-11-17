@@ -49,6 +49,7 @@ type Entry struct {
 	fp              string // sha256 hex, first 12 chars — the public id
 	source          string // "env" | "admin"
 	label           string
+	modelOverride   string // pinned model when the default 404s for this key (see below)
 	uses            int
 	successes       int
 	failures        int
@@ -60,10 +61,12 @@ type Entry struct {
 }
 
 // Stat is the admin-safe view of one Entry. No key material.
+// Model is the pinned model override ("" = the pool default model).
 type Stat struct {
 	Fingerprint   string    `json:"fingerprint"`
 	Source        string    `json:"source"`
 	Label         string    `json:"label"`
+	Model         string    `json:"model,omitempty"`
 	Uses          int       `json:"uses"`
 	Successes     int       `json:"successes"`
 	Failures      int       `json:"failures"`
@@ -239,6 +242,7 @@ func (p *Pool) Stats() []Stat {
 			Fingerprint:   e.fp,
 			Source:        e.source,
 			Label:         e.label,
+			Model:         e.modelOverride,
 			Uses:          e.uses,
 			Successes:     e.successes,
 			Failures:      e.failures,
@@ -249,6 +253,36 @@ func (p *Pool) Stats() []Stat {
 		})
 	}
 	return out
+}
+
+// ModelFor returns the pinned model override for a key, or "" when
+// the key uses the pool default model.
+func (p *Pool) ModelFor(fp string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, e := range p.entries {
+		if e.fp == fp {
+			return e.modelOverride
+		}
+	}
+	return ""
+}
+
+// SetModelOverride pins a model for one key. Called when the default
+// model 404s with "no longer available" for that key's project
+// (live 2026-11-17: Google gates gemini-2.5-flash for new users, who
+// must use gemini-3.8-flash instead). The pin lives for the process
+// lifetime; an ai restart re-learns it on the first 404 (one wasted
+// attempt). Unknown fingerprints are ignored.
+func (p *Pool) SetModelOverride(fp, model string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, e := range p.entries {
+		if e.fp == fp {
+			e.modelOverride = model
+			return
+		}
+	}
 }
 
 // Add inserts a key (admin path). The value is validated for shape

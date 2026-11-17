@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -99,6 +100,73 @@ func TestTryGeminiPoolFallsThroughDeadKey(t *testing.T) {
 		case goodFP:
 			if s.Successes < 1 {
 				t.Fatalf("serving key successes = %d, want >= 1", s.Successes)
+			}
+		}
+	}
+}
+
+// A key whose project cannot use the default model (live key#2:
+// gemini-2.5-flash 404s "no longer available to new users") must not
+// sink the request and must not cool down: the pool pins the fallback
+// model (gemini-3.8-flash, live-verified 200 for that key) and retries
+// the SAME key once; the next call goes straight to the fallback.
+func TestTryGeminiPoolRetiredModelFallsBack(t *testing.T) {
+	var mu sync.Mutex
+	hits := map[string]int{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits[r.URL.Path]++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "gemini-2.5-flash") {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": map[string]interface{}{"code": 404, "message": "This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash."},
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"candidates": []map[string]interface{}{
+				{"content": map[string]interface{}{"parts": []map[string]interface{}{{"text": "hello from gemini"}}}},
+			},
+		})
+	}))
+	defer srv.Close()
+	key := "RetiredModelKey0123456789"
+	e := testPoolEngine(t, srv, key)
+	fp := keypool.Fingerprint(key)
+
+	for i := 0; i < 2; i++ {
+		reply, model, err := e.tryGeminiPool(context.Background(), "sys", "hi", nil)
+		if err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		if reply != "hello from gemini" {
+			t.Fatalf("call %d: reply = %q, want pool reply", i, reply)
+		}
+		if model != "direct-gemini-api:"+fp {
+			t.Fatalf("call %d: model = %q, want direct-gemini-api:%s", i, model, fp)
+		}
+	}
+	if got := hits["/models/gemini-2.5-flash:generateContent"]; got != 1 {
+		t.Fatalf("2.5-flash hits = %d, want 1 (pinned after the first 404)", got)
+	}
+	if got := hits["/models/gemini-3.8-flash:generateContent"]; got != 2 {
+		t.Fatalf("3.8-flash hits = %d, want 2 (retry + second call)", got)
+	}
+	if got := e.keyPool.ModelFor(fp); got != "gemini-3.8-flash" {
+		t.Fatalf("pinned model = %q, want gemini-3.8-flash", got)
+	}
+	for _, s := range e.keyPool.Stats() {
+		if s.Fingerprint == fp {
+			if s.Failures != 0 {
+				t.Fatalf("retired-model 404 counted as a key failure (%d); it must not", s.Failures)
+			}
+			if !s.Healthy {
+				t.Fatal("key cooled down over a model mismatch")
+			}
+			if s.Model != "gemini-3.8-flash" {
+				t.Fatalf("stat model = %q, want gemini-3.8-flash", s.Model)
 			}
 		}
 	}

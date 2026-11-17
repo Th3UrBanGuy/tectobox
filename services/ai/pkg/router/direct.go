@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -58,6 +59,14 @@ const (
 	// API returns 404 "no longer available"); gemini-2.5-flash is the
 	// current free-tier model. Env GEMINI_DIRECT_MODEL overrides it.
 	directModelDefault = "gemini-2.5-flash"
+
+	// directModelFallbackDefault is the model a key is pinned to when
+	// the default model 404s with "no longer available" for that key's
+	// project (live 2026-11-17: Google gates gemini-2.5-flash for NEW
+	// users — key#2's project — who must use gemini-3.8-flash; verified
+	// 200 for both key#1 and key#2). Env GEMINI_DIRECT_MODEL_FALLBACK
+	// overrides it.
+	directModelFallbackDefault = "gemini-3.8-flash"
 )
 
 // web2apiBreakerOpen reports whether the web2api leg is currently
@@ -206,6 +215,28 @@ func (e *Engine) tryDirectAPIs(ctx context.Context, pctx PromptContext, sysPromp
 // to the pool; a dead key cools down and the next key is tried. The
 // model name carries the serving key's fingerprint — the ai log then
 // proves rotation without ever holding key material.
+// geminiStatusError carries a non-200 Gemini response. Error() keeps
+// the historical "gemini status %d" text so logs and pool reports are
+// unchanged; the body is kept so callers can tell a retired model
+// (404 "no longer available") apart from a dead key.
+type geminiStatusError struct {
+	status int
+	body   string
+}
+
+func (e *geminiStatusError) Error() string { return fmt.Sprintf("gemini status %d", e.status) }
+
+// isRetiredModel reports whether err is a 404 saying the model is no
+// longer available for that key's project (not a key failure — the
+// key itself is fine, it just cannot use this model).
+func isRetiredModel(err error) bool {
+	var gs *geminiStatusError
+	if !errors.As(err, &gs) {
+		return false
+	}
+	return gs.status == http.StatusNotFound && strings.Contains(gs.body, "no longer available")
+}
+
 func (e *Engine) tryGeminiPool(ctx context.Context, sysPrompt, userMsg string, history []ChatMessage) (string, string, error) {
 	timeout := poolTimeout
 	if v := os.Getenv("GEMINI_POOL_TIMEOUT_SEC"); v != "" {
@@ -213,16 +244,34 @@ func (e *Engine) tryGeminiPool(ctx context.Context, sysPrompt, userMsg string, h
 			timeout = time.Duration(d) * time.Second
 		}
 	}
-	model := os.Getenv("GEMINI_DIRECT_MODEL")
-	if model == "" {
-		model = directModelDefault
+	defaultModel := os.Getenv("GEMINI_DIRECT_MODEL")
+	if defaultModel == "" {
+		defaultModel = directModelDefault
+	}
+	fallbackModel := os.Getenv("GEMINI_DIRECT_MODEL_FALLBACK")
+	if fallbackModel == "" {
+		fallbackModel = directModelFallbackDefault
 	}
 	pCtx, pCancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer pCancel()
 	var lastErr error
 	for _, cand := range e.keyPool.Shuffled() {
+		model := e.keyPool.ModelFor(cand.Fingerprint)
+		if model == "" {
+			model = defaultModel
+		}
 		start := time.Now()
 		reply, err := e.callDirectGemini(pCtx, cand.Value, model, sysPrompt, userMsg, history)
+		// A 404 "no longer available" is a MODEL mismatch, not a key
+		// failure: pin the fallback model for this key and retry it
+		// once. The 404 is NOT Reported — the attempt never tested
+		// the key, so it must not count toward its cooldown.
+		if isRetiredModel(err) && model != fallbackModel {
+			e.keyPool.SetModelOverride(cand.Fingerprint, fallbackModel)
+			log.Printf("[ai] tier3 pool key=%s model %s retired for this key, pinning %s", cand.Fingerprint, model, fallbackModel)
+			model = fallbackModel
+			reply, err = e.callDirectGemini(pCtx, cand.Value, model, sysPrompt, userMsg, history)
+		}
 		kind := "ok"
 		if err != nil {
 			kind = err.Error()
@@ -276,7 +325,13 @@ func (e *Engine) callDirectGemini(ctx context.Context, key, model, sysPrompt, us
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("gemini status %d", resp.StatusCode)
+		// Keep the body (truncated) so the caller can tell a retired
+		// model apart from a dead key; Error() stays "gemini status %d".
+		bodyStr := string(body)
+		if len(bodyStr) > 500 {
+			bodyStr = bodyStr[:500]
+		}
+		return "", &geminiStatusError{status: resp.StatusCode, body: bodyStr}
 	}
 	var gRes struct {
 		Candidates []struct {
